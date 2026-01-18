@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { createGalaxyAudio } from "./audio.js";
 
 import starsVert from "./shaders/stars.vert.glsl?raw";
 import starsFrag from "./shaders/stars.frag.glsl?raw";
@@ -49,6 +50,15 @@ window.addEventListener("pointermove", (e) => {
   pointer.y = -((e.clientY / window.innerHeight) * 2 - 1);
 });
 
+//音频实例
+const galaxyAudio = createGalaxyAudio();
+
+// 第一次用户交互后启动音频（浏览器限制必须）
+window.addEventListener("pointerdown", async () => {
+  await galaxyAudio.start();
+}, { once: true });
+
+
 // 星尘粒子
 const stars = makeStars({ count: 65000, radius: 7.0, thickness: 1.6 });
 scene.add(stars);
@@ -74,6 +84,12 @@ function tick() {
 
   streak.material.uniforms.uTime.value = t;
   streak.material.uniforms.uPointer.value.set(pointer.x, pointer.y);
+
+  // pointer 从 [-1,1] 映射到 [0,1]
+  const x01 = (pointer.x * 0.5 + 0.5);
+  const y01 = (pointer.y * 0.5 + 0.5);
+  galaxyAudio.setZones({ x01, y01 });
+
 
   composer.render();
   requestAnimationFrame(tick);
