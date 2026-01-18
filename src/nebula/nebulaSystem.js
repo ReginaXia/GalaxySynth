@@ -116,12 +116,32 @@ export function createNebulaSystem({
       alpha: 0.22,
     });
 
+    // 旋臂亮星：专门用来“生动星点 + 显旋臂结构”
+    const armStars = makeNebulaPoints({
+    count: 1600,          // 很少，但很亮
+    spread: d.radius * 1.05,
+    thickness: 0.22,
+    colorA: "#ffffff",
+    colorB: d.colorA,
+    sizeMin: 2.2,
+    sizeMax: 6.5,
+    alpha: 0.85,
+    });
+
+    // 让亮星更贴盘面
+    armStars.position.set(0, 0.06, 0);
+
+    // ✅ 让它更“亮”——只对这一层用更强 additive
+    armStars.material.opacity = 0.75;
+
+
     // 层级：核心在上，外层略散
     core.position.set(0, 0.03, 0);
     outer.position.set(0, 0, 0);
 
     group.add(outer);
     group.add(core);
+    group.add(armStars);
     root.add(group);
 
 
@@ -132,6 +152,8 @@ export function createNebulaSystem({
     clusters.push({
       id: d.id,
       group,
+      armStars,
+      armStarsBase: armStars.geometry.attributes.position.array.slice(),
       center: d.center.clone(),
       radius: d.radius,
       rotSpeed: d.rotSpeed,
@@ -140,6 +162,7 @@ export function createNebulaSystem({
       outerBase,
       coreBase,
       influence: 0.0,
+      
     });
   }
 
@@ -176,6 +199,11 @@ export function createNebulaSystem({
       // 我们在 local space 做（因为 group 已经有 position/rotation）
       const pLocal = c.group.worldToLocal(pWorld.clone());
 
+      // 亮星闪烁：不规则的“呼吸闪点”
+      const tw = 0.55 + 0.45 * Math.sin(t * 1.8 + c.center.x * 0.7 + c.center.z * 0.9);
+      c.armStars.material.opacity = lerp(0.25, 0.85, Math.max(inflOuter, tw));
+
+
       // 更新外层
       applyAttraction({
         points: c.outer,
@@ -198,8 +226,8 @@ export function createNebulaSystem({
 
       // 5) 额外：靠近时整体轻微“抬亮”（用 material opacity/gain 模拟）
       // 这会让“靠近就更梦幻”非常明显
-      c.outer.material.opacity = lerp(0.12, 0.32, inflOuter);
-      c.core.material.opacity  = lerp(0.10, 0.26, inflCore);
+      c.outer.material.opacity = lerp(0.16, 0.42, inflOuter);
+      c.core.material.opacity  = lerp(0.10, 0.30, inflCore);
 
     }
   }
@@ -235,8 +263,8 @@ function makeNebulaPoints({
 
   // --------- 关键参数：你想更“有旋臂”就调这些 ----------
   const ARMS = 3;                 // 2~4 都行，3 最像参考图
-  const TWIST = 8.5;              // 旋臂扭转强度（越大越“旋”）
-  const ARM_TIGHTNESS = 0.55;     // 越小越贴臂（更像旋臂）
+  const TWIST = 12.5;              // 旋臂扭转强度（越大越“旋”）
+  const ARM_TIGHTNESS = 0.38;     // 越小越贴臂（更像旋臂）
   const EDGE_FADE = 1.15;         // 边缘淡出强度（越大边缘越“雾化消失”）
   const CLUMPINESS = 0.22;        // 团簇感（越大越不均匀）
 
