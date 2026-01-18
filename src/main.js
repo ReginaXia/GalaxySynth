@@ -3,6 +3,7 @@ import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { createGalaxyAudio } from "./audio.js";
+import { createNebulaSystem } from "./nebula/nebulaSystem.js";
 
 import starsVert from "./shaders/stars.vert.glsl?raw";
 import starsFrag from "./shaders/stars.frag.glsl?raw";
@@ -25,8 +26,47 @@ scene.add(makeGradientBackground());
 
 // 相机
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 2000);
-camera.position.set(0, 0, 6);
+camera.position.set(0, 10, 0);   // 高一点
+camera.lookAt(0, 0, 0);
+camera.up.set(0, 0, -1);         // 让画面方向更“正”（可选）
+
 // scene.add(camera);
+
+//星云
+const nebulaSystem = createNebulaSystem({
+  scene,
+  radiusWorld: 7.0, // 你银河 radius
+  planeY: 0.0,
+});
+
+let isDragging = false;
+let lastX = 0;
+let lastY = 0;
+
+window.addEventListener("pointerdown", (e) => {
+  isDragging = true;
+  lastX = e.clientX;
+  lastY = e.clientY;
+});
+
+window.addEventListener("pointerup", () => {
+  isDragging = false;
+});
+
+window.addEventListener("pointermove", (e) => {
+  if (!isDragging) return;
+
+  const dx = e.clientX - lastX;
+  const dy = e.clientY - lastY;
+  lastX = e.clientX;
+  lastY = e.clientY;
+
+  // 旋转整个星云世界：水平拖动→绕Y转，竖直拖动→绕X转
+  nebulaSystem.root.rotation.y += dx * 0.005;
+  nebulaSystem.root.rotation.x += dy * 0.005;
+});
+
+
 
 
 // ----- Post: Composer + Bloom (Ariana soft) -----
@@ -59,13 +99,13 @@ window.addEventListener("pointerdown", async () => {
 }, { once: true });
 
 
-// 星尘粒子
-const stars = makeStars({ count: 65000, radius: 7.0, thickness: 1.6 });
-scene.add(stars);
+// // 星尘粒子
+// const stars = makeStars({ count: 65000, radius: 7.0, thickness: 1.6 });
+// scene.add(stars);
 
-// 流光（少量但主视觉）
-const streak = makeStreak();
-scene.add(streak);
+// // 流光（少量但主视觉）
+// const streak = makeStreak();
+// scene.add(streak);
 
 // 时间
 const clock = new THREE.Clock();
@@ -73,23 +113,26 @@ const clock = new THREE.Clock();
 function tick() {
   const t = clock.getElapsedTime();
 
+camera.lookAt(0, 0, 0);
+
   // 轻微相机漂浮（呼吸感）
-  camera.position.x = Math.sin(t * 0.12) * 0.08;
-  camera.position.y = Math.cos(t * 0.10) * 0.06;
-  camera.lookAt(0, 0, 0);
+//   camera.position.x = Math.sin(t * 0.12) * 0.08;
+//   camera.position.y = Math.cos(t * 0.10) * 0.06;
+//   camera.lookAt(0, 0, 0);
 
   // 更新 uniforms
-  stars.material.uniforms.uTime.value = t;
-  stars.material.uniforms.uPointer.value.set(pointer.x, pointer.y);
+//   stars.material.uniforms.uTime.value = t;
+//   stars.material.uniforms.uPointer.value.set(pointer.x, pointer.y);
 
-  streak.material.uniforms.uTime.value = t;
-  streak.material.uniforms.uPointer.value.set(pointer.x, pointer.y);
+//   streak.material.uniforms.uTime.value = t;
+//   streak.material.uniforms.uPointer.value.set(pointer.x, pointer.y);
 
   // pointer 从 [-1,1] 映射到 [0,1]
   const x01 = (pointer.x * 0.5 + 0.5);
   const y01 = (pointer.y * 0.5 + 0.5);
   galaxyAudio.setZones({ x01, y01 });
 
+  nebulaSystem.update(pointer, t);
 
   composer.render();
   requestAnimationFrame(tick);
