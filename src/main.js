@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
-import { createGalaxyAudio } from "./audio.js";
+import { initAudioOnFirstGesture, triggerOnMove } from "./audio.js";
 import { createNebulaSystem } from "./nebula/nebulaSystem.js";
 
 import starsVert from "./shaders/stars.vert.glsl?raw";
@@ -42,6 +42,16 @@ const nebulaSystem = createNebulaSystem({
 let isDragging = false;
 let lastX = 0;
 let lastY = 0;
+
+window.addEventListener(
+  "pointerdown",
+  async () => {
+    await initAudioOnFirstGesture();
+  },
+  { once: true }
+);
+
+
 
 window.addEventListener("pointerdown", (e) => {
   isDragging = true;
@@ -90,13 +100,36 @@ window.addEventListener("pointermove", (e) => {
   pointer.y = -((e.clientY / window.innerHeight) * 2 - 1);
 });
 
-//音频实例
-const galaxyAudio = createGalaxyAudio();
+let lastPX = 0, lastPY = 0;
+let move01 = 0;
 
-// 第一次用户交互后启动音频（浏览器限制必须）
-window.addEventListener("pointerdown", async () => {
-  await galaxyAudio.start();
-}, { once: true });
+window.addEventListener("pointermove", (e) => {
+  pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
+  pointer.y = -((e.clientY / window.innerHeight) * 2 - 1);
+
+  const dx = e.clientX - lastPX;
+  const dy = e.clientY - lastPY;
+  lastPX = e.clientX;
+  lastPY = e.clientY;
+
+  // 0..1，数值可调：越大越容易触发
+  const speed = Math.sqrt(dx * dx + dy * dy);
+  move01 = Math.min(1, speed / 60);
+});
+
+
+//音频实例
+// const galaxyAudio = createGalaxyAudio();
+
+// // 第一次用户交互后启动音频（浏览器限制必须）
+// window.addEventListener("pointerdown", async () => {
+//   await galaxyAudio.start();
+// }, { once: true });
+
+// // pointer 从 [-1,1] 映射到 [0,1]
+// const x01 = (pointer.x * 0.5 + 0.5);
+// const y01 = (pointer.y * 0.5 + 0.5);
+// galaxyAudio.setZones({ x01, y01 });
 
 
 // // 星尘粒子
@@ -113,27 +146,25 @@ const clock = new THREE.Clock();
 function tick() {
   const t = clock.getElapsedTime();
 
-camera.lookAt(0, 0, 0);
+  camera.lookAt(0, 0, 0);
 
-  // 轻微相机漂浮（呼吸感）
-//   camera.position.x = Math.sin(t * 0.12) * 0.08;
-//   camera.position.y = Math.cos(t * 0.10) * 0.06;
-//   camera.lookAt(0, 0, 0);
+  let maxInfl = 0;
+  for (const c of nebulaSystem.clusters) maxInfl = Math.max(maxInfl, c.influence || 0);
 
-  // 更新 uniforms
-//   stars.material.uniforms.uTime.value = t;
-//   stars.material.uniforms.uPointer.value.set(pointer.x, pointer.y);
+  // 只有移动时触发音效
+  triggerOnMove(move01, maxInfl);
 
-//   streak.material.uniforms.uTime.value = t;
-//   streak.material.uniforms.uPointer.value.set(pointer.x, pointer.y);
+  // 每帧让 move01 缓慢衰减（否则停了也会残留）
+  move01 *= 0.9;
+
 
   // pointer 从 [-1,1] 映射到 [0,1]
   const x01 = (pointer.x * 0.5 + 0.5);
   const y01 = (pointer.y * 0.5 + 0.5);
-  galaxyAudio.setZones({ x01, y01 });
+  // galaxyAudio.setZones({ x01, y01 });
 
   nebulaSystem.update(pointer, t);
-
+  // updateAudioFromNebula(nebulaSystem.clusters);
   composer.render();
   requestAnimationFrame(tick);
 }
