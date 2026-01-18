@@ -176,7 +176,7 @@ function makeStars({ count, radius, thickness }) {
     colors[idx3 + 1] = c.g;
     colors[idx3 + 2] = c.b;
 
-    sizes[i] = 0.6 + Math.random() * 1.4;
+    sizes[i] = 0.25 + Math.pow(Math.random(), 2.2) * 1.4;
     seeds[i] = Math.random() * 1000.0;
   }
 
