@@ -87,10 +87,18 @@ function makePad(ctx) {
   // Pad osc
   const o1 = ctx.createOscillator();
   const o2 = ctx.createOscillator();
+  const o3 = ctx.createOscillator();
+
   o1.type = "sine";
   o2.type = "triangle";
-  o1.frequency.value = 196.0; // G3
-  o2.frequency.value = 196.0 * 1.005;
+  o3.type = "sine";
+
+  // Ariana-ish: 轻柔大三和弦（G - B - D）
+  const root = 196.0;         // G3
+  o1.frequency.value = root;                   // G
+  o2.frequency.value = root * 1.2599;          // B (major third)
+  o3.frequency.value = root * 1.4983;          // D (perfect fifth)
+
 
   const oscGain = ctx.createGain();
   oscGain.gain.value = 0.55;
@@ -98,6 +106,7 @@ function makePad(ctx) {
   // routing
   o1.connect(oscGain);
   o2.connect(oscGain);
+  o3.connect(oscGain);
   oscGain.connect(filter);
   filter.connect(out);
 
@@ -113,6 +122,7 @@ function makePad(ctx) {
     started = true;
     o1.start();
     o2.start();
+    o3.start();
   }
 
   function setTargetGain(v) {
