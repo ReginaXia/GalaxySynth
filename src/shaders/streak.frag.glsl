@@ -20,9 +20,7 @@ void main(){
   float body = smoothstep(1.0, 0.0, edge);
 
   float breathe = 0.75 + 0.25 * sin(uTime * 1.2 + vUv.x * 6.283);
-  float glow = (0.35 + vPulse * 1.25) * body * breathe;
-
-  float alpha = glow * 0.65;
-
+  float glow = (0.20 + vPulse * 0.85) * body * breathe;
+  float alpha = glow * 0.40;
   gl_FragColor = vec4(col * glow, alpha);
 }

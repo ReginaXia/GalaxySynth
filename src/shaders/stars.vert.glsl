@@ -26,7 +26,7 @@ void main(){
   // size：按距离做衰减（让近处更大）
   vec4 mv = modelViewMatrix * vec4(p, 1.0);
   float dist = -mv.z;
-  float size = aSize * (120.0 / dist);
+  float size = aSize * (70.0 / dist);
 
   gl_PointSize = size * uPixelRatio;
   gl_Position = projectionMatrix * mv;
