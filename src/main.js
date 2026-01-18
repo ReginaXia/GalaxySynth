@@ -12,10 +12,16 @@ import streakFrag from "./shaders/streak.frag.glsl?raw";
 
 console.log("MAIN JS LOADED");
 
+const texLoader = new THREE.TextureLoader();
+const starTexture = texLoader.load("/textures/star.png");
+starTexture.colorSpace = THREE.SRGBColorSpace;
+
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15; // 先用 1.15，后面再调
 document.body.appendChild(renderer.domElement);
 
 
@@ -37,6 +43,7 @@ const nebulaSystem = createNebulaSystem({
   scene,
   radiusWorld: 7.0, // 你银河 radius
   planeY: 0.0,
+  starTexture,
 });
 
 let isDragging = false;
@@ -86,9 +93,9 @@ composer.addPass(renderPass);
 
 const bloom = new UnrealBloomPass(
   new THREE.Vector2(window.innerWidth, window.innerHeight),
-  0.55, // strength（仙气要回来）
-  0.95, // radius（更柔）
-  0.42  // threshold（只让亮点触发，不让整团泛白）
+  0.001, // strength（仙气要回来）
+  0.65, // radius（更柔）
+  0.28  // threshold（只让亮点触发，不让整团泛白）
 );
 composer.addPass(bloom);
 
@@ -132,13 +139,13 @@ window.addEventListener("pointermove", (e) => {
 // galaxyAudio.setZones({ x01, y01 });
 
 
-// // 星尘粒子
-// const stars = makeStars({ count: 65000, radius: 7.0, thickness: 1.6 });
-// scene.add(stars);
+// 星尘粒子
+const stars = makeStars({ count: 65000, radius: 7.0, thickness: 1.6 });
+scene.add(stars);
 
-// // 流光（少量但主视觉）
-// const streak = makeStreak();
-// scene.add(streak);
+// 流光（少量但主视觉）
+const streak = makeStreak();
+scene.add(streak);
 
 // 时间
 const clock = new THREE.Clock();
@@ -147,6 +154,13 @@ function tick() {
   const t = clock.getElapsedTime();
 
   camera.lookAt(0, 0, 0);
+
+  stars.material.uniforms.uTime.value = t;
+  stars.material.uniforms.uPointer.value.copy(pointer);
+
+  streak.material.uniforms.uTime.value = t;
+  streak.material.uniforms.uPointer.value.copy(pointer);
+
 
   let maxInfl = 0;
   for (const c of nebulaSystem.clusters) maxInfl = Math.max(maxInfl, c.influence || 0);
@@ -201,9 +215,9 @@ function makeGradientBackground() {
       float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453123); }
       void main(){
         float r = length(vPos.xy) / 60.0;
-        vec3 c1 = vec3(0.07, 0.03, 0.12); // deep violet
-        vec3 c2 = vec3(0.03, 0.05, 0.14); // indigo
-        vec3 c3 = vec3(0.06, 0.04, 0.16); // purple haze
+        vec3 c1 = vec3(0.02, 0.03, 0.07); // deep navy
+        vec3 c2 = vec3(0.01, 0.02, 0.05); // near black-blue
+        vec3 c3 = vec3(0.03, 0.05, 0.10); // subtle blue haze
         float a = smoothstep(0.0, 0.9, r);
         vec3 col = mix(c1, c2, a);
         col = mix(col, c3, smoothstep(0.6, 1.0, r));

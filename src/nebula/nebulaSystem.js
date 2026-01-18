@@ -1,6 +1,53 @@
 // src/nebula/nebulaSystem.js
 import * as THREE from "three";
 
+const nebulaVert = `
+  attribute float aSize;
+  attribute float aSeed;
+  varying vec3 vColor;
+  varying float vTw;
+
+  uniform float uTime;
+  uniform float uPixelRatio;
+  uniform float uBaseSize;
+
+  void main(){
+    vColor = color;
+
+    // 不规则闪烁（每个点不一样）
+    vTw = 0.55 + 0.45 * sin(uTime * 2.1 + aSeed * 6.2831);
+
+    vec4 mv = modelViewMatrix * vec4(position, 1.0);
+
+    // 透视缩放：越近越大
+    float size = aSize * uBaseSize * uPixelRatio * (1.0 / max(0.6, -mv.z));
+    gl_PointSize = size;
+
+    gl_Position = projectionMatrix * mv;
+  }
+`;
+
+const nebulaFrag = `
+  uniform sampler2D uMap;
+  uniform float uOpacity;
+  varying vec3 vColor;
+  varying float vTw;
+
+  void main(){
+    vec4 tex = texture2D(uMap, gl_PointCoord);
+
+    // tex.a 是柔边圆
+    float a = tex.a * uOpacity;
+
+    // twinkle：让少量点更亮
+    float glow = mix(0.85, 1.35, vTw);
+    vec3 col = vColor * glow;
+
+    gl_FragColor = vec4(col, a);
+  }
+`;
+
+
 //白色柔边圆点贴图
 function makeSoftDotTexture() {
   const size = 64;
@@ -30,6 +77,7 @@ export function createNebulaSystem({
   scene,
   radiusWorld = 7.0,   // 你的银河半径（和 makeStars radius 一致）
   planeY = 0.0,        // 星云所在平面高度
+  starTexture,  
 }) {
 
   // 所有星云的根节点（用于整体旋转）
@@ -102,6 +150,7 @@ export function createNebulaSystem({
       sizeMin: 0.8,
       sizeMax: 2.6,
       alpha: 0.28,
+      starTexture,
     });
 
     // 内核：密集、小颗粒、后被牵引
@@ -114,6 +163,7 @@ export function createNebulaSystem({
       sizeMin: 0.5,
       sizeMax: 1.4,
       alpha: 0.22,
+      starTexture,
     });
 
     // 旋臂亮星：专门用来“生动星点 + 显旋臂结构”
@@ -126,6 +176,7 @@ export function createNebulaSystem({
     sizeMin: 2.2,
     sizeMax: 6.5,
     alpha: 0.85,
+    starTexture,
     });
 
     // 让亮星更贴盘面
@@ -203,6 +254,9 @@ export function createNebulaSystem({
       const tw = 0.55 + 0.45 * Math.sin(t * 1.8 + c.center.x * 0.7 + c.center.z * 0.9);
       c.armStars.material.opacity = lerp(0.25, 0.85, Math.max(inflOuter, tw));
 
+      c.outer.material.uniforms.uTime.value = t;
+      c.core.material.uniforms.uTime.value = t + 13.7;
+      c.armStars.material.uniforms.uTime.value = t + 31.0;
 
       // 更新外层
       applyAttraction({
@@ -251,6 +305,7 @@ function makeNebulaPoints({
   sizeMin,
   sizeMax,
   alpha,
+  starTexture,
 }) {
   const geo = new THREE.BufferGeometry();
   const positions = new Float32Array(count * 3);
@@ -267,11 +322,14 @@ function makeNebulaPoints({
   const ARM_TIGHTNESS = 0.38;     // 越小越贴臂（更像旋臂）
   const EDGE_FADE = 1.15;         // 边缘淡出强度（越大边缘越“雾化消失”）
   const CLUMPINESS = 0.22;        // 团簇感（越大越不均匀）
+  const seeds = new Float32Array(count);
 
   if (!__dotTex) __dotTex = makeSoftDotTexture();
 
   for (let i = 0; i < count; i++) {
     const idx3 = i * 3;
+
+    seeds[i] = Math.random();
 
     // 半径：中心密，外侧稀（pow<1 中心更多；pow>1 外侧更多）
     // 我们要中心密 → 用更小的 pow
@@ -345,18 +403,26 @@ function makeNebulaPoints({
   geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   geo.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
+  geo.setAttribute("aSeed", new THREE.BufferAttribute(seeds, 1));
 
-  const mat = new THREE.PointsMaterial({
-    size: 0.035,               // ✅ 变小一点更细腻
-    sizeAttenuation: true,
-    vertexColors: true,
+
+  const mat = new THREE.ShaderMaterial({
     transparent: true,
-    opacity: alpha,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
-    map: __dotTex,
-    alphaMap: __dotTex,
-    });
+    vertexColors: true,
+    uniforms: {
+      uMap: { value: starTexture || __dotTex },
+      uOpacity: { value: alpha },
+      uTime: { value: 0 },
+      uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) },
+      uBaseSize: { value: 38.0 }, // ✅ 这个是“细腻度/颗粒感”的关键旋钮（先用 38）
+    },
+    vertexShader: nebulaVert,
+    fragmentShader: nebulaFrag,
+  });
+
+
 
   mat.alphaTest = 0.01;
 
