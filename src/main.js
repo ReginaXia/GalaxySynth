@@ -1,7 +1,9 @@
+// src/main.js
 import * as THREE from "three";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+
 import { initAudioOnFirstGesture, triggerOnMove } from "./audio.js";
 import { createNebulaSystem } from "./nebula/nebulaSystem.js";
 
@@ -12,44 +14,71 @@ import streakFrag from "./shaders/streak.frag.glsl?raw";
 
 console.log("MAIN JS LOADED");
 
-const texLoader = new THREE.TextureLoader();
-const starTexture = texLoader.load("/textures/star.png");
-starTexture.colorSpace = THREE.SRGBColorSpace;
-
+// -------------------------------------
+// Renderer
+// -------------------------------------
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+// 更“干净利落”的对比（别太仙雾）
+// 你想更锐更亮：把 exposure 往上加一点点（1.05~1.2）
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.15; // 先用 1.15，后面再调
+renderer.toneMappingExposure = 1.05;
+
 document.body.appendChild(renderer.domElement);
 
-
+// -------------------------------------
+// Scene / Camera
+// -------------------------------------
 const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000); // ✅ 黑底
 
-// 深色非纯黑背景：用大球做渐变（比纯色更“有层次”）
-scene.add(makeGradientBackground());
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.05, 2000);
 
-// 相机
-const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 2000);
-camera.position.set(0, 10, 0);   // 高一点
+// 不是纯俯视：更像“俯冲观察”，滚轮推近会更像进入星云
+camera.position.set(0, 6.5, 8.5);
 camera.lookAt(0, 0, 0);
-camera.up.set(0, 0, -1);         // 让画面方向更“正”（可选）
 
-// scene.add(camera);
+// -------------------------------------
+// Texture
+// -------------------------------------
+const texLoader = new THREE.TextureLoader();
+const starTexture = texLoader.load("/textures/star.png");
+starTexture.colorSpace = THREE.SRGBColorSpace;
 
-//星云
-const nebulaSystem = createNebulaSystem({
-  scene,
-  radiusWorld: 7.0, // 你银河 radius
-  planeY: 0.0,
-  starTexture,
+// -------------------------------------
+// Post (Bloom)
+// -------------------------------------
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+
+const bloom = new UnrealBloomPass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  0.55, // strength：亮点有光晕
+  0.65, // radius：柔
+  0.22  // threshold：只让“亮星/亮边”触发，避免整团泛白
+);
+composer.addPass(bloom);
+
+// -------------------------------------
+// Raycast plane (y = 0)
+// -------------------------------------
+const raycaster = new THREE.Raycaster();
+const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.0);
+const hitPoint = new THREE.Vector3();
+
+// 鼠标 NDC
+const pointer = new THREE.Vector2(0, 0);
+window.addEventListener("pointermove", (e) => {
+  pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
+  pointer.y = -((e.clientY / window.innerHeight) * 2 - 1);
 });
 
-let isDragging = false;
-let lastX = 0;
-let lastY = 0;
-
+// -------------------------------------
+// Audio: must start on gesture
+// -------------------------------------
 window.addEventListener(
   "pointerdown",
   async () => {
@@ -58,132 +87,137 @@ window.addEventListener(
   { once: true }
 );
 
+// -------------------------------------
+// Nebula system (5 clusters)
+// -------------------------------------
+const nebulaSystem = createNebulaSystem({
+  scene,
+  radiusWorld: 7.0,
+  planeY: 0.0,
+  starTexture, // ✅ 传进去：点会更“闪亮+细腻”
+});
 
+// 拖拽旋转整个星云世界（可选）
+// 你想“360旋转看俯视角”就是这个
+let isDragging = false;
+let lastX = 0;
+let lastY = 0;
 
 window.addEventListener("pointerdown", (e) => {
   isDragging = true;
   lastX = e.clientX;
   lastY = e.clientY;
 });
-
-window.addEventListener("pointerup", () => {
-  isDragging = false;
-});
-
+window.addEventListener("pointerup", () => (isDragging = false));
 window.addEventListener("pointermove", (e) => {
   if (!isDragging) return;
-
   const dx = e.clientX - lastX;
   const dy = e.clientY - lastY;
   lastX = e.clientX;
   lastY = e.clientY;
 
-  // 旋转整个星云世界：水平拖动→绕Y转，竖直拖动→绕X转
   nebulaSystem.root.rotation.y += dx * 0.005;
   nebulaSystem.root.rotation.x += dy * 0.005;
+
+  // 防止翻过头（你也可以删掉这两行，完全自由旋转）
+  nebulaSystem.root.rotation.x = THREE.MathUtils.clamp(nebulaSystem.root.rotation.x, -1.25, 1.25);
 });
 
+// -------------------------------------
+// Zoom into nebula (wheel)
+// - 滚轮会改变相机距离
+// - 同时让相机更倾向于看向鼠标击中的点（更像“进入星云内部”）
+// -------------------------------------
+let camDist = camera.position.length();
+camDist = THREE.MathUtils.clamp(camDist, 2.2, 30);
 
+const lookTarget = new THREE.Vector3(0, 0, 0);
+const lookTargetSmooth = new THREE.Vector3(0, 0, 0);
 
-
-// ----- Post: Composer + Bloom (Ariana soft) -----
-const composer = new EffectComposer(renderer);
-const renderPass = new RenderPass(scene, camera);
-composer.addPass(renderPass);
-
-const bloom = new UnrealBloomPass(
-  new THREE.Vector2(window.innerWidth, window.innerHeight),
-  0.001, // strength（仙气要回来）
-  0.65, // radius（更柔）
-  0.28  // threshold（只让亮点触发，不让整团泛白）
+window.addEventListener(
+  "wheel",
+  (e) => {
+    // 向上滚（deltaY>0）拉远；向下滚推近
+    const delta = Math.sign(e.deltaY);
+    camDist *= delta > 0 ? 1.08 : 0.92;
+    camDist = THREE.MathUtils.clamp(camDist, 2.2, 30);
+  },
+  { passive: true }
 );
-composer.addPass(bloom);
 
+// -------------------------------------
+// Stars + Streak (your previous galaxy vibe)
+// -------------------------------------
+const stars = makeStars({ count: 65000, radius: 7.0, thickness: 1.6 });
+scene.add(stars);
 
-// 鼠标交互点（先当作后面摄像头手势的替代输入）
-const pointer = new THREE.Vector2(0, 0);
-window.addEventListener("pointermove", (e) => {
-  pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
-  pointer.y = -((e.clientY / window.innerHeight) * 2 - 1);
-});
+const streak = makeStreak();
+scene.add(streak);
 
+// -------------------------------------
+// Mouse move intensity (for audio trigger)
+// -------------------------------------
 let lastPX = 0, lastPY = 0;
 let move01 = 0;
 
 window.addEventListener("pointermove", (e) => {
-  pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
-  pointer.y = -((e.clientY / window.innerHeight) * 2 - 1);
-
   const dx = e.clientX - lastPX;
   const dy = e.clientY - lastPY;
   lastPX = e.clientX;
   lastPY = e.clientY;
 
-  // 0..1，数值可调：越大越容易触发
   const speed = Math.sqrt(dx * dx + dy * dy);
   move01 = Math.min(1, speed / 60);
 });
 
-
-//音频实例
-// const galaxyAudio = createGalaxyAudio();
-
-// // 第一次用户交互后启动音频（浏览器限制必须）
-// window.addEventListener("pointerdown", async () => {
-//   await galaxyAudio.start();
-// }, { once: true });
-
-// // pointer 从 [-1,1] 映射到 [0,1]
-// const x01 = (pointer.x * 0.5 + 0.5);
-// const y01 = (pointer.y * 0.5 + 0.5);
-// galaxyAudio.setZones({ x01, y01 });
-
-
-// 星尘粒子
-const stars = makeStars({ count: 65000, radius: 7.0, thickness: 1.6 });
-scene.add(stars);
-
-// 流光（少量但主视觉）
-const streak = makeStreak();
-scene.add(streak);
-
-// 时间
+// -------------------------------------
+// Tick
+// -------------------------------------
 const clock = new THREE.Clock();
 
 function tick() {
   const t = clock.getElapsedTime();
 
-  camera.lookAt(0, 0, 0);
+  // raycast -> hitPoint（✅ 鼠标扰动对齐关键）
+  raycaster.setFromCamera(pointer, camera);
+  raycaster.ray.intersectPlane(plane, hitPoint);
 
+  // look target：平时偏向 origin，缩放/靠近时更偏向鼠标点
+  lookTarget.copy(hitPoint);
+
+  // 让 lookTarget 不要抖：平滑一下
+  lookTargetSmooth.lerp(lookTarget, 0.08);
+
+  // 相机沿当前方向保持距离（更像 dolly）
+  const dir = camera.position.clone().normalize();
+  camera.position.copy(dir.multiplyScalar(camDist));
+  camera.lookAt(lookTargetSmooth);
+
+  // 更新星尘
   stars.material.uniforms.uTime.value = t;
   stars.material.uniforms.uPointer.value.copy(pointer);
 
+  // 更新流光
   streak.material.uniforms.uTime.value = t;
   streak.material.uniforms.uPointer.value.copy(pointer);
 
+  // ✅ 星云扰动：只调用一次，用 hitPoint
+  nebulaSystem.update(hitPoint, t);
 
+  // audio trigger：移动强度 + 当前最大 influence
   let maxInfl = 0;
   for (const c of nebulaSystem.clusters) maxInfl = Math.max(maxInfl, c.influence || 0);
-
-  // 只有移动时触发音效
   triggerOnMove(move01, maxInfl);
-
-  // 每帧让 move01 缓慢衰减（否则停了也会残留）
   move01 *= 0.9;
 
-
-  // pointer 从 [-1,1] 映射到 [0,1]
-  const x01 = (pointer.x * 0.5 + 0.5);
-  const y01 = (pointer.y * 0.5 + 0.5);
-  // galaxyAudio.setZones({ x01, y01 });
-
-  nebulaSystem.update(pointer, t);
-  // updateAudioFromNebula(nebulaSystem.clusters);
   composer.render();
   requestAnimationFrame(tick);
 }
 tick();
 
+// -------------------------------------
+// Resize
+// -------------------------------------
 window.addEventListener("resize", () => {
   const w = window.innerWidth;
   const h = window.innerHeight;
@@ -194,45 +228,11 @@ window.addEventListener("resize", () => {
   bloom.setSize(w, h);
 });
 
-// ----------------------------
+// -------------------------------------
 // Helpers
-// ----------------------------
-
-function makeGradientBackground() {
-  const geo = new THREE.SphereGeometry(60, 32, 32);
-  const mat = new THREE.ShaderMaterial({
-    side: THREE.BackSide,
-    uniforms: { uTime: { value: 0 } },
-    vertexShader: `
-      varying vec3 vPos;
-      void main(){
-        vPos = position;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
-      }
-    `,
-    fragmentShader: `
-      varying vec3 vPos;
-      float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453123); }
-      void main(){
-        float r = length(vPos.xy) / 60.0;
-        vec3 c1 = vec3(0.02, 0.03, 0.07); // deep navy
-        vec3 c2 = vec3(0.01, 0.02, 0.05); // near black-blue
-        vec3 c3 = vec3(0.03, 0.05, 0.10); // subtle blue haze
-        float a = smoothstep(0.0, 0.9, r);
-        vec3 col = mix(c1, c2, a);
-        col = mix(col, c3, smoothstep(0.6, 1.0, r));
-        float n = hash(gl_FragCoord.xy * 0.35) * 0.04;
-        col += n;
-        gl_FragColor = vec4(col, 1.0);
-      }
-    `,
-  });
-  return new THREE.Mesh(geo, mat);
-}
-
+// -------------------------------------
 function makeStars({ count, radius, thickness }) {
   const geo = new THREE.BufferGeometry();
-
   const positions = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
   const sizes = new Float32Array(count);
@@ -259,7 +259,7 @@ function makeStars({ count, radius, thickness }) {
     positions[idx3 + 1] = y;
     positions[idx3 + 2] = z;
 
-    // 颜色：粉紫 -> 蓝紫 -> 青
+    // 粉紫 -> 蓝紫 -> 青（保留你之前的 vibe）
     const t = Math.min(1, r / radius);
     const cA = new THREE.Color("#ff72d8");
     const cB = new THREE.Color("#b9a7ff");
@@ -267,14 +267,13 @@ function makeStars({ count, radius, thickness }) {
     const c = new THREE.Color();
     if (t < 0.5) c.copy(cA).lerp(cB, t / 0.5);
     else c.copy(cB).lerp(cC, (t - 0.5) / 0.5);
-    const pearl = new THREE.Color("#fff1fb"); // pearl pink-white
-    c.lerp(pearl, (1.0 - t) * 0.22);
+    c.lerp(new THREE.Color("#ffffff"), (1.0 - t) * 0.18);
 
     colors[idx3 + 0] = c.r;
     colors[idx3 + 1] = c.g;
     colors[idx3 + 2] = c.b;
 
-    sizes[i] = 0.25 + Math.pow(Math.random(), 2.2) * 1.4;
+    sizes[i] = 0.18 + Math.pow(Math.random(), 2.2) * 1.2;
     seeds[i] = Math.random() * 1000.0;
   }
 
@@ -306,10 +305,10 @@ function makeStreak() {
   const pts = [];
   const len = 120;
   for (let i = 0; i < len; i++) {
-    const t = i / (len - 1);
-    const x = THREE.MathUtils.lerp(-4.2, 4.2, t);
-    const y = Math.sin(t * Math.PI * 1.1) * 0.45;
-    const z = Math.cos(t * Math.PI * 0.9) * 0.6;
+    const tt = i / (len - 1);
+    const x = THREE.MathUtils.lerp(-4.2, 4.2, tt);
+    const y = Math.sin(tt * Math.PI * 1.1) * 0.45;
+    const z = Math.cos(tt * Math.PI * 0.9) * 0.6;
     pts.push(new THREE.Vector3(x, y, z));
   }
 
