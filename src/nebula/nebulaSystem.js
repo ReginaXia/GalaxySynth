@@ -274,7 +274,7 @@ export function createNebulaSystem({
         points: c.outer,
         basePositions: c.outerBase,
         targetLocal: pLocal,
-        strength: 0.22 * inflOuter,
+        strength: 0.01 * inflOuter,
         swirl: 0.40 * inflOuter,
         t,
       });
@@ -284,7 +284,7 @@ export function createNebulaSystem({
         basePositions: c.coreBase,
         targetLocal: pLocal,
         strength: 0.10 * inflCore,
-        swirl: 0.26 * inflCore,
+        swirl: 0.01* inflCore,
         t: t + 13.7,
       });
 
@@ -293,7 +293,7 @@ export function createNebulaSystem({
         points: c.armStars,
         basePositions: c.armBase,
         targetLocal: pLocal,
-        strength: 0.06 * inflOuter,
+        strength: 0.01 * inflOuter,
         swirl: 0.18 * inflOuter,
         t: t + 7.3,
       });
