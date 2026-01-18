@@ -3,15 +3,14 @@ import * as THREE from "three";
 
 /**
  * 目标：
- * - 5 个星云团：螺旋臂清晰
- * - 三段色彩（中心/中间/边缘）
- * - 粒子细腻：大量小点 + 少量亮点
- * - 边缘渐隐，不泛白
- * - 鼠标扰动：用 world hitPoint（main.js 传进来）精准对齐
+ * - 每团是清晰的螺旋臂（像星系照片）
+ * - 粒子大小强不均匀：大量细尘 + 少量亮星
+ * - 边缘渐隐（不是整团发白）
+ * - 少量炫光/光晕（soft dot + additive）
  */
 
 // ----------------------------
-// Shaders (soft dot + twinkle)
+// Shaders (use per-point alpha + twinkle)
 // ----------------------------
 const nebulaVert = `
   attribute float aSize;
@@ -30,15 +29,17 @@ const nebulaVert = `
     vColor = color;
     vAlpha = aAlpha;
 
+    // 不规则闪烁（每个点不一样，范围更克制，避免“全白爆”）
     float tw = sin(uTime * 1.7 + aSeed * 6.2831);
-    vTw = 0.78 + 0.22 * tw;  // 更克制，避免全团爆白
+    vTw = 0.72 + 0.28 * tw;  // 0.44~1.0 （更柔和）
 
     vec4 mv = modelViewMatrix * vec4(position, 1.0);
 
-    float invZ = 1.0 / max(0.9, -mv.z);
+    // 透视缩放：越近越大（clamp 避免极端放大）
+    float invZ = 1.0 / max(0.8, -mv.z);
     float size = aSize * uBaseSize * uPixelRatio * invZ;
+    gl_PointSize = clamp(size, 1.0, 220.0);
 
-    gl_PointSize = clamp(size, 1.0, 140.0);
     gl_Position = projectionMatrix * mv;
   }
 `;
@@ -54,12 +55,14 @@ const nebulaFrag = `
   void main(){
     vec4 tex = texture2D(uMap, gl_PointCoord);
 
+    // tex.a = soft dot
     float a = tex.a * uOpacity * vAlpha;
 
-    float glow = mix(0.90, 1.35, vTw);
+    // 轻微发光（别太猛，否则一团白）
+    float glow = mix(0.85, 1.25, vTw);
     vec3 col = vColor * glow;
 
-    // 很轻微的额外光晕
+    // 额外一点点“中心亮边”幻觉（很轻）
     col += vColor * (tex.a * 0.10);
 
     gl_FragColor = vec4(col, a);
@@ -67,7 +70,7 @@ const nebulaFrag = `
 `;
 
 // ----------------------------
-// Soft dot texture
+// texture: soft dot
 // ----------------------------
 let __dotTex = null;
 
@@ -108,119 +111,76 @@ export function createNebulaSystem({
 
   const clusters = [];
 
-  // 5 团：每团给 center/mid/edge 三段色
+  // 5 团分布（你要 5 个）
   const defs = [
-    {
-      id: "A_pad",
-      center: new THREE.Vector3(-4.2, planeY + 0.05, 1.6),
-      radius: 1.55,
-      rotSpeed: 0.06,
-      centerColor: "#fff1ff",
-      midColor: "#c7a6ff",
-      edgeColor: "#ff4fc8",
-    },
-    {
-      id: "B_bell",
-      center: new THREE.Vector3(4.0, planeY + 0.10, 1.2),
-      radius: 1.25,
-      rotSpeed: -0.08,
-      centerColor: "#f6ffff",
-      midColor: "#a9d8ff",
-      edgeColor: "#72f0ff",
-    },
-    {
-      id: "C_pluck",
-      center: new THREE.Vector3(-3.6, planeY - 0.05, -2.6),
-      radius: 1.45,
-      rotSpeed: 0.05,
-      centerColor: "#ffffff",
-      midColor: "#ffd3f2",
-      edgeColor: "#ff6fd8",
-    },
-    {
-      id: "D_sparkle",
-      center: new THREE.Vector3(3.5, planeY - 0.05, -3.1),
-      radius: 1.65,
-      rotSpeed: -0.045,
-      centerColor: "#ffffff",
-      midColor: "#ffe2a6",
-      edgeColor: "#ff7bd7",
-    },
-    {
-      id: "E_air",
-      center: new THREE.Vector3(1.2, planeY + 0.06, 2.9),
-      radius: 1.30,
-      rotSpeed: 0.035,
-      centerColor: "#ffffff",
-      midColor: "#c7b6ff",
-      edgeColor: "#7fe7ff",
-    },
+    { id: "A_pad",     center: new THREE.Vector3(-4.2, planeY + 0.05,  1.6), radius: 1.55, rotSpeed:  0.06,  colorA: "#ff77d7", colorB: "#b6a7ff" },
+    { id: "B_bell",    center: new THREE.Vector3( 4.0, planeY + 0.10,  1.2), radius: 1.25, rotSpeed: -0.08,  colorA: "#7fe7ff", colorB: "#b9a7ff" },
+    { id: "C_pluck",   center: new THREE.Vector3(-3.6, planeY - 0.05, -2.6), radius: 1.45, rotSpeed:  0.05,  colorA: "#9ff3ff", colorB: "#ff8fe6" },
+    { id: "D_sparkle", center: new THREE.Vector3( 3.5, planeY - 0.05, -3.1), radius: 1.65, rotSpeed: -0.045, colorA: "#ffd27a", colorB: "#ff72d8" },
+    { id: "E_air",     center: new THREE.Vector3( 1.2, planeY + 0.06,  2.9), radius: 1.30, rotSpeed:  0.035, colorA: "#c7b6ff", colorB: "#7fe7ff" },
   ];
-
-  const mapTex = starTexture || __dotTex;
 
   for (const d of defs) {
     const group = new THREE.Group();
     group.position.copy(d.center);
 
-    // 外层雾：更广 + 更淡（边缘渐隐）
+    // 外层：薄、广、渐隐
     const outer = makeNebulaPoints({
-      count: 15000,
-      spread: d.radius * 1.18,
+      count: 14000,
+      spread: d.radius * 1.10,
       thickness: 0.42,
-      centerColor: d.centerColor,
-      midColor: d.midColor,
-      edgeColor: d.edgeColor,
-      sizeMin: 0.18,
-      sizeMax: 1.10,
-      alpha: 0.16,
-      map: mapTex,
+      colorA: d.colorA,
+      colorB: d.colorB,
+      sizeMin: 0.35,
+      sizeMax: 1.8,
+      alpha: 0.22,
+      map: starTexture || __dotTex,
+      // 旋臂强度（外层更“雾”）
       arms: 3,
-      twist: 12.0,
-      tightness: 0.60,
+      twist: 10.8,
+      tightness: 0.55,
       edgeFade: 2.2,
-      clumpiness: 0.16,
-      armContrast: 0.80,
+      clumpiness: 0.18,
+      armContrast: 0.65,
     });
 
-    // 内核：更亮但克制（别爆白）
+    // 内核：更亮、但别爆白
     const core = makeNebulaPoints({
-      count: 9500,
-      spread: d.radius * 0.58,
+      count: 9000,
+      spread: d.radius * 0.55,
       thickness: 0.28,
-      centerColor: d.centerColor,
-      midColor: d.midColor,
-      edgeColor: d.edgeColor,
-      sizeMin: 0.16,
-      sizeMax: 0.85,
-      alpha: 0.15,
-      map: mapTex,
+      colorA: d.colorB,
+      colorB: "#fff1fb",
+      sizeMin: 0.28,
+      sizeMax: 1.2,
+      alpha: 0.18,
+      map: starTexture || __dotTex,
       arms: 3,
-      twist: 13.2,
-      tightness: 0.34,
-      edgeFade: 1.25,
+      twist: 12.5,
+      tightness: 0.35,
+      edgeFade: 1.2,
       clumpiness: 0.22,
-      armContrast: 0.95,
+      armContrast: 0.85,
     });
 
-    // 亮星点缀（少量更大、更闪）
+    // 亮星点缀：少量大点，帮助“活”
     const armStars = makeNebulaPoints({
-      count: 850,
-      spread: d.radius * 1.08,
+      count: 900,
+      spread: d.radius * 1.05,
       thickness: 0.20,
-      centerColor: "#ffffff",
-      midColor: d.midColor,
-      edgeColor: d.edgeColor,
-      sizeMin: 1.2,
-      sizeMax: 3.2,
-      alpha: 0.45,
-      map: mapTex,
+      colorA: "#ffffff",
+      colorB: d.colorA,
+      sizeMin: 1.6,
+      sizeMax: 4.6,
+      alpha: 0.50,
+      map: starTexture || __dotTex,
       arms: 3,
-      twist: 12.4,
+      twist: 11.6,
       tightness: 0.22,
-      edgeFade: 1.4,
+      edgeFade: 1.35,
       clumpiness: 0.10,
       armContrast: 1.0,
+      // 亮星更集中在旋臂上
       starLayer: true,
     });
 
@@ -250,130 +210,122 @@ export function createNebulaSystem({
     });
   }
 
+  // function pointerToWorld(pointerNDC) {
+  //   return new THREE.Vector3(pointerNDC.x * radiusWorld, planeY, pointerNDC.y * radiusWorld);
+  // }
+
   function update(worldPoint, t) {
-    const pWorld = worldPoint;
+  // worldPoint: THREE.Vector3  (已经是射线打到平面的交点)
+  const pWorld = worldPoint;
 
-    for (const c of clusters) {
-      c.group.rotation.y = t * c.rotSpeed;
+  for (const c of clusters) {
+    c.group.rotation.y = t * c.rotSpeed;
 
-      // ✅ 别忘了更新 shader time（否则 twinkle 不会动）
-      c.outer.material.uniforms.uTime.value = t;
-      c.core.material.uniforms.uTime.value = t;
-      c.armStars.material.uniforms.uTime.value = t;
+    const dist = pWorld.distanceTo(c.center);
+    const infl = smoothstep(c.radius * 1.35, c.radius * 0.25, dist);
+    c.influence = infl;
 
-      const dist = pWorld.distanceTo(c.center);
-      const infl = smoothstep(c.radius * 1.35, c.radius * 0.25, dist);
-      c.influence = infl;
+    const inflOuter = Math.pow(infl, 1.0);
+    const inflCore = Math.pow(infl, 2.0);
 
-      const inflOuter = Math.pow(infl, 1.0);
-      const inflCore = Math.pow(infl, 2.0);
+    const pLocal = c.group.worldToLocal(pWorld.clone());
 
-      const pLocal = c.group.worldToLocal(pWorld.clone());
+    applyAttraction({
+      points: c.outer,
+      basePositions: c.outerBase,
+      targetLocal: pLocal,
+      strength: 0.01 * inflOuter,
+      swirl: 0.35 * inflOuter,
+      t,
+    });
 
-      applyAttraction({
-        points: c.outer,
-        basePositions: c.outerBase,
-        targetLocal: pLocal,
-        strength: 0.01 * inflOuter,
-        swirl: 0.40 * inflOuter,
-        t,
-      });
+    applyAttraction({
+      points: c.core,
+      basePositions: c.coreBase,
+      targetLocal: pLocal,
+      strength: 0.01 * inflCore,
+      swirl: 0.22 * inflCore,
+      t: t + 13.7,
+    });
 
-      applyAttraction({
-        points: c.core,
-        basePositions: c.coreBase,
-        targetLocal: pLocal,
-        strength: 0.10 * inflCore,
-        swirl: 0.01* inflCore,
-        t: t + 13.7,
-      });
-
-      // 亮星更轻微扰动（否则会乱飞）
-      applyAttraction({
-        points: c.armStars,
-        basePositions: c.armBase,
-        targetLocal: pLocal,
-        strength: 0.01 * inflOuter,
-        swirl: 0.18 * inflOuter,
-        t: t + 7.3,
-      });
-
-      // 透明度：靠近更明显，但不过曝
-      c.outer.material.uniforms.uOpacity.value = lerp(0.10, 0.20, inflOuter);
-      c.core.material.uniforms.uOpacity.value = lerp(0.10, 0.18, inflCore);
-      c.armStars.material.uniforms.uOpacity.value = lerp(0.28, 0.50, inflOuter);
-    }
+    c.outer.material.opacity = lerp(0.20, 0.55, inflOuter);
+    c.core.material.opacity = lerp(0.30, 0.70, inflCore);
   }
+}
 
-  return { clusters, update, root };
+return { clusters, update, root };
 }
 
 // ----------------------------
-// Spiral generator (3-color)
+// Generate spiral nebula points
 // ----------------------------
 function makeNebulaPoints({
   count,
   spread,
   thickness,
-  centerColor,
-  midColor,
-  edgeColor,
+  colorA,
+  colorB,
   sizeMin,
   sizeMax,
   alpha,
   map,
+  // spiral params
   arms = 3,
   twist = 12.0,
   tightness = 0.35,
   edgeFade = 1.6,
   clumpiness = 0.18,
   armContrast = 0.8,
+  // star layer tweak
   starLayer = false,
 }) {
   const geo = new THREE.BufferGeometry();
-  const positions = new Float32Array(count * 3);
-  const colors = new Float32Array(count * 3);
-  const sizes = new Float32Array(count);
-  const seeds = new Float32Array(count);
-  const alphas = new Float32Array(count);
 
-  const cCenter = new THREE.Color(centerColor);
-  const cMid = new THREE.Color(midColor);
-  const cEdge = new THREE.Color(edgeColor);
-  const c = new THREE.Color();
+  const positions = new Float32Array(count * 3);
+  const colors    = new Float32Array(count * 3);
+  const sizes     = new Float32Array(count);
+  const seeds     = new Float32Array(count);
+  const alphas    = new Float32Array(count);
+
+  const cA = new THREE.Color(colorA);
+  const cB = new THREE.Color(colorB);
+  const c  = new THREE.Color();
 
   for (let i = 0; i < count; i++) {
     const idx3 = i * 3;
     seeds[i] = Math.random();
 
-    // 半径：中心更密，starLayer 稍偏外
+    // 半径分布：中心更密
     const u = Math.random();
-    const r01 = Math.pow(u, starLayer ? 0.68 : 0.52);
+    const r01 = Math.pow(u, starLayer ? 0.65 : 0.52); // starLayer 稍偏外
     const r = r01 * spread;
 
     // 选臂
     const armId = Math.floor(Math.random() * arms);
     const armBase = (armId / arms) * Math.PI * 2.0;
 
-    // 螺旋角：r 越大越转
+    // 螺旋角
     const spiralA = armBase + r01 * twist;
 
-    // 贴臂程度
+    // 贴臂程度（外侧更雾）
     const armJitter = (Math.random() - 0.5) * tightness * (0.25 + r01 * 1.35);
+
+    // 核心扰动
     const coreNoise = (1.0 - r01) * (Math.random() - 0.5) * 0.35;
+
     const a = spiralA + armJitter + coreNoise;
 
     // 椭圆盘
     const ex = 1.0;
-    const ez = 0.76;
+    const ez = 0.75;
 
     // 外圈散射
-    const edgeScatter = 0.03 + r01 * (starLayer ? 0.18 : 0.30);
+    const edgeScatter = (0.04 + r01 * (starLayer ? 0.22 : 0.34));
     const jitterX = (Math.random() - 0.5) * edgeScatter;
     const jitterZ = (Math.random() - 0.5) * edgeScatter;
 
-    // 团簇感（少量）
-    const clump = Math.random() < clumpiness ? (Math.random() - 0.5) * 0.26 : 0.0;
+    // 团簇感
+    const clump = (Math.random() < clumpiness) ? (Math.random() - 0.5) * 0.30 : 0.0;
 
     const x = Math.cos(a) * r * ex + jitterX + clump;
     const z = Math.sin(a) * r * ez + jitterZ - clump;
@@ -385,59 +337,56 @@ function makeNebulaPoints({
     positions[idx3 + 1] = y;
     positions[idx3 + 2] = z;
 
-    // ✅ 三段色（中心 -> 中间 -> 边缘）
-    if (r01 < 0.5) {
-      c.copy(cCenter).lerp(cMid, r01 / 0.5);
-    } else {
-      c.copy(cMid).lerp(cEdge, (r01 - 0.5) / 0.5);
-    }
+    // 颜色：中心->边缘分层清晰
+    // 中心偏 B（亮、珠光），外侧偏 A（彩）
+    c.copy(cB).lerp(cA, clamp01(r01));
 
-    // 少量白星尘点缀（别太多，不然又发白）
-    if (!starLayer && Math.random() < 0.008) c.lerp(new THREE.Color("#ffffff"), 0.45);
-
+    // 偶尔加一点白星尘点缀
+    if (!starLayer && Math.random() < 0.012) c.lerp(new THREE.Color("#ffffff"), 0.55);
     colors[idx3 + 0] = c.r;
     colors[idx3 + 1] = c.g;
     colors[idx3 + 2] = c.b;
 
-    // ✅ 粒径：大量细点 + 少量亮点
+    // 大小：大量细点 + 少量亮点（避免“粗”）
     if (starLayer) {
-      const big = Math.random() < (0.20 * (1.0 - r01) + 0.06);
+      // 亮星层：更大、更不均匀
+      const big = Math.random() < (0.18 * (1.0 - r01) + 0.08);
       sizes[i] = big
-        ? sizeMin + (sizeMax - sizeMin) * (0.70 + Math.random() * 0.55)
-        : sizeMin + Math.pow(Math.random(), 2.3) * (sizeMax - sizeMin) * 0.45;
+        ? sizeMin + (sizeMax - sizeMin) * (0.65 + Math.random() * 0.55)
+        : sizeMin + Math.pow(Math.random(), 2.2) * (sizeMax - sizeMin) * 0.55;
     } else {
-      const bigChance = (1.0 - r01) * 0.04 + 0.006;
-      sizes[i] =
-        Math.random() < bigChance
-          ? sizeMin + (sizeMax - sizeMin) * (0.55 + Math.random() * 0.55)
-          : sizeMin + Math.pow(Math.random(), 3.6) * (sizeMax - sizeMin) * 0.38;
+      const bigChance = (1.0 - r01) * 0.05 + 0.008;
+      sizes[i] = (Math.random() < bigChance)
+        ? sizeMin + (sizeMax - sizeMin) * (0.55 + Math.random() * 0.55)
+        : sizeMin + Math.pow(Math.random(), 3.2) * (sizeMax - sizeMin) * 0.42;
     }
 
-    // ✅ per-point alpha：中心亮，边缘渐隐 + 旋臂更清晰
-    const radial = Math.pow(1.0 - r01, starLayer ? 0.18 : 0.26);
+    // ---- per-point alpha：核心更亮，边缘渐隐 ----
+    const radial = Math.pow(1.0 - r01, starLayer ? 0.18 : 0.25);
     const edgeFog = Math.exp(-r01 * edgeFade);
 
-    // 旋臂 mask：越靠近臂（armJitter 越小）越不透明
-    const armMask = Math.exp(-Math.pow(armJitter / 0.18, 2.0));
-    let aPoint = radial * edgeFog * (0.35 + armContrast * armMask);
+    // 旋臂 mask：越靠近旋臂（armJitter 越接近 0）越不透明 → 螺旋更清楚
+    const armMask = Math.exp(-Math.pow(armJitter / 0.20, 2.0));
+    let aPoint = radial * edgeFog * (0.40 + armContrast * armMask);
 
-    if (starLayer) aPoint *= 1.25;
-    if (Math.random() < 0.008) aPoint *= 1.20;
+    // 亮星点更明显但不爆
+    if (starLayer) aPoint *= 1.2;
+    if (Math.random() < 0.010) aPoint *= 1.25;
 
     alphas[i] = clamp(aPoint, 0.02, 1.0);
 
-    // 边缘稍压暗（避免外圈发白）
+    // 额外：边缘颜色变暗一点，防止外圈发白
     const fade = Math.pow(1.0 - r01, 0.30) * Math.exp(-r01 * (edgeFade * 0.75));
-    colors[idx3 + 0] *= 0.60 + 0.60 * fade;
-    colors[idx3 + 1] *= 0.60 + 0.60 * fade;
-    colors[idx3 + 2] *= 0.60 + 0.60 * fade;
+    colors[idx3 + 0] *= (0.55 + 0.65 * fade);
+    colors[idx3 + 1] *= (0.55 + 0.65 * fade);
+    colors[idx3 + 2] *= (0.55 + 0.65 * fade);
   }
 
   geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-  geo.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
-  geo.setAttribute("aSeed", new THREE.BufferAttribute(seeds, 1));
-  geo.setAttribute("aAlpha", new THREE.BufferAttribute(alphas, 1));
+  geo.setAttribute("color",    new THREE.BufferAttribute(colors, 3));
+  geo.setAttribute("aSize",    new THREE.BufferAttribute(sizes, 1));
+  geo.setAttribute("aSeed",    new THREE.BufferAttribute(seeds, 1));
+  geo.setAttribute("aAlpha",   new THREE.BufferAttribute(alphas, 1));
 
   const mat = new THREE.ShaderMaterial({
     transparent: true,
@@ -445,16 +394,18 @@ function makeNebulaPoints({
     blending: THREE.AdditiveBlending,
     vertexColors: true,
     uniforms: {
-      uMap: { value: map || __dotTex },
-      uOpacity: { value: alpha },
-      uTime: { value: 0 },
-      uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) },
-      // ✅ 更细腻：调小一点
-      uBaseSize: { value: starLayer ? 9.0 : 6.8 },
+      uMap:       { value: map || __dotTex },
+      uOpacity:   { value: alpha },
+      uTime:      { value: 0 },
+      uPixelRatio:{ value: Math.min(window.devicePixelRatio, 2) },
+      // ✅ 细腻度关键：越小越“细”，越大越“粗+容易白”
+      uBaseSize:  { value: starLayer ? 12.0 : 9.0 },
     },
     vertexShader: nebulaVert,
     fragmentShader: nebulaFrag,
   });
+
+  mat.alphaTest = 0.01;
 
   const pts = new THREE.Points(geo, mat);
   pts.frustumCulled = false;
@@ -500,12 +451,12 @@ function applyAttraction({ points, basePositions, targetLocal, strength, swirl, 
       x += dx * strength * w;
       z += dz * strength * w;
 
-      // swirl
+      // swirl：更柔
       const ang = Math.atan2(dz, dx);
       const ss = Math.sin(ang + t * 1.1);
       const cc = Math.cos(ang + t * 1.1);
-      x += (-dz) * swirl * w * 0.07 * cc;
-      z += (dx) * swirl * w * 0.07 * ss;
+      x += (-dz) * swirl * w * 0.08 * cc;
+      z += (dx) * swirl * w * 0.08 * ss;
 
       y += 0.045 * w * Math.sin(t * 1.8 + bx * 1.3 + bz * 1.1);
     }

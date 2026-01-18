@@ -157,6 +157,14 @@ scene.add(streak);
 // -------------------------------------
 // Mouse move intensity (for audio trigger)
 // -------------------------------------
+
+// -------------------------------------
+// Camera follow tuning (敏感度在这里调)
+// -------------------------------------
+const LOOK_MIX = 0.18;        // 0=完全不跟鼠标；1=完全追鼠标（你现在就是 1）
+const LOOK_SMOOTH = 0.035;    // 越小越“慢”，越稳（0.02~0.06）
+const HIT_CLAMP_RADIUS = 4.0; // 鼠标落点最大半径，防止飙飞（3~6）
+
 let lastPX = 0, lastPY = 0;
 let move01 = 0;
 
@@ -182,11 +190,17 @@ function tick() {
   raycaster.setFromCamera(pointer, camera);
   raycaster.ray.intersectPlane(plane, hitPoint);
 
-  // look target：平时偏向 origin，缩放/靠近时更偏向鼠标点
-  lookTarget.copy(hitPoint);
+  // 1) clamp hitPoint：限制鼠标落点范围，防止相机看向点飙飞
+  const hitClamped = hitPoint.clone();
+  const len = hitClamped.length();
+  if (len > HIT_CLAMP_RADIUS) hitClamped.multiplyScalar(HIT_CLAMP_RADIUS / len);
 
-  // 让 lookTarget 不要抖：平滑一下
-  lookTargetSmooth.lerp(lookTarget, 0.08);
+  // 2) mix：只“跟一部分”鼠标（关键！）
+  lookTarget.lerpVectors(new THREE.Vector3(0, 0, 0), hitClamped, LOOK_MIX);
+
+  // 3) smooth：再慢慢追上去（关键！）
+  lookTargetSmooth.lerp(lookTarget, LOOK_SMOOTH);
+
 
   // 相机沿当前方向保持距离（更像 dolly）
   const dir = camera.position.clone().normalize();
