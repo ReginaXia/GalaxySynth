@@ -25,29 +25,22 @@ scene.add(makeGradientBackground());
 // 相机
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 2000);
 camera.position.set(0, 0, 6);
-scene.add(camera);
-
-// ===== DEBUG: 强制可见测试物体 =====
-// const debugCube = new THREE.Mesh(
-//   new THREE.BoxGeometry(1, 1, 1),
-//   new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true })
-// );
-// scene.add(debugCube);
-
-camera.position.set(0, 0, 6);
-//===================================
+// scene.add(camera);
 
 
-// 后处理：Bloom
-// const composer = new EffectComposer(renderer);
-// composer.addPass(new RenderPass(scene, camera));
-// const bloom = new UnrealBloomPass(
-//   new THREE.Vector2(window.innerWidth, window.innerHeight),
-//   0.85,   // strength
-//   0.9,    // radius
-//   0.15    // threshold
-// );
-// composer.addPass(bloom);
+// ----- Post: Composer + Bloom (Ariana soft) -----
+const composer = new EffectComposer(renderer);
+const renderPass = new RenderPass(scene, camera);
+composer.addPass(renderPass);
+
+const bloom = new UnrealBloomPass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  0.01, // strength
+  0.90, // radius
+  0.35  // threshold
+);
+composer.addPass(bloom);
+
 
 // 鼠标交互点（先当作后面摄像头手势的替代输入）
 const pointer = new THREE.Vector2(0, 0);
@@ -82,7 +75,7 @@ function tick() {
   streak.material.uniforms.uTime.value = t;
   streak.material.uniforms.uPointer.value.set(pointer.x, pointer.y);
 
-  renderer.render(scene, camera);
+  composer.render();
   requestAnimationFrame(tick);
 }
 tick();
@@ -91,9 +84,9 @@ window.addEventListener("resize", () => {
   const w = window.innerWidth;
   const h = window.innerHeight;
   renderer.setSize(w, h);
-  composer.setSize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  composer.setSize(w, h);
   bloom.setSize(w, h);
 });
 
@@ -118,9 +111,9 @@ function makeGradientBackground() {
       float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453123); }
       void main(){
         float r = length(vPos.xy) / 60.0;
-        vec3 c1 = vec3(0.05, 0.02, 0.10);
-        vec3 c2 = vec3(0.02, 0.05, 0.12);
-        vec3 c3 = vec3(0.02, 0.08, 0.10);
+        vec3 c1 = vec3(0.07, 0.03, 0.12); // deep violet
+        vec3 c2 = vec3(0.03, 0.05, 0.14); // indigo
+        vec3 c3 = vec3(0.06, 0.04, 0.16); // purple haze
         float a = smoothstep(0.0, 0.9, r);
         vec3 col = mix(c1, c2, a);
         col = mix(col, c3, smoothstep(0.6, 1.0, r));
@@ -164,13 +157,14 @@ function makeStars({ count, radius, thickness }) {
 
     // 颜色：粉紫 -> 蓝紫 -> 青
     const t = Math.min(1, r / radius);
-    const cA = new THREE.Color("#ff5cff");
-    const cB = new THREE.Color("#5b7cff");
-    const cC = new THREE.Color("#39ffe3");
+    const cA = new THREE.Color("#ff72d8");
+    const cB = new THREE.Color("#b9a7ff");
+    const cC = new THREE.Color("#7fe7ff");
     const c = new THREE.Color();
     if (t < 0.5) c.copy(cA).lerp(cB, t / 0.5);
     else c.copy(cB).lerp(cC, (t - 0.5) / 0.5);
-    c.lerp(cA, (1.0 - t) * 0.25);
+    const pearl = new THREE.Color("#fff1fb"); // pearl pink-white
+    c.lerp(pearl, (1.0 - t) * 0.22);
 
     colors[idx3 + 0] = c.r;
     colors[idx3 + 1] = c.g;

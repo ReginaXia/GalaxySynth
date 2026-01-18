@@ -12,6 +12,7 @@ void main(){
 
   float alpha = (core + halo) * (0.10 + vTwinkle * 0.18);
   vec3 col = vColor * (0.55 + vTwinkle * 0.25);
+  col = mix(col, vec3(1.0, 0.93, 0.98), 0.12); // Ariana: pearl soften
 
   if (d > 0.5) discard;
 
