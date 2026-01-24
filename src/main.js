@@ -157,6 +157,55 @@ window.addEventListener(
   { passive: true }
 );
 
+// --- Zoom to cursor (no OrbitControls needed) ---
+const zoomRaycaster = new THREE.Raycaster();
+const zoomMouse = new THREE.Vector2();
+const zoomPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -nebulaSystem.planeY);
+
+function getMouseWorldOnPlane(e) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  zoomMouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  zoomMouse.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+  zoomRaycaster.setFromCamera(zoomMouse, camera);
+
+  const hit = new THREE.Vector3();
+  const ok = zoomRaycaster.ray.intersectPlane(zoomPlane, hit);
+  return ok ? hit : null;
+}
+
+const tmpV = new THREE.Vector3();
+window.addEventListener(
+  "wheel",
+  (e) => {
+    e.preventDefault();
+
+    const worldBefore = getMouseWorldOnPlane(e);
+    if (!worldBefore) return;
+
+    // zoom factor
+    const delta = Math.sign(e.deltaY);
+    const zoomStep = 1.12; // 手感：可调 1.06~1.18
+    const factor = delta > 0 ? zoomStep : 1 / zoomStep;
+
+    // 1) dolly camera along view direction
+    tmpV.copy(camera.position).sub(worldBefore); // vector from hit to camera
+    tmpV.multiplyScalar(factor);
+    camera.position.copy(worldBefore).add(tmpV);
+
+    camera.updateMatrixWorld();
+
+    // 2) compute world point under mouse after zoom, then pan to keep it stable
+    const worldAfter = getMouseWorldOnPlane(e);
+    if (!worldAfter) return;
+
+    const pan = worldBefore.clone().sub(worldAfter);
+    camera.position.add(pan);
+
+    camera.updateProjectionMatrix();
+  },
+  { passive: false }
+);
+
 // -------------------------------------
 // Stars + Streak
 // -------------------------------------

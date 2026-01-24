@@ -2,114 +2,156 @@
 import * as THREE from "three";
 import GUI from "lil-gui";
 
-/**
- * Compatible with the new nebulaSystem.js I gave you:
- * nebulaSystem = { clusters, update, root, setClusterPalette }
- *
- * Features:
- * - dropdown active galaxy
- * - click pick galaxy
- * - Palette system (2~4 colors), default RADIAL
- * - PATCH mode
- * - per-layer size/opacity
- * - auto save/restore (localStorage)
- * - preset slots (save/load/delete/rename/apply-to-all)
- */
-
 export function setupGalaxyGUI({ camera, renderer, nebulaSystem }) {
-  const STORAGE_KEY = "GalaxySynth_GalaxyPresets_v1";
+  const STORAGE_KEY = "GalaxySynth_GalaxyPresets_v2";
 
-  // -------------------------
-  // Storage (perGalaxy + slots)
-  // -------------------------
+  // -------- storage --------
   function readStore() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return { perGalaxy: {}, slots: {} };
+      if (!raw) return { perGalaxy: {} };
       const obj = JSON.parse(raw);
-      return {
-        perGalaxy: obj.perGalaxy ?? {},
-        slots: obj.slots ?? {},
-      };
+      return { perGalaxy: obj.perGalaxy ?? {} };
     } catch {
-      return { perGalaxy: {}, slots: {} };
+      return { perGalaxy: {} };
     }
   }
-
   function writeStore(store) {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
-    } catch {}
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(store)); } catch {}
   }
-
   function savePerGalaxy(id, data) {
     const store = readStore();
-    store.perGalaxy[id] = deepClone(data);
+    store.perGalaxy[id] = structuredCloneSafe(data);
     writeStore(store);
   }
-
   function loadPerGalaxy(id) {
-    const store = readStore();
-    return store.perGalaxy[id] ?? null;
+    return readStore().perGalaxy[id] ?? null;
   }
 
-  function listSlots() {
-    return Object.keys(readStore().slots).sort((a, b) => a.localeCompare(b));
-  }
-
-  function saveSlot(name, data) {
-    const store = readStore();
-    store.slots[name] = deepClone(data);
-    writeStore(store);
-  }
-
-  function loadSlot(name) {
-    const store = readStore();
-    return store.slots[name] ?? null;
-  }
-
-  function deleteSlot(name) {
-    const store = readStore();
-    delete store.slots[name];
-    writeStore(store);
-  }
-
-  function renameSlot(oldName, newName) {
-    const store = readStore();
-    if (!store.slots[oldName]) return false;
-    if (store.slots[newName]) return false;
-    store.slots[newName] = store.slots[oldName];
-    delete store.slots[oldName];
-    writeStore(store);
-    return true;
-  }
-
-  // -------------------------
-  // Helpers to get cluster
-  // -------------------------
-  function getClusterById(id) {
-    return nebulaSystem.clusters.find((c) => c.id === id);
-  }
-
-  function getPickables() {
-    // we tag userData.galaxyId so pick works reliably
-    const objs = [];
-    for (const c of nebulaSystem.clusters) {
-      [c.outer, c.core, c.armStars].forEach((o) => {
-        if (!o) return;
-        o.userData.galaxyId = c.id;
-        objs.push(o);
-      });
+  // -------- restore each cluster --------
+  for (const c of nebulaSystem.clusters) {
+    const saved = loadPerGalaxy(c.id);
+    if (saved) {
+      // rebuild + palette + transform
+      if (saved.transform) nebulaSystem.setClusterTransform(c.id, saved.transform);
+      if (saved.shape) nebulaSystem.rebuildCluster(c.id, { shape: saved.shape, layers: saved.layers, palette: saved.palette });
+      else {
+        if (saved.palette) nebulaSystem.setClusterPalette(c.id, saved.palette);
+      }
     }
-    return objs;
   }
 
-  // -------------------------
-  // Apply / Snapshot
-  // -------------------------
-  function snapshotActive(state) {
-    // minimal things we can control in the new nebulaSystem
+  // -------- pick --------
+  const raycaster = new THREE.Raycaster();
+  raycaster.params.Points.threshold = 0.12;
+  const mouse = new THREE.Vector2();
+
+  let downX = 0, downY = 0;
+  window.addEventListener("pointerdown", (e) => { downX = e.clientX; downY = e.clientY; });
+  window.addEventListener("pointerup", (e) => {
+    const dx = e.clientX - downX, dy = e.clientY - downY;
+    if (Math.sqrt(dx*dx + dy*dy) < 4) tryPick(e);
+  });
+
+  function tryPick(e) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+    raycaster.setFromCamera(mouse, camera);
+    const hits = raycaster.intersectObjects(nebulaSystem.pickables, true);
+    if (!hits.length) return;
+    const id = hits[0].object.userData.galaxyId;
+    if (!id) return;
+    state.active = id;
+    nebulaSystem.setActive(id);
+    pullStateFromActive();
+    updateAllDisplays(gui);
+  }
+
+  // -------- state --------
+  const state = {
+    active: nebulaSystem.getActiveId(),
+
+    // Shape (rebuild)
+    arms: 3,
+    gap: 0.14,
+    length: 1.0,
+    sizeScale: 1.0,
+
+    // Transform
+    posX: 0,
+    posY: nebulaSystem.planeY,
+    posZ: 0,
+    scale: 1.0,
+
+    // Palette
+    palCount: 4,
+    colorMode: 0, // RADIAL default
+    colorStrength: 1.15,
+    colorNoise: 0.35,
+    hueJitter: 0.35,
+    rainbowMix: 0.10,
+    hueScale: 0.015,
+    pal0: "#ffffff",
+    pal1: "#ffd1f2",
+    pal2: "#ff77d7",
+    pal3: "#6aa7ff",
+
+    // Look (layer opacity/size)
+    outerOpacity: 0.22,
+    coreOpacity: 0.18,
+    starsOpacity: 0.50,
+    outerSize: 9.0,
+    coreSize: 9.0,
+    starsSize: 12.0,
+  };
+
+  function activeCluster() {
+    return nebulaSystem.getCluster(state.active);
+  }
+
+  function pullStateFromActive() {
+    const c = activeCluster();
+    if (!c) return;
+
+    const p = c.preset;
+
+    // shape
+    state.arms = p.shape.arms;
+    state.gap = p.shape.gap;
+    state.length = p.shape.length;
+    state.sizeScale = p.shape.sizeScale;
+
+    // transform
+    state.posX = c.group.position.x;
+    state.posY = c.group.position.y;
+    state.posZ = c.group.position.z;
+    state.scale = c.group.scale.x;
+
+    // palette
+    const pal = p.palette;
+    state.palCount = pal.count;
+    state.colorMode = pal.mode;
+    state.colorStrength = pal.strength;
+    state.colorNoise = pal.noise;
+    state.hueJitter = pal.hueJitter;
+    state.rainbowMix = pal.rainbowMix;
+    state.hueScale = pal.hueScale;
+    state.pal0 = pal.c0; state.pal1 = pal.c1; state.pal2 = pal.c2; state.pal3 = pal.c3;
+
+    // layers
+    state.outerOpacity = p.layers.outer.opacity;
+    state.coreOpacity = p.layers.core.opacity;
+    state.starsOpacity = p.layers.stars.opacity;
+    state.outerSize = p.layers.outer.size;
+    state.coreSize = p.layers.core.size;
+    state.starsSize = p.layers.stars.size;
+  }
+
+  function snapshot() {
     return {
+      shape: { arms: state.arms, gap: state.gap, length: state.length, sizeScale: state.sizeScale },
+      transform: { x: state.posX, y: state.posY, z: state.posZ, scale: state.scale },
       palette: {
         count: state.palCount,
         mode: state.colorMode,
@@ -118,10 +160,7 @@ export function setupGalaxyGUI({ camera, renderer, nebulaSystem }) {
         hueJitter: state.hueJitter,
         rainbowMix: state.rainbowMix,
         hueScale: state.hueScale,
-        c0: state.pal0,
-        c1: state.pal1,
-        c2: state.pal2,
-        c3: state.pal3,
+        c0: state.pal0, c1: state.pal1, c2: state.pal2, c3: state.pal3,
       },
       layers: {
         outer: { opacity: state.outerOpacity, size: state.outerSize },
@@ -131,343 +170,165 @@ export function setupGalaxyGUI({ camera, renderer, nebulaSystem }) {
     };
   }
 
-  function applyToCluster(id, data) {
-    const c = getClusterById(id);
-    if (!c) return;
-
-    // palette -> setClusterPalette (updates uniforms on all three layers)
-    if (data?.palette) {
-      nebulaSystem.setClusterPalette(id, {
-        count: data.palette.count,
-        mode: data.palette.mode,
-        strength: data.palette.strength,
-        noise: data.palette.noise,
-        hueJitter: data.palette.hueJitter,
-        rainbowMix: data.palette.rainbowMix,
-        hueScale: data.palette.hueScale,
-        c0: data.palette.c0,
-        c1: data.palette.c1,
-        c2: data.palette.c2,
-        c3: data.palette.c3,
-      });
-    }
-
-    // per-layer opacity/size (uniforms exist in the shader I gave)
-    const L = data?.layers;
-    if (L?.outer) applyLayer(c.outer, L.outer);
-    if (L?.core) applyLayer(c.core, L.core);
-    if (L?.stars) applyLayer(c.armStars, L.stars);
+  // rebuild debounce（避免拖动滑条狂 rebuild）
+  let rebuildTimer = null;
+  function scheduleRebuild() {
+    if (rebuildTimer) clearTimeout(rebuildTimer);
+    rebuildTimer = setTimeout(() => {
+      rebuildTimer = null;
+      applyRebuildAndSave();
+    }, 150);
   }
 
-  function applyLayer(points, layerData) {
-    if (!points?.material?.uniforms) return;
-    if (typeof layerData.opacity === "number") {
-      points.material.uniforms.uOpacity.value = clamp(layerData.opacity, 0, 2);
-    }
-    if (typeof layerData.size === "number") {
-      points.material.uniforms.uBaseSize.value = clamp(layerData.size, 0.5, 120);
-    }
+  function applyRebuildAndSave() {
+    const id = state.active;
+    nebulaSystem.setActive(id);
+    nebulaSystem.setClusterTransform(id, { x: state.posX, y: state.posY, z: state.posZ, scale: state.scale });
+
+    nebulaSystem.rebuildCluster(id, {
+      shape: { arms: state.arms, gap: state.gap, length: state.length, sizeScale: state.sizeScale },
+      palette: snapshot().palette,
+      layers: snapshot().layers,
+    });
+
+    savePerGalaxy(id, snapshot());
   }
 
-  // -------------------------
-  // Init restore from localStorage
-  // -------------------------
-  for (const c of nebulaSystem.clusters) {
-    const saved = loadPerGalaxy(c.id);
-    if (saved) applyToCluster(c.id, saved);
+  function applyPaletteAndLookAndSave() {
+    const id = state.active;
+    nebulaSystem.setActive(id);
+
+    nebulaSystem.setClusterPalette(id, snapshot().palette);
+
+    // layer uniforms 其实在 rebuild 时会写入 preset；这里为了实时反馈也直接写 preset + rebuild（轻）
+    nebulaSystem.rebuildCluster(id, {
+      shape: activeCluster().preset.shape,
+      palette: snapshot().palette,
+      layers: snapshot().layers,
+    });
+
+    savePerGalaxy(id, snapshot());
   }
 
-  // -------------------------
-  // GUI state
-  // -------------------------
-  const defaultId = nebulaSystem.clusters[0]?.id ?? "A_pad";
-
-  const state = {
-    active: defaultId,
-
-    // Palette (default RADIAL)
-    palCount: 4,
-    colorMode: 0, // 0 RADIAL / 2 PATCH
-    colorStrength: 1.15,
-    colorNoise: 0.35,
-    hueJitter: 0.35,
-    rainbowMix: 0.10,
-    hueScale: 0.015,
-
-    pal0: "#ffffff",
-    pal1: "#ffd1f2",
-    pal2: "#ff77d7",
-    pal3: "#6aa7ff",
-
-    // Layer look
-    outerOpacity: 0.22,
-    coreOpacity: 0.18,
-    starsOpacity: 0.50,
-
-    outerSize: 9.0,
-    coreSize: 9.0,
-    starsSize: 12.0,
-  };
-
-  // Sync state from current cluster palette + uniforms
-  function pullStateFromActive() {
-    const c = getClusterById(state.active);
-    if (!c) return;
-
-    // palette (from cluster.palette, kept in the system)
-    if (c.palette) {
-      state.palCount = c.palette.count ?? state.palCount;
-      state.colorMode = c.palette.mode ?? state.colorMode;
-      state.colorStrength = c.palette.strength ?? state.colorStrength;
-      state.colorNoise = c.palette.noise ?? state.colorNoise;
-      state.hueJitter = c.palette.hueJitter ?? state.hueJitter;
-      state.rainbowMix = c.palette.rainbowMix ?? state.rainbowMix;
-      state.hueScale = c.palette.hueScale ?? state.hueScale;
-
-      state.pal0 = c.palette.c0 ?? state.pal0;
-      state.pal1 = c.palette.c1 ?? state.pal1;
-      state.pal2 = c.palette.c2 ?? state.pal2;
-      state.pal3 = c.palette.c3 ?? state.pal3;
-    }
-
-    // layer uniforms
-    state.outerOpacity = c.outer?.material?.uniforms?.uOpacity?.value ?? state.outerOpacity;
-    state.coreOpacity = c.core?.material?.uniforms?.uOpacity?.value ?? state.coreOpacity;
-    state.starsOpacity = c.armStars?.material?.uniforms?.uOpacity?.value ?? state.starsOpacity;
-
-    state.outerSize = c.outer?.material?.uniforms?.uBaseSize?.value ?? state.outerSize;
-    state.coreSize = c.core?.material?.uniforms?.uBaseSize?.value ?? state.coreSize;
-    state.starsSize = c.armStars?.material?.uniforms?.uBaseSize?.value ?? state.starsSize;
+  function applyTransformAndSave() {
+    const id = state.active;
+    nebulaSystem.setActive(id);
+    nebulaSystem.setClusterTransform(id, { x: state.posX, y: state.posY, z: state.posZ, scale: state.scale });
+    savePerGalaxy(id, snapshot());
   }
 
-  function applyActiveAndSave() {
-    const payload = snapshotActive(state);
-    applyToCluster(state.active, payload);
-    savePerGalaxy(state.active, payload);
-  }
-
-  // initialize from active (after restore)
+  // init
   pullStateFromActive();
 
-  // -------------------------
-  // GUI creation
-  // -------------------------
+  // -------- GUI --------
   const gui = new GUI({ title: "GalaxySynth" });
 
-  // Active dropdown
-  const options = {};
-  for (const c of nebulaSystem.clusters) options[c.id] = c.id;
+  // Active dropdown (dynamic)
+  function activeOptions() {
+    const opts = {};
+    for (const c of nebulaSystem.clusters) opts[c.id] = c.id;
+    return opts;
+  }
 
-  gui.add(state, "active", options).name("Active Galaxy").onChange(() => {
+  let activeCtrl = gui.add(state, "active", activeOptions()).name("Active Galaxy");
+  activeCtrl.onChange(() => {
+    nebulaSystem.setActive(state.active);
     pullStateFromActive();
     updateAllDisplays(gui);
   });
 
-  // Palette folder
-  const fPal = gui.addFolder("Palette (Radial Default)");
-
-  fPal.add(state, "palCount", 2, 4, 1).name("paletteCount").onChange(applyActiveAndSave);
-  fPal.add(state, "colorMode", { RADIAL: 0, PATCH: 2 }).name("colorMode").onChange(applyActiveAndSave);
-
-  fPal.add(state, "colorStrength", 0, 2, 0.01).name("colorStrength").onChange(applyActiveAndSave);
-  fPal.add(state, "colorNoise", 0, 1, 0.01).name("colorNoise").onChange(applyActiveAndSave);
-  fPal.add(state, "hueJitter", 0, 1, 0.01).name("hueJitter").onChange(applyActiveAndSave);
-
-  fPal.add(state, "rainbowMix", 0, 1, 0.01).name("rainbowMix (spice)").onChange(applyActiveAndSave);
-  fPal.add(state, "hueScale", 0, 0.05, 0.001).name("hueScale").onChange(applyActiveAndSave);
-
-  fPal.addColor(state, "pal0").name("coreColor").onChange(applyActiveAndSave);
-  fPal.addColor(state, "pal1").name("midColor1").onChange(applyActiveAndSave);
-  fPal.addColor(state, "pal2").name("midColor2").onChange(applyActiveAndSave);
-  fPal.addColor(state, "pal3").name("outerColor").onChange(applyActiveAndSave);
-
-  fPal.add({ RandomPalette: () => { randomizePalette(state); applyActiveAndSave(); updateAllDisplays(gui); } }, "RandomPalette").name("Random Palette");
-
-  // Layer look folder
-  const fLook = gui.addFolder("Look (Realtime)");
-  fLook.add(state, "outerOpacity", 0, 2, 0.01).name("outerOpacity").onChange(applyActiveAndSave);
-  fLook.add(state, "coreOpacity", 0, 2, 0.01).name("coreOpacity").onChange(applyActiveAndSave);
-  fLook.add(state, "starsOpacity", 0, 2, 0.01).name("starsOpacity").onChange(applyActiveAndSave);
-
-  fLook.add(state, "outerSize", 0.5, 80, 0.1).name("outerBaseSize").onChange(applyActiveAndSave);
-  fLook.add(state, "coreSize", 0.5, 80, 0.1).name("coreBaseSize").onChange(applyActiveAndSave);
-  fLook.add(state, "starsSize", 0.5, 120, 0.1).name("starsBaseSize").onChange(applyActiveAndSave);
-
-  // Preset Manager (slots)
-  const fPreset = gui.addFolder("Preset Manager");
-
-  const presetState = {
-    slot: "(none)",
-    newSlotName: "MyPreset_01",
-    SaveSlot: () => {
-      const name = (presetState.newSlotName || "").trim();
-      if (!name) return alert("请输入 slot 名字");
-      saveSlot(name, snapshotActive(state));
-      presetState.slot = name;
-      refreshSlotDropdown();
-      alert(`Saved slot: ${name}`);
-    },
-    LoadSlot: () => {
-      const name = presetState.slot;
-      if (!name || name === "(none)") return alert("请选择 slot");
-      const p = loadSlot(name);
-      if (!p) return alert("slot 不存在");
-      // apply to active
-      applyToCluster(state.active, p);
-      // sync state from active cluster after applying
+  // Cluster manager
+  const fCluster = gui.addFolder("Cluster");
+  fCluster.add({ Add: () => {
+    const newId = nebulaSystem.addCluster({
+      x: 0, y: nebulaSystem.planeY, z: 0,
+      scale: 1,
+      preset: structuredCloneSafe(activeCluster().preset),
+    });
+    // refresh dropdown
+    gui.remove(activeCtrl);
+    activeCtrl = gui.add(state, "active", activeOptions()).name("Active Galaxy");
+    activeCtrl.onChange(() => {
+      nebulaSystem.setActive(state.active);
       pullStateFromActive();
       updateAllDisplays(gui);
-      // save as perGalaxy too
-      savePerGalaxy(state.active, p);
-      alert(`Loaded slot: ${name} -> ${state.active}`);
-    },
-    DeleteSlot: () => {
-      const name = presetState.slot;
-      if (!name || name === "(none)") return alert("请选择 slot");
-      if (!confirm(`Delete slot "${name}" ?`)) return;
-      deleteSlot(name);
-      presetState.slot = "(none)";
-      refreshSlotDropdown();
-    },
-    RenameSlot: () => {
-      const oldName = presetState.slot;
-      if (!oldName || oldName === "(none)") return alert("请选择 slot");
-      const newName = prompt("新的 slot 名字：", oldName);
-      if (!newName) return;
-      const ok = renameSlot(oldName, newName.trim());
-      if (!ok) return alert("重命名失败：新名字可能已存在");
-      presetState.slot = newName.trim();
-      refreshSlotDropdown();
-    },
-    ApplyToAll: () => {
-      const payload = snapshotActive(state);
-      for (const c of nebulaSystem.clusters) {
-        applyToCluster(c.id, payload);
-        savePerGalaxy(c.id, payload);
-      }
-      alert("Applied active preset to ALL galaxies ✅");
-    },
-    ClearAllSaved: () => {
-      if (!confirm("清空所有 localStorage 的 perGalaxy + slots？")) return;
-      writeStore({ perGalaxy: {}, slots: {} });
-      presetState.slot = "(none)";
-      refreshSlotDropdown();
-      alert("Cleared ✅");
-    },
-  };
+    });
 
-  let slotController = null;
-  function refreshSlotDropdown() {
-    const slots = listSlots();
-    const dict = { "(none)": "(none)" };
-    for (const s of slots) dict[s] = s;
-
-    if (slotController) {
-      fPreset.remove(slotController);
-      slotController = null;
-    }
-    slotController = fPreset.add(presetState, "slot", dict).name("Slot");
-  }
-  refreshSlotDropdown();
-
-  fPreset.add(presetState, "newSlotName").name("New Slot Name");
-  fPreset.add(presetState, "SaveSlot").name("Save Slot (Active)");
-  fPreset.add(presetState, "LoadSlot").name("Load Slot -> Active");
-  fPreset.add(presetState, "RenameSlot").name("Rename Slot");
-  fPreset.add(presetState, "DeleteSlot").name("Delete Slot");
-  fPreset.add(presetState, "ApplyToAll").name("Apply Active -> ALL");
-  fPreset.add(presetState, "ClearAllSaved").name("Clear ALL Saved");
-
-  // -------------------------
-  // Click picking
-  // -------------------------
-  const raycaster = new THREE.Raycaster();
-  raycaster.params.Points.threshold = 0.12; // easier picking
-  const mouse = new THREE.Vector2();
-  const pickables = getPickables();
-
-  let downX = 0,
-    downY = 0;
-  window.addEventListener("pointerdown", (e) => {
-    downX = e.clientX;
-    downY = e.clientY;
-  });
-  window.addEventListener("pointerup", (e) => {
-    const dx = e.clientX - downX;
-    const dy = e.clientY - downY;
-    // treat as click if very small movement
-    if (Math.sqrt(dx * dx + dy * dy) < 4) tryPickGalaxy(e);
-  });
-
-  function tryPickGalaxy(e) {
-    const rect = renderer.domElement.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width;
-    const y = (e.clientY - rect.top) / rect.height;
-
-    mouse.x = x * 2 - 1;
-    mouse.y = -(y * 2 - 1);
-
-    raycaster.setFromCamera(mouse, camera);
-    const hits = raycaster.intersectObjects(pickables, true);
-    if (!hits.length) return;
-
-    const id = hits[0].object.userData.galaxyId;
-    if (!id) return;
-
-    state.active = id;
+    state.active = newId;
+    nebulaSystem.setActive(newId);
     pullStateFromActive();
     updateAllDisplays(gui);
-  }
+  } }, "Add").name("Add Galaxy (Duplicate Active)");
 
-  // initial apply save (ensure store has an entry)
-  applyActiveAndSave();
+  fCluster.add({ Remove: () => {
+    if (nebulaSystem.clusters.length <= 1) return alert("至少保留一个星云");
+    const id = state.active;
+    if (!confirm(`Remove galaxy ${id}?`)) return;
+    nebulaSystem.removeCluster(id);
 
-  return {
-    gui,
-    state,
-    destroy: () => gui.destroy(),
-  };
+    // refresh dropdown
+    gui.remove(activeCtrl);
+    activeCtrl = gui.add(state, "active", activeOptions()).name("Active Galaxy");
+    activeCtrl.onChange(() => {
+      nebulaSystem.setActive(state.active);
+      pullStateFromActive();
+      updateAllDisplays(gui);
+    });
+
+    state.active = nebulaSystem.getActiveId();
+    nebulaSystem.setActive(state.active);
+    pullStateFromActive();
+    updateAllDisplays(gui);
+  } }, "Remove").name("Remove Active");
+
+  // Shape
+  const fShape = gui.addFolder("Shape (Rebuild)");
+  fShape.add(state, "arms", 1, 7, 1).name("arms").onChange(scheduleRebuild);
+  fShape.add(state, "gap", 0.0, 0.35, 0.005).name("armGap").onChange(scheduleRebuild);
+  fShape.add(state, "length", 0.5, 2.2, 0.01).name("armLength").onChange(scheduleRebuild);
+  fShape.add(state, "sizeScale", 0.35, 2.5, 0.01).name("galaxySize").onChange(scheduleRebuild);
+
+  // Transform
+  const fTf = gui.addFolder("Transform");
+  fTf.add(state, "posX", -10, 10, 0.01).name("x").onChange(applyTransformAndSave);
+  fTf.add(state, "posY", nebulaSystem.planeY - 2, nebulaSystem.planeY + 2, 0.01).name("y").onChange(applyTransformAndSave);
+  fTf.add(state, "posZ", -10, 10, 0.01).name("z").onChange(applyTransformAndSave);
+  fTf.add(state, "scale", 0.2, 3.5, 0.01).name("scale").onChange(applyTransformAndSave);
+
+  // Palette
+  const fPal = gui.addFolder("Palette (Radial Default)");
+  fPal.add(state, "palCount", 2, 4, 1).name("paletteCount").onChange(applyPaletteAndLookAndSave);
+  fPal.add(state, "colorMode", { RADIAL: 0, PATCH: 2 }).name("colorMode").onChange(applyPaletteAndLookAndSave);
+  fPal.add(state, "colorStrength", 0, 2, 0.01).name("colorStrength").onChange(applyPaletteAndLookAndSave);
+  fPal.add(state, "colorNoise", 0, 1, 0.01).name("colorNoise").onChange(applyPaletteAndLookAndSave);
+  fPal.add(state, "hueJitter", 0, 1, 0.01).name("hueJitter").onChange(applyPaletteAndLookAndSave);
+  fPal.add(state, "rainbowMix", 0, 1, 0.01).name("rainbowMix (spice)").onChange(applyPaletteAndLookAndSave);
+  fPal.add(state, "hueScale", 0, 0.05, 0.001).name("hueScale").onChange(applyPaletteAndLookAndSave);
+  fPal.addColor(state, "pal0").name("coreColor").onChange(applyPaletteAndLookAndSave);
+  fPal.addColor(state, "pal1").name("midColor1").onChange(applyPaletteAndLookAndSave);
+  fPal.addColor(state, "pal2").name("midColor2").onChange(applyPaletteAndLookAndSave);
+  fPal.addColor(state, "pal3").name("outerColor").onChange(applyPaletteAndLookAndSave);
+
+  // Look
+  const fLook = gui.addFolder("Look (Realtime)");
+  fLook.add(state, "outerOpacity", 0, 2, 0.01).name("outerOpacity").onChange(applyPaletteAndLookAndSave);
+  fLook.add(state, "coreOpacity", 0, 2, 0.01).name("coreOpacity").onChange(applyPaletteAndLookAndSave);
+  fLook.add(state, "starsOpacity", 0, 2, 0.01).name("starsOpacity").onChange(applyPaletteAndLookAndSave);
+  fLook.add(state, "outerSize", 0.5, 80, 0.1).name("outerBaseSize").onChange(applyPaletteAndLookAndSave);
+  fLook.add(state, "coreSize", 0.5, 80, 0.1).name("coreBaseSize").onChange(applyPaletteAndLookAndSave);
+  fLook.add(state, "starsSize", 0.5, 120, 0.1).name("starsBaseSize").onChange(applyPaletteAndLookAndSave);
+
+  // final: ensure perGalaxy saved
+  savePerGalaxy(state.active, snapshot());
+
+  return { gui, state, destroy: () => gui.destroy() };
 }
 
-// -------------------------
-// Utils
-// -------------------------
-function deepClone(obj) {
-  if (typeof structuredClone === "function") return structuredClone(obj);
-  return JSON.parse(JSON.stringify(obj));
-}
-
-function clamp(x, a, b) {
-  return Math.max(a, Math.min(b, x));
-}
-
+/* -------- utils -------- */
 function updateAllDisplays(gui) {
   gui.controllersRecursive().forEach((c) => c.updateDisplay());
 }
-
-// A few curated palettes (dreamy)
-const PALETTES = [
-  ["#ffffff", "#ffd1f2", "#ff77d7", "#6aa7ff"], // pink/blue
-  ["#ffffff", "#d9f7ff", "#7fe7ff", "#b9a7ff"], // cyan/lavender
-  ["#ffffff", "#fff1c8", "#ffd27a", "#ff72d8"], // gold/pink
-  ["#ffffff", "#efe6ff", "#c7b6ff", "#7fe7ff"], // violet/cyan
-  ["#ffffff", "#c9f8ff", "#9ff3ff", "#ff8fe6"], // mint/pink
-];
-
-function randomizePalette(state) {
-  const p = PALETTES[Math.floor(Math.random() * PALETTES.length)];
-  state.pal0 = p[0];
-  state.pal1 = p[1];
-  state.pal2 = p[2];
-  state.pal3 = p[3];
-
-  state.palCount = Math.random() < 0.5 ? 4 : 3;
-  state.colorMode = 0; // keep RADIAL default
-  state.colorStrength = 1.05 + Math.random() * 0.35;
-  state.colorNoise = 0.25 + Math.random() * 0.25;
-  state.hueJitter = 0.25 + Math.random() * 0.25;
-
-  // keep rainbow as spice
-  state.rainbowMix = 0.06 + Math.random() * 0.08;
-  state.hueScale = 0.010 + Math.random() * 0.010;
+function structuredCloneSafe(obj) {
+  if (typeof structuredClone === "function") return structuredClone(obj);
+  return JSON.parse(JSON.stringify(obj));
 }
