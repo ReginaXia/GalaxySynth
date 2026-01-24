@@ -109,6 +109,8 @@ const meteorSystem = createMeteorSystem({
 });
 
 window.__meteor = meteorSystem;
+console.log("meteor mesh", meteorSystem.mesh, meteorSystem.mesh.material);
+console.log("vert len", meteorVert.length, "frag len", meteorFrag.length);
 
 setupMeteorGUI(meteorSystem);
 
@@ -282,6 +284,7 @@ function tick() {
   move01 *= 0.9;
 
   composer.render();
+  
   requestAnimationFrame(tick);
 }
 tick();

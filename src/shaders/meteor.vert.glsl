@@ -1,6 +1,11 @@
 // src/shaders/meteor.vert.glsl
 // 注意：ShaderMaterial 会自动注入 attribute position/uv 等，所以这里不要重复声明！
 
+precision highp float;
+precision highp int;
+
+uniform float uTime;
+
 attribute vec3 aStart;
 attribute vec3 aDir;
 attribute float aSpeed;
@@ -9,7 +14,6 @@ attribute float aLife;
 attribute float aSeed;
 attribute float aHue;
 
-uniform float uTime;
 uniform vec3 uCamRight;
 uniform vec3 uCamUp;
 

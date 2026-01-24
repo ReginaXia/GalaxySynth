@@ -1,6 +1,10 @@
-precision mediump float;
+precision highp float;
+precision highp int;
 
 uniform float uTime;
+
+precision mediump float;
+
 
 uniform float uHeadSize;
 uniform float uHeadGlow;
