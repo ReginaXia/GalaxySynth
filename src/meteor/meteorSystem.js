@@ -38,12 +38,17 @@ export function createMeteorSystem({
     lifeMax: 1.4,
 
     // geometry look in shader space
-    tailLength: 1.4, // (world scale factor)
+    tailLength: 2.8, // (world scale factor)
     tailWidth: 0.18, // (world scale factor)
     headSize: 0.22, // UV radius control
     headGlow: 2.2, // glow intensity
     tailGlow: 1.2, // tail intensity
     tailFade: 2.2, // tail falloff
+
+    // --- GUI controls (requested) ---
+    strandCount: 12, // filament strands
+    spread: 0.90,    // tail scatter amount
+    
 
     // head shape
     headShape: 1, // 0=orb, 1=cross, 2=star5
@@ -66,12 +71,48 @@ export function createMeteorSystem({
     audioEnabled: true,
     audioGain: 0.7,
     audioCooldown: 0.10, // seconds
+
+    
+
   };
 
   // -------------------------
   // Instanced quad
   // -------------------------
-  const baseGeo = new THREE.PlaneGeometry(1, 1, 1, 1);
+  function makeCrossRibbonGeometry(layers = 3) {
+    // 一个plane = 2 tris = 6 verts（用非indexed更好加属性）
+    const plane = new THREE.PlaneGeometry(1, 1, 1, 1).toNonIndexed();
+    const pos0 = plane.attributes.position.array;
+    const uv0  = plane.attributes.uv.array;
+    const vCount0 = plane.attributes.position.count; // 6
+
+    const pos = new Float32Array(vCount0 * 3 * layers);
+    const uv  = new Float32Array(vCount0 * 2 * layers);
+    const aLayer = new Float32Array(vCount0 * layers);
+
+    for (let L = 0; L < layers; L++) {
+        for (let i = 0; i < vCount0; i++) {
+        pos[(L*vCount0 + i)*3 + 0] = pos0[i*3 + 0];
+        pos[(L*vCount0 + i)*3 + 1] = pos0[i*3 + 1];
+        pos[(L*vCount0 + i)*3 + 2] = pos0[i*3 + 2];
+
+        uv[(L*vCount0 + i)*2 + 0]  = uv0[i*2 + 0];
+        uv[(L*vCount0 + i)*2 + 1]  = uv0[i*2 + 1];
+
+        aLayer[L*vCount0 + i] = L; // 0,1,2
+        }
+    }
+
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+    g.setAttribute("aLayer", new THREE.BufferAttribute(aLayer, 1));
+    return g;
+    }
+
+    // 用三层交叉 ribbon
+    const baseGeo = makeCrossRibbonGeometry(3);
+
   const instGeo = new THREE.InstancedBufferGeometry().copy(baseGeo);
 
   // ✅ 关键：确保实例数 > 0（否则可能完全不画）
@@ -124,6 +165,9 @@ export function createMeteorSystem({
       uAuroraSpeed: { value: params.auroraSpeed },
       uSat: { value: params.sat },
       uVal: { value: params.val },
+      uStrandCount: { value: params.strandCount },
+      uSpread: { value: params.spread },
+
     },
   });
 
@@ -242,6 +286,9 @@ export function createMeteorSystem({
     mat.uniforms.uAuroraSpeed.value = params.auroraSpeed;
     mat.uniforms.uSat.value = params.sat;
     mat.uniforms.uVal.value = params.val;
+    mat.uniforms.uStrandCount.value = params.strandCount;
+    mat.uniforms.uSpread.value = params.spread;
+
 
     if (!params.enabled) return;
 

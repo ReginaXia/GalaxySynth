@@ -36,7 +36,9 @@ export function setupMeteorGUI(meteorSystem) {
   fMove.add(p, "lifeMax", 0.2, 4.0, 0.01).name("lifeMax").onChange(persist);
 
   const fLook = gui.addFolder("Look");
-  fLook.add(p, "tailLength", 0.2, 3.5, 0.01).name("tailLength").onChange(persist);
+  fLook.add(p, "tailLength", 0.2, 20, 0.01).name("tailLength").onChange(persist);
+  fLook.add(p, "spread", 0.01, 1.2, 0.02).name("spread").onChange(persist);
+  fLook.add(p, "strandCount", 4, 16, 1).name("strandCount").onChange(persist);
   fLook.add(p, "tailWidth", 0.02, 0.6, 0.005).name("tailWidth").onChange(persist);
   fLook.add(p, "tailGlow", 0.0, 3.0, 0.01).name("tailGlow").onChange(persist);
   fLook.add(p, "tailFade", 0.5, 6.0, 0.01).name("tailFade").onChange(persist);

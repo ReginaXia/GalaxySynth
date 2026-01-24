@@ -1,10 +1,12 @@
 // src/shaders/meteor.vert.glsl
-// ShaderMaterial 会自动注入 attribute position/uv，所以不要重复声明它们。
-
 precision highp float;
 precision highp int;
 
 uniform float uTime;
+
+uniform float uTailLength;   // GUI: tailLength
+uniform float uTailWidth;    // GUI: tailWidth
+
 
 attribute vec3  aStart;
 attribute vec3  aDir;
@@ -14,54 +16,58 @@ attribute float aLife;
 attribute float aSeed;
 attribute float aHue;
 
-uniform vec3 uCamRight;
-uniform vec3 uCamUp;
-
-uniform float uTailLength;
-uniform float uTailWidth;
-
 varying vec2  vUv;
 varying float vAge01;
 varying float vSeed;
 varying float vHue;
 varying float vAlive;
 
-void main() {
-  vUv   = uv;
-  vSeed = aSeed;
-  vHue  = aHue;
+mat3 makeBasis(vec3 forward){
+  vec3 up0 = vec3(0.0, 1.0, 0.0);
+  if (abs(dot(forward, up0)) > 0.95) up0 = vec3(1.0, 0.0, 0.0);
+  vec3 right = normalize(cross(up0, forward));
+  vec3 up    = normalize(cross(forward, right));
+  return mat3(right, up, forward);
+}
 
-  float age   = uTime - aBirth;
-  float age01 = clamp(age / max(0.001, aLife), 0.0, 1.0);
+void main(){
+  float age = uTime - aBirth;
+  float age01 = clamp(age / max(0.0001, aLife), 0.0, 1.0);
+  float alive = step(0.0, age) * step(age, aLife);
+
   vAge01 = age01;
+  vAlive = alive;
+  vSeed  = aSeed;
+  vHue   = aHue;
 
-  // 未出生隐藏
-  vAlive = step(0.0, age);
+  vec3 fwd = normalize(aDir);
+  mat3 B = makeBasis(fwd);
+  vec3 right = B[0];
+  vec3 up    = B[1];
+  vec3 forward = B[2];
 
-  // 头部世界位置
-  vec3 head = aStart + aDir * (age * aSpeed);
+  // 中心沿着方向飞行
+  vec3 center = aStart + forward * (aSpeed * age);
 
-  // uv.x: 0尾 -> 1头
-  float x = uv.x;
+  // ribbon 语义：position.x 控制长度，position.y 控制宽度
+  float uLen = clamp(position.x + 0.5, 0.0, 1.0); // 0=尾, 1=头
 
-  // 沿着方向：头在 0，尾在 -uTailLength
-  float along = (x - 1.0) * uTailLength;
+  // 尾部更宽一点（更像参考图喷散）
+  float widen = mix(1.25, 0.65, pow(uLen, 0.8)); // 尾(0)更宽，头(1)更窄
+  float w = uTailWidth * widen;
 
-  // ✅ 关键：做“流线锥形” —— 头宽尾窄
-  // u: 0(头) -> 1(尾)
-  float u = clamp(1.0 - x, 0.0, 1.0);
+  vec3 lengthOffset = forward * (position.x * uTailLength);
+  vec3 widthOffset  = right   * (position.y * w);
 
-  // 头部宽、尾部窄（尾部不要为 0，否则会出现极细锯齿）
-  float widthScale = mix(1.25, 0.08, pow(u, 1.15));
+  // 轻微扰动（让尾巴不那么“激光直”）
+  float wobble = sin(uTime * 1.4 + aSeed * 10.0 + uLen * 9.0) * 0.06;
+  vec3 wobbleOffset = up * (w * wobble);
 
-  // ✅ 关键：宽度方向用 uCamRight（别用 uCamUp），才不会像“竖条长方形”
-  float across = (uv.y - 0.5) * uTailWidth * widthScale;
+  vec3 worldPos = center + lengthOffset + widthOffset + wobbleOffset;
 
-  // 少量厚度（可选）：给一点点 uCamUp，让尾巴更像“气体厚度”
-  float thickness = (uv.y - 0.5) * uTailWidth * 0.04 * (1.0 - u);
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(worldPos, 1.0);
 
-  vec3 offset = aDir * along + uCamRight * across + uCamUp * thickness;
-  vec3 worldPos = head + offset;
-
-  gl_Position = projectionMatrix * viewMatrix * vec4(worldPos, 1.0);
+  // ✅ 给 frag：vUv.y 必须代表“横向”，0.5 是中心线
+  // PlaneGeometry 的 uv.y 正好对应宽度方向：0..1
+  vUv = vec2(uLen, uv.y);
 }
