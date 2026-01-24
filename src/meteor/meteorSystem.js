@@ -2,66 +2,54 @@
 import * as THREE from "three";
 
 /**
- * Meteor System
- * - Instanced billboard quads (each instance = one meteor)
- * - Random spawn and fly across
- * - Shader draws head glow/star + aurora shifting tail
- * - Optional onSpawn callback for audio
+ * New Meteor System (Ball + Gas Tail)
+ * - Head: glowing sphere
+ * - Tail: Points particle pool using /textures/meteor.png
+ * - GUI controls: tailLength, headGlow, spread, strandCount
  */
 export function createMeteorSystem({
   scene,
   camera,
   renderer,
-  streakVert,
-  streakFrag,
+  // keep signature compatible but no longer required:
+  streakVert = "",
+  streakFrag = "",
   planeY = 0.0,
   onSpawn = null,
 }) {
   const root = new THREE.Group();
   scene.add(root);
 
-  const maxMeteors = 24;
-
   // -------------------------
   // Parameters (GUI will mutate these)
   // -------------------------
+  const maxMeteors = 24;
+
   const params = {
     enabled: true,
 
     maxMeteors,
-    spawnRate: 0.35, // per second (平均每秒多少条)
+    spawnRate: 0.35, // per second
 
-    // movement
+    // motion
     speedMin: 4.0,
     speedMax: 9.0,
     lifeMin: 0.7,
     lifeMax: 1.4,
 
-    // geometry look in shader space
-    tailLength: 2.8, // (world scale factor)
-    tailWidth: 0.18, // (world scale factor)
-    headSize: 0.22, // UV radius control
-    headGlow: 2.2, // glow intensity
-    tailGlow: 1.2, // tail intensity
-    tailFade: 2.2, // tail falloff
+    // look (GUI targets)
+    tailLength: 3.2,     // "visual length" (maps to tail life)
+    headGlow: 3.2,       // head brightness multiplier
+    spread: 0.85,        // tail spread (0..1.2)
+    strandCount: 12,     // we reinterpret as "emit density" (4..16)
 
-    // --- GUI controls (requested) ---
-    strandCount: 12, // filament strands
-    spread: 0.90,    // tail scatter amount
-    
-
-    // head shape
-    headShape: 1, // 0=orb, 1=cross, 2=star5
-    shapeMix: 0.85, // blend between orb & shape
-    starSharpness: 2.0, // shape crisp
-
-    // color / aurora
-    baseHue: 0.62,
-    hueRange: 0.12,
-    auroraAmount: 0.75,
-    auroraSpeed: 0.55,
-    sat: 0.85,
-    val: 1.0,
+    // extra look
+    headSize: 0.09,      // sphere radius
+    tailSize: 0.18,      // base particle size (world-ish)
+    tailDrag: 1.7,       // how fast tail slows down
+    tailWobble: 1.6,     // flame-like wobble
+    tailGlow: 1.6,       // tail color intensity
+    baseColor: "#ff4fd8",// default pink
 
     // placement
     areaRadius: 7.5,
@@ -70,120 +58,118 @@ export function createMeteorSystem({
     // audio
     audioEnabled: true,
     audioGain: 0.7,
-    audioCooldown: 0.10, // seconds
-
-    
-
+    audioCooldown: 0.10,
   };
 
   // -------------------------
-  // Instanced quad
+  // Meteor state
   // -------------------------
-  function makeCrossRibbonGeometry(layers = 3) {
-    // 一个plane = 2 tris = 6 verts（用非indexed更好加属性）
-    const plane = new THREE.PlaneGeometry(1, 1, 1, 1).toNonIndexed();
-    const pos0 = plane.attributes.position.array;
-    const uv0  = plane.attributes.uv.array;
-    const vCount0 = plane.attributes.position.count; // 6
+  const meteors = new Array(maxMeteors).fill(0).map(() => ({
+    alive: false,
+    start: new THREE.Vector3(),
+    dir: new THREE.Vector3(1, 0, 0),
+    speed: 6,
+    birth: 0,
+    life: 1,
+    seed: Math.random(),
+    hue: 0.9,
+    head: null, // mesh
+  }));
 
-    const pos = new Float32Array(vCount0 * 3 * layers);
-    const uv  = new Float32Array(vCount0 * 2 * layers);
-    const aLayer = new Float32Array(vCount0 * layers);
+  // -------------------------
+  // Head meshes (pool)
+  // -------------------------
+  const headGeo = new THREE.SphereGeometry(1, 12, 12);
+  const headMat = new THREE.MeshBasicMaterial({
+    color: new THREE.Color(params.baseColor),
+    transparent: true,
+    opacity: 1.0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    depthTest: false,
+  });
 
-    for (let L = 0; L < layers; L++) {
-        for (let i = 0; i < vCount0; i++) {
-        pos[(L*vCount0 + i)*3 + 0] = pos0[i*3 + 0];
-        pos[(L*vCount0 + i)*3 + 1] = pos0[i*3 + 1];
-        pos[(L*vCount0 + i)*3 + 2] = pos0[i*3 + 2];
+  for (let i = 0; i < maxMeteors; i++) {
+    const m = new THREE.Mesh(headGeo, headMat.clone());
+    m.visible = false;
+    m.renderOrder = 9998;
+    root.add(m);
+    meteors[i].head = m;
+  }
 
-        uv[(L*vCount0 + i)*2 + 0]  = uv0[i*2 + 0];
-        uv[(L*vCount0 + i)*2 + 1]  = uv0[i*2 + 1];
+  // -------------------------
+  // Tail particles (Points pool)
+  // -------------------------
+  const MAX_P = 6000; // tail particle budget
+  const pos = new Float32Array(MAX_P * 3);
+  const col = new Float32Array(MAX_P * 3);
+  const siz = new Float32Array(MAX_P);
+  const vel = new Float32Array(MAX_P * 3);
+  const birth = new Float32Array(MAX_P);
+  const life = new Float32Array(MAX_P);
+  const seed = new Float32Array(MAX_P);
 
-        aLayer[L*vCount0 + i] = L; // 0,1,2
-        }
-    }
+  // init all dead
+  for (let i = 0; i < MAX_P; i++) {
+    birth[i] = -9999;
+    life[i] = 0;
+    seed[i] = Math.random();
+    siz[i] = 0;
+    col[i * 3 + 0] = 1;
+    col[i * 3 + 1] = 0.3;
+    col[i * 3 + 2] = 0.85;
+  }
 
-    const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-    g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
-    g.setAttribute("aLayer", new THREE.BufferAttribute(aLayer, 1));
-    return g;
-    }
+  const tailGeo = new THREE.BufferGeometry();
+  tailGeo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  tailGeo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  tailGeo.setAttribute("aSize", new THREE.BufferAttribute(siz, 1)); // custom size
 
-    // 用三层交叉 ribbon
-    const baseGeo = makeCrossRibbonGeometry(3);
+  // texture: from public/textures/meteor.png => served at /textures/meteor.png
+  const tex = new THREE.TextureLoader().load("/textures/meteor.png");
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
 
-  const instGeo = new THREE.InstancedBufferGeometry().copy(baseGeo);
-
-  // ✅ 关键：确保实例数 > 0（否则可能完全不画）
-  instGeo.instanceCount = maxMeteors;
-
-  const aStart = new THREE.InstancedBufferAttribute(new Float32Array(maxMeteors * 3), 3);
-  const aDir = new THREE.InstancedBufferAttribute(new Float32Array(maxMeteors * 3), 3);
-  const aSpeed = new THREE.InstancedBufferAttribute(new Float32Array(maxMeteors), 1);
-  const aBirth = new THREE.InstancedBufferAttribute(new Float32Array(maxMeteors), 1);
-  const aLife = new THREE.InstancedBufferAttribute(new Float32Array(maxMeteors), 1);
-  const aSeed = new THREE.InstancedBufferAttribute(new Float32Array(maxMeteors), 1);
-  const aHue = new THREE.InstancedBufferAttribute(new Float32Array(maxMeteors), 1);
-
-  instGeo.setAttribute("aStart", aStart);
-  instGeo.setAttribute("aDir", aDir);
-  instGeo.setAttribute("aSpeed", aSpeed);
-  instGeo.setAttribute("aBirth", aBirth);
-  instGeo.setAttribute("aLife", aLife);
-  instGeo.setAttribute("aSeed", aSeed);
-  instGeo.setAttribute("aHue", aHue);
-
-  const mat = new THREE.ShaderMaterial({
+  const tailMat = new THREE.PointsMaterial({
+    map: tex,
     transparent: true,
     depthWrite: false,
     depthTest: false,
-    side: THREE.DoubleSide,
+    vertexColors: true,
     blending: THREE.AdditiveBlending,
-    vertexShader: streakVert,
-    fragmentShader: streakFrag,
-    uniforms: {
-      uTime: { value: 0 },
-      uCamRight: { value: new THREE.Vector3(1, 0, 0) },
-      uCamUp: { value: new THREE.Vector3(0, 1, 0) },
-
-      uTailLength: { value: params.tailLength },
-      uTailWidth: { value: params.tailWidth },
-
-      uHeadSize: { value: params.headSize },
-      uHeadGlow: { value: params.headGlow },
-      uTailGlow: { value: params.tailGlow },
-      uTailFade: { value: params.tailFade },
-
-      uHeadShape: { value: params.headShape },
-      uShapeMix: { value: params.shapeMix },
-      uStarSharpness: { value: params.starSharpness },
-
-      uBaseHue: { value: params.baseHue },
-      uHueRange: { value: params.hueRange },
-      uAuroraAmount: { value: params.auroraAmount },
-      uAuroraSpeed: { value: params.auroraSpeed },
-      uSat: { value: params.sat },
-      uVal: { value: params.val },
-      uStrandCount: { value: params.strandCount },
-      uSpread: { value: params.spread },
-
-    },
+    size: 1.0, // will be overridden in shader via onBeforeCompile
+    sizeAttenuation: true,
+    opacity: 1.0,
   });
 
-  const mesh = new THREE.Mesh(instGeo, mat);
-  mesh.frustumCulled = false;
-  mesh.renderOrder = 9999;
-  root.add(mesh);
+  // Make PointsMaterial support per-particle size attribute
+  tailMat.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        "uniform float size;",
+        "uniform float size;\nattribute float aSize;"
+      )
+      .replace(
+        "gl_PointSize = size;",
+        "gl_PointSize = size * aSize;"
+      );
+
+    tailMat.userData.shader = shader;
+  };
+
+  const tailPoints = new THREE.Points(tailGeo, tailMat);
+  tailPoints.frustumCulled = false;
+  tailPoints.renderOrder = 9997;
+  root.add(tailPoints);
+
+  let pCursor = 0;
 
   // -------------------------
-  // Spawn state
+  // Spawn helpers
   // -------------------------
-  const alive = new Array(maxMeteors).fill(false);
   let t = 0;
   let lastSpawnT = -999;
-
-  // ✅ 用 dt 累积生成：spawnRate=每秒平均多少条
   let lastUpdateT = 0;
   let spawnAccum = 0;
 
@@ -196,10 +182,32 @@ export function createMeteorSystem({
     return { x: Math.cos(a), z: Math.sin(a) };
   }
 
-  function spawn(i, now) {
+  function wrap01(x) {
+    x = x % 1;
+    if (x < 0) x += 1;
+    return x;
+  }
+
+  function hsv2rgb(h, s, v) {
+    // simple HSV -> RGB
+    const i = Math.floor(h * 6);
+    const f = h * 6 - i;
+    const p = v * (1 - s);
+    const q = v * (1 - f * s);
+    const tt = v * (1 - (1 - f) * s);
+    switch (i % 6) {
+      case 0: return [v, tt, p];
+      case 1: return [q, v, p];
+      case 2: return [p, v, tt];
+      case 3: return [p, q, v];
+      case 4: return [tt, p, v];
+      case 5: return [v, p, q];
+    }
+  }
+
+  function spawnMeteor(i, now) {
     const R = params.areaRadius;
 
-    // 让流星大概率斜着扫过（更像真实“划过”）
     const baseAng =
       rand(-Math.PI * 0.15, Math.PI * 0.15) +
       (Math.random() < 0.5 ? Math.PI * 0.75 : Math.PI * 0.25);
@@ -207,140 +215,222 @@ export function createMeteorSystem({
     const dx = Math.cos(baseAng);
     const dz = Math.sin(baseAng);
 
-    // start somewhere outside-ish so it crosses view
     const startSide = randomUnit2();
     const sx = startSide.x * R * rand(0.85, 1.25) + rand(-1.2, 1.2);
     const sz = startSide.z * R * rand(0.85, 1.25) + rand(-1.2, 1.2);
     const sy = params.planeY + rand(0.2, 1.5);
 
-    aStart.setXYZ(i, sx, sy, sz);
-    aDir.setXYZ(i, dx, 0.0, dz);
-
     const speed = rand(params.speedMin, params.speedMax);
-    const life = rand(params.lifeMin, params.lifeMax);
+    const lifeT = rand(params.lifeMin, params.lifeMax);
 
-    aSpeed.setX(i, speed);
-    aBirth.setX(i, now);
-    aLife.setX(i, life);
-    aSeed.setX(i, Math.random());
+    const m = meteors[i];
+    m.alive = true;
+    m.start.set(sx, sy, sz);
+    m.dir.set(dx, 0, dz).normalize();
+    m.speed = speed;
+    m.birth = now;
+    m.life = lifeT;
+    m.seed = Math.random();
 
-    const h = wrap01(params.baseHue + rand(-params.hueRange, params.hueRange));
-    aHue.setX(i, h);
+    // slight hue random around pink (optional)
+    m.hue = wrap01(0.92 + rand(-0.06, 0.06));
 
-    alive[i] = true;
-
-    aStart.needsUpdate = true;
-    aDir.needsUpdate = true;
-    aSpeed.needsUpdate = true;
-    aBirth.needsUpdate = true;
-    aLife.needsUpdate = true;
-    aSeed.needsUpdate = true;
-    aHue.needsUpdate = true;
+    m.head.visible = true;
+    m.head.scale.setScalar(params.headSize);
+    m.head.material.color.set(params.baseColor);
+    m.head.material.opacity = 1.0;
 
     // audio
     if (params.audioEnabled && onSpawn && now - lastSpawnT > params.audioCooldown) {
       lastSpawnT = now;
-      onSpawn({ hue: h, gain: params.audioGain, speed, life });
+      onSpawn({ hue: m.hue, gain: params.audioGain, speed, life: lifeT });
     }
   }
 
-  // 初始先丢几条（避免你打开页面啥都看不到）
+  // initial burst so you see something
   for (let i = 0; i < Math.min(6, maxMeteors); i++) {
-    spawn(i, 0);
-    aBirth.setX(i, -rand(0, 1.2));
-    aBirth.needsUpdate = true;
+    spawnMeteor(i, 0);
+    meteors[i].birth = -rand(0, 1.2);
+  }
+
+  function emitTail(worldPos, dir, meteorHue, now, dt) {
+    // density controlled by strandCount
+    const emitPerSec = THREE.MathUtils.lerp(60, 260, (params.strandCount - 4) / 12);
+    const emitN = Math.max(1, Math.floor(emitPerSec * dt));
+
+    // tail life maps from tailLength (visual)
+    const tailLife = THREE.MathUtils.clamp(params.tailLength * 0.22, 0.18, 1.4);
+
+    for (let n = 0; n < emitN; n++) {
+      const i = (pCursor++) % MAX_P;
+
+      // spawn position with tiny jitter (so it doesn't look like a single line)
+      const jx = (Math.random() - 0.5) * 0.06 * params.spread;
+      const jy = (Math.random() - 0.5) * 0.06 * params.spread;
+      const jz = (Math.random() - 0.5) * 0.06 * params.spread;
+
+      pos[i * 3 + 0] = worldPos.x + jx;
+      pos[i * 3 + 1] = worldPos.y + jy;
+      pos[i * 3 + 2] = worldPos.z + jz;
+
+      // velocity: mainly backward + cone spread
+      const back = new THREE.Vector3().copy(dir).multiplyScalar(-1);
+      const side = new THREE.Vector3(back.z, 0, -back.x).normalize();
+      const up = new THREE.Vector3(0, 1, 0);
+
+      const spread = THREE.MathUtils.clamp(params.spread, 0.0, 1.2);
+      const cone = spread * 0.9;
+
+      const sv = (Math.random() - 0.5) * cone;
+      const uvv = (Math.random() - 0.5) * cone * 0.7;
+
+      const v = back.multiplyScalar(THREE.MathUtils.lerp(1.6, 3.2, Math.random()))
+        .addScaledVector(side, sv)
+        .addScaledVector(up, uvv);
+
+      vel[i * 3 + 0] = v.x;
+      vel[i * 3 + 1] = v.y;
+      vel[i * 3 + 2] = v.z;
+
+      birth[i] = now;
+      life[i] = tailLife * THREE.MathUtils.lerp(0.75, 1.25, Math.random());
+
+      // size grows with life (gas expands)
+      const base = params.tailSize;
+      siz[i] = base * THREE.MathUtils.lerp(0.7, 1.25, Math.random());
+
+      // color: default pink + slight hue variation
+      const [r, g, b] = hsv2rgb(meteorHue, 0.65, 1.0);
+      col[i * 3 + 0] = r * params.tailGlow;
+      col[i * 3 + 1] = g * params.tailGlow;
+      col[i * 3 + 2] = b * params.tailGlow;
+
+      seed[i] = Math.random();
+    }
   }
 
   // -------------------------
   // Update
   // -------------------------
-  const camRight = new THREE.Vector3();
-  const camUp = new THREE.Vector3();
-
   function update(now) {
     t = now;
-    mat.uniforms.uTime.value = t;
 
-    // camera basis (for billboard)
-    camera.updateMatrixWorld();
-    camRight.setFromMatrixColumn(camera.matrixWorld, 0).normalize();
-    camUp.setFromMatrixColumn(camera.matrixWorld, 1).normalize();
-    mat.uniforms.uCamRight.value.copy(camRight);
-    mat.uniforms.uCamUp.value.copy(camUp);
-
-    // push params to uniforms (so GUI real-time)
-    mat.uniforms.uTailLength.value = params.tailLength;
-    mat.uniforms.uTailWidth.value = params.tailWidth;
-    mat.uniforms.uHeadSize.value = params.headSize;
-    mat.uniforms.uHeadGlow.value = params.headGlow;
-    mat.uniforms.uTailGlow.value = params.tailGlow;
-    mat.uniforms.uTailFade.value = params.tailFade;
-
-    mat.uniforms.uHeadShape.value = params.headShape;
-    mat.uniforms.uShapeMix.value = params.shapeMix;
-    mat.uniforms.uStarSharpness.value = params.starSharpness;
-
-    mat.uniforms.uBaseHue.value = params.baseHue;
-    mat.uniforms.uHueRange.value = params.hueRange;
-    mat.uniforms.uAuroraAmount.value = params.auroraAmount;
-    mat.uniforms.uAuroraSpeed.value = params.auroraSpeed;
-    mat.uniforms.uSat.value = params.sat;
-    mat.uniforms.uVal.value = params.val;
-    mat.uniforms.uStrandCount.value = params.strandCount;
-    mat.uniforms.uSpread.value = params.spread;
-
-
-    if (!params.enabled) return;
-
-    // ✅ dt spawn（稳定、不吃帧率）
-    const dt = Math.min(0.05, Math.max(0, t - lastUpdateT)); // clamp 防止切回标签页爆发
+    // dt
+    const dt = Math.min(0.05, Math.max(0, t - lastUpdateT));
     lastUpdateT = t;
 
-    spawnAccum += params.spawnRate * dt;
-
-    // 每累计到 1，就生成一条（可能一次生成多条）
-    while (spawnAccum >= 1.0) {
-      spawnAccum -= 1.0;
-
-      // 找一个可用槽位
-      for (let i = 0; i < maxMeteors; i++) {
-        const birth = aBirth.getX(i);
-        const life = aLife.getX(i);
-        const age = t - birth;
-        if (!alive[i] || age > life + 0.15) {
-          spawn(i, t);
-          break;
+    // spawn
+    if (!params.enabled) {
+      // still update tail fade-out if disabled
+    } else {
+      spawnAccum += params.spawnRate * dt;
+      while (spawnAccum >= 1.0) {
+        spawnAccum -= 1.0;
+        for (let i = 0; i < maxMeteors; i++) {
+          const m = meteors[i];
+          const age = t - m.birth;
+          if (!m.alive || age > m.life + 0.15) {
+            spawnMeteor(i, t);
+            break;
+          }
         }
       }
     }
 
-    // mark dead
+    // update meteors + emit tail
     for (let i = 0; i < maxMeteors; i++) {
-      const birth = aBirth.getX(i);
-      const life = aLife.getX(i);
-      if (alive[i] && t - birth > life + 0.25) alive[i] = false;
+      const m = meteors[i];
+      const age = t - m.birth;
+
+      if (!m.alive || age < 0) continue;
+
+      if (age > m.life) {
+        m.alive = false;
+        m.head.visible = false;
+        continue;
+      }
+
+      // head position
+      const headPos = new THREE.Vector3()
+        .copy(m.start)
+        .addScaledVector(m.dir, m.speed * age);
+
+      m.head.position.copy(headPos);
+      m.head.scale.setScalar(params.headSize);
+
+      // head brightness (via opacity+color)
+      // keep color pink but boost intensity by multiplying material color
+      const base = new THREE.Color(params.baseColor);
+      base.multiplyScalar(params.headGlow);
+      m.head.material.color.copy(base);
+
+      // emit tail particles
+      if (params.enabled) emitTail(headPos, m.dir, m.hue, t, dt);
     }
+
+    // update particles (cpu)
+    // flame-like wobble + drag + fade
+    const drag = params.tailDrag;
+    const wob = params.tailWobble;
+
+    for (let i = 0; i < MAX_P; i++) {
+      const a = t - birth[i];
+      const L = life[i];
+      if (a < 0 || a > L) {
+        // make fully transparent by shrinking size
+        siz[i] = 0.0;
+        continue;
+      }
+
+      const k = a / Math.max(1e-5, L); // 0..1
+      const fade = (1.0 - k);
+      const fade2 = fade * fade;
+
+      // integrate velocity
+      pos[i * 3 + 0] += vel[i * 3 + 0] * dt;
+      pos[i * 3 + 1] += vel[i * 3 + 1] * dt;
+      pos[i * 3 + 2] += vel[i * 3 + 2] * dt;
+
+      // drag
+      const damp = Math.exp(-drag * dt);
+      vel[i * 3 + 0] *= damp;
+      vel[i * 3 + 1] *= damp;
+      vel[i * 3 + 2] *= damp;
+
+      // wobble: swirl sideways a bit (gas flame)
+      const s = seed[i];
+      const w = Math.sin(t * (2.2 + s * 2.0) + s * 10.0) * wob * 0.015;
+      pos[i * 3 + 0] += w;
+      pos[i * 3 + 2] -= w * 0.8;
+
+      // size expands over life
+      const grow = THREE.MathUtils.lerp(0.85, 1.9, 1.0 - fade2);
+      siz[i] = Math.max(0.0, params.tailSize * grow * fade2);
+
+      // color fades with life (multiply)
+      col[i * 3 + 0] *= 0.995; // keep stable
+      col[i * 3 + 1] *= 0.995;
+      col[i * 3 + 2] *= 0.995;
+
+      // alpha control via size shrink; PointsMaterial opacity stays 1
+    }
+
+    tailGeo.attributes.position.needsUpdate = true;
+    tailGeo.attributes.color.needsUpdate = true;
+    tailGeo.attributes.aSize.needsUpdate = true;
   }
 
-  // ✅ 给 GUI/调试用：手动爆发几条（确认“能画出来”）
   function burst(n = 3) {
     let spawned = 0;
-    for (let k = 0; k < maxMeteors && spawned < n; k++) {
-      const birth = aBirth.getX(k);
-      const life = aLife.getX(k);
-      const age = t - birth;
-      if (!alive[k] || age > life + 0.15) {
-        spawn(k, t);
+    for (let i = 0; i < maxMeteors && spawned < n; i++) {
+      const m = meteors[i];
+      const age = t - m.birth;
+      if (!m.alive || age > m.life + 0.15) {
+        spawnMeteor(i, t);
         spawned++;
       }
     }
   }
 
-  return { root, mesh, params, update, burst };
-}
-
-function wrap01(x) {
-  x = x % 1;
-  if (x < 0) x += 1;
-  return x;
+  return { root, params, update, burst };
 }

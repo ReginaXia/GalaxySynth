@@ -109,8 +109,11 @@ const meteorSystem = createMeteorSystem({
 });
 
 window.__meteor = meteorSystem;
-console.log("meteor mesh", meteorSystem.mesh, meteorSystem.mesh.material);
+
+// 新系统没有 mesh（旧系统才有 instanced quad mesh）
+console.log("meteor system", meteorSystem);
 console.log("vert len", meteorVert.length, "frag len", meteorFrag.length);
+
 
 setupMeteorGUI(meteorSystem);
 

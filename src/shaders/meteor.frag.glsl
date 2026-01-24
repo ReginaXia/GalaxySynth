@@ -108,9 +108,6 @@ void main(){
   float core  = hardLine(av, wCore, 6.0) * lenFadeCore;
   vec3 coreCol = mix(vec3(1.0), hsv2rgb(vec3(hBase, 0.18, val)), 0.35);
 
-  // ==== 2) 关键：锥体多丝缕（明显“放射性”线条）====
-  // 锥体展开：尾部更开
-  float spread = mix(0.015, uSpread, pow(u, 0.92));
 
   // 丝缕更细、更硬
   float fw = mix(0.0045, 0.018, u);
