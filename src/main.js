@@ -1,8 +1,11 @@
 // src/main.js
 import * as THREE from "three";
+import GUI from "lil-gui";
+
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { setupGalaxyGUI } from "./ui/galaxyGui.js";
 
 import { initAudioOnFirstGesture, triggerOnMove } from "./audio.js";
 import { createNebulaSystem } from "./nebula/nebulaSystem.js";
@@ -22,8 +25,6 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-// 更“干净利落”的对比（别太仙雾）
-// 你想更锐更亮：把 exposure 往上加一点点（1.05~1.2）
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 
@@ -33,11 +34,9 @@ document.body.appendChild(renderer.domElement);
 // Scene / Camera
 // -------------------------------------
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x000000); // ✅ 黑底
+scene.background = new THREE.Color(0x000000);
 
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.05, 2000);
-
-// 不是纯俯视：更像“俯冲观察”，滚轮推近会更像进入星云
 camera.position.set(0, 6.5, 8.5);
 camera.lookAt(0, 0, 0);
 
@@ -56,9 +55,9 @@ composer.addPass(new RenderPass(scene, camera));
 
 const bloom = new UnrealBloomPass(
   new THREE.Vector2(window.innerWidth, window.innerHeight),
-  0.55, // strength：亮点有光晕
-  0.65, // radius：柔
-  0.22  // threshold：只让“亮星/亮边”触发，避免整团泛白
+  0.55,
+  0.65,
+  0.22
 );
 composer.addPass(bloom);
 
@@ -69,7 +68,7 @@ const raycaster = new THREE.Raycaster();
 const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.0);
 const hitPoint = new THREE.Vector3();
 
-// 鼠标 NDC
+// 鼠标 NDC（用于星空/streak）
 const pointer = new THREE.Vector2(0, 0);
 window.addEventListener("pointermove", (e) => {
   pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
@@ -94,21 +93,39 @@ const nebulaSystem = createNebulaSystem({
   scene,
   radiusWorld: 7.0,
   planeY: 0.0,
-  starTexture, // ✅ 传进去：点会更“闪亮+细腻”
+  starTexture,
 });
 
-// 拖拽旋转整个星云世界（可选）
-// 你想“360旋转看俯视角”就是这个
+setupGalaxyGUI({ camera, renderer, nebulaSystem });
+
+// -------------------------------------
+// Drag rotate nebula world
+// -------------------------------------
 let isDragging = false;
 let lastX = 0;
 let lastY = 0;
+
+let downX = 0;
+let downY = 0;
 
 window.addEventListener("pointerdown", (e) => {
   isDragging = true;
   lastX = e.clientX;
   lastY = e.clientY;
+  downX = e.clientX;
+  downY = e.clientY;
 });
-window.addEventListener("pointerup", () => (isDragging = false));
+
+window.addEventListener("pointerup", (e) => {
+  isDragging = false;
+
+  // ✅ 点击选中：移动距离小才当 click
+  const dx = e.clientX - downX;
+  const dy = e.clientY - downY;
+  const moved = Math.sqrt(dx * dx + dy * dy);
+  if (moved < 4) tryPickGalaxy(e);
+});
+
 window.addEventListener("pointermove", (e) => {
   if (!isDragging) return;
   const dx = e.clientX - lastX;
@@ -118,15 +135,11 @@ window.addEventListener("pointermove", (e) => {
 
   nebulaSystem.root.rotation.y += dx * 0.005;
   nebulaSystem.root.rotation.x += dy * 0.005;
-
-  // 防止翻过头（你也可以删掉这两行，完全自由旋转）
   nebulaSystem.root.rotation.x = THREE.MathUtils.clamp(nebulaSystem.root.rotation.x, -1.25, 1.25);
 });
 
 // -------------------------------------
-// Zoom into nebula (wheel)
-// - 滚轮会改变相机距离
-// - 同时让相机更倾向于看向鼠标击中的点（更像“进入星云内部”）
+// Zoom (wheel)
 // -------------------------------------
 let camDist = camera.position.length();
 camDist = THREE.MathUtils.clamp(camDist, 2.2, 30);
@@ -137,7 +150,6 @@ const lookTargetSmooth = new THREE.Vector3(0, 0, 0);
 window.addEventListener(
   "wheel",
   (e) => {
-    // 向上滚（deltaY>0）拉远；向下滚推近
     const delta = Math.sign(e.deltaY);
     camDist *= delta > 0 ? 1.08 : 0.92;
     camDist = THREE.MathUtils.clamp(camDist, 2.2, 30);
@@ -146,7 +158,7 @@ window.addEventListener(
 );
 
 // -------------------------------------
-// Stars + Streak (your previous galaxy vibe)
+// Stars + Streak
 // -------------------------------------
 const stars = makeStars({ count: 65000, radius: 7.0, thickness: 1.6 });
 scene.add(stars);
@@ -157,15 +169,12 @@ scene.add(streak);
 // -------------------------------------
 // Mouse move intensity (for audio trigger)
 // -------------------------------------
+const LOOK_MIX = 0.18;
+const LOOK_SMOOTH = 0.035;
+const HIT_CLAMP_RADIUS = 4.0;
 
-// -------------------------------------
-// Camera follow tuning (敏感度在这里调)
-// -------------------------------------
-const LOOK_MIX = 0.18;        // 0=完全不跟鼠标；1=完全追鼠标（你现在就是 1）
-const LOOK_SMOOTH = 0.035;    // 越小越“慢”，越稳（0.02~0.06）
-const HIT_CLAMP_RADIUS = 4.0; // 鼠标落点最大半径，防止飙飞（3~6）
-
-let lastPX = 0, lastPY = 0;
+let lastPX = 0,
+  lastPY = 0;
 let move01 = 0;
 
 window.addEventListener("pointermove", (e) => {
@@ -186,39 +195,32 @@ const clock = new THREE.Clock();
 function tick() {
   const t = clock.getElapsedTime();
 
-  // raycast -> hitPoint（✅ 鼠标扰动对齐关键）
   raycaster.setFromCamera(pointer, camera);
   raycaster.ray.intersectPlane(plane, hitPoint);
 
-  // 1) clamp hitPoint：限制鼠标落点范围，防止相机看向点飙飞
   const hitClamped = hitPoint.clone();
   const len = hitClamped.length();
   if (len > HIT_CLAMP_RADIUS) hitClamped.multiplyScalar(HIT_CLAMP_RADIUS / len);
 
-  // 2) mix：只“跟一部分”鼠标（关键！）
   lookTarget.lerpVectors(new THREE.Vector3(0, 0, 0), hitClamped, LOOK_MIX);
-
-  // 3) smooth：再慢慢追上去（关键！）
   lookTargetSmooth.lerp(lookTarget, LOOK_SMOOTH);
 
-
-  // 相机沿当前方向保持距离（更像 dolly）
   const dir = camera.position.clone().normalize();
   camera.position.copy(dir.multiplyScalar(camDist));
   camera.lookAt(lookTargetSmooth);
 
-  // 更新星尘
+  // stars
   stars.material.uniforms.uTime.value = t;
   stars.material.uniforms.uPointer.value.copy(pointer);
 
-  // 更新流光
+  // streak
   streak.material.uniforms.uTime.value = t;
   streak.material.uniforms.uPointer.value.copy(pointer);
 
-  // ✅ 星云扰动：只调用一次，用 hitPoint
+  // nebula
   nebulaSystem.update(hitPoint, t);
 
-  // audio trigger：移动强度 + 当前最大 influence
+  // audio trigger
   let maxInfl = 0;
   for (const c of nebulaSystem.clusters) maxInfl = Math.max(maxInfl, c.influence || 0);
   triggerOnMove(move01, maxInfl);
@@ -273,7 +275,6 @@ function makeStars({ count, radius, thickness }) {
     positions[idx3 + 1] = y;
     positions[idx3 + 2] = z;
 
-    // 粉紫 -> 蓝紫 -> 青（保留你之前的 vibe）
     const t = Math.min(1, r / radius);
     const cA = new THREE.Color("#ff72d8");
     const cB = new THREE.Color("#b9a7ff");
