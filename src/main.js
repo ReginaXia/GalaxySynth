@@ -1,19 +1,23 @@
 // src/main.js
 import * as THREE from "three";
-import GUI from "lil-gui";
 
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+
 import { setupGalaxyGUI } from "./ui/galaxyGui.js";
+import { setupMeteorGUI } from "./ui/meteorGui.js";
 
 import { initAudioOnFirstGesture, triggerOnMove } from "./audio.js";
+import { playMeteorSfx } from "./audio/meteorSfx.js";
+
 import { createNebulaSystem } from "./nebula/nebulaSystem.js";
+import { createMeteorSystem } from "./meteor/meteorSystem.js";
 
 import starsVert from "./shaders/stars.vert.glsl?raw";
 import starsFrag from "./shaders/stars.frag.glsl?raw";
-import streakVert from "./shaders/streak.vert.glsl?raw";
-import streakFrag from "./shaders/streak.frag.glsl?raw";
+import meteorVert from "./shaders/meteor.vert.glsl?raw";
+import meteorFrag from "./shaders/meteor.frag.glsl?raw";
 
 console.log("MAIN JS LOADED");
 
@@ -24,10 +28,8 @@ const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "hi
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
-
 document.body.appendChild(renderer.domElement);
 
 // -------------------------------------
@@ -53,12 +55,7 @@ starTexture.colorSpace = THREE.SRGBColorSpace;
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
 
-const bloom = new UnrealBloomPass(
-  new THREE.Vector2(window.innerWidth, window.innerHeight),
-  0.55,
-  0.65,
-  0.22
-);
+const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.65, 0.22);
 composer.addPass(bloom);
 
 // -------------------------------------
@@ -68,7 +65,7 @@ const raycaster = new THREE.Raycaster();
 const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.0);
 const hitPoint = new THREE.Vector3();
 
-// 鼠标 NDC（用于星空/streak）
+// 鼠标 NDC（用于星空）
 const pointer = new THREE.Vector2(0, 0);
 window.addEventListener("pointermove", (e) => {
   pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
@@ -87,7 +84,7 @@ window.addEventListener(
 );
 
 // -------------------------------------
-// Nebula system (5 clusters)
+// Nebula system
 // -------------------------------------
 const nebulaSystem = createNebulaSystem({
   scene,
@@ -99,35 +96,45 @@ const nebulaSystem = createNebulaSystem({
 setupGalaxyGUI({ camera, renderer, nebulaSystem });
 
 // -------------------------------------
+// Meteors
+// -------------------------------------
+const meteorSystem = createMeteorSystem({
+  scene,
+  camera,
+  renderer,
+  streakVert: meteorVert,
+  streakFrag: meteorFrag,
+  planeY: nebulaSystem.planeY,
+  onSpawn: (e) => playMeteorSfx(e),
+});
+
+window.__meteor = meteorSystem;
+
+setupMeteorGUI(meteorSystem);
+
+// -------------------------------------
 // Drag rotate nebula world
 // -------------------------------------
+const canvas = renderer.domElement;
+
 let isDragging = false;
 let lastX = 0;
 let lastY = 0;
 
-let downX = 0;
-let downY = 0;
+canvas.addEventListener("pointerdown", (e) => {
+  // 点到 GUI 不旋转
+  if (e.target.closest?.(".lil-gui") || e.target.closest?.(".dg")) return;
 
-window.addEventListener("pointerdown", (e) => {
   isDragging = true;
   lastX = e.clientX;
   lastY = e.clientY;
-  downX = e.clientX;
-  downY = e.clientY;
+
+  canvas.setPointerCapture(e.pointerId);
 });
 
-window.addEventListener("pointerup", (e) => {
-  isDragging = false;
-
-  // ✅ 点击选中：移动距离小才当 click
-  const dx = e.clientX - downX;
-  const dy = e.clientY - downY;
-  const moved = Math.sqrt(dx * dx + dy * dy);
-  if (moved < 4) tryPickGalaxy(e);
-});
-
-window.addEventListener("pointermove", (e) => {
+canvas.addEventListener("pointermove", (e) => {
   if (!isDragging) return;
+
   const dx = e.clientX - lastX;
   const dy = e.clientY - lastY;
   lastX = e.clientX;
@@ -135,93 +142,90 @@ window.addEventListener("pointermove", (e) => {
 
   nebulaSystem.root.rotation.y += dx * 0.005;
   nebulaSystem.root.rotation.x += dy * 0.005;
-  nebulaSystem.root.rotation.x = THREE.MathUtils.clamp(nebulaSystem.root.rotation.x, -1.25, 1.25);
+
+  nebulaSystem.root.rotation.x = THREE.MathUtils.clamp(
+    nebulaSystem.root.rotation.x,
+    -1.25,
+    1.25
+  );
 });
 
+canvas.addEventListener("pointerup", (e) => {
+  isDragging = false;
+  try {
+    canvas.releasePointerCapture(e.pointerId);
+  } catch {}
+});
+
+
 // -------------------------------------
-// Zoom (wheel)
+// Zoom to cursor
 // -------------------------------------
-let camDist = camera.position.length();
-camDist = THREE.MathUtils.clamp(camDist, 2.2, 30);
-
-const lookTarget = new THREE.Vector3(0, 0, 0);
-const lookTargetSmooth = new THREE.Vector3(0, 0, 0);
-
-window.addEventListener(
-  "wheel",
-  (e) => {
-    const delta = Math.sign(e.deltaY);
-    camDist *= delta > 0 ? 1.08 : 0.92;
-    camDist = THREE.MathUtils.clamp(camDist, 2.2, 30);
-  },
-  { passive: true }
-);
-
-// --- Zoom to cursor (no OrbitControls needed) ---
 const zoomRaycaster = new THREE.Raycaster();
 const zoomMouse = new THREE.Vector2();
 const zoomPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -nebulaSystem.planeY);
 
-function getMouseWorldOnPlane(e) {
-  const rect = renderer.domElement.getBoundingClientRect();
-  zoomMouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-  zoomMouse.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
-  zoomRaycaster.setFromCamera(zoomMouse, camera);
+function getMouseWorldOnPlane(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  zoomMouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+  zoomMouse.y = -(((clientY - rect.top) / rect.height) * 2 - 1);
 
+  zoomRaycaster.setFromCamera(zoomMouse, camera);
   const hit = new THREE.Vector3();
   const ok = zoomRaycaster.ray.intersectPlane(zoomPlane, hit);
   return ok ? hit : null;
 }
 
-const tmpV = new THREE.Vector3();
-window.addEventListener(
+const MIN_DIST = 1.2;
+const MAX_DIST = 60.0;
+
+canvas.addEventListener(
   "wheel",
   (e) => {
     e.preventDefault();
 
-    const worldBefore = getMouseWorldOnPlane(e);
-    if (!worldBefore) return;
+    const pivot = getMouseWorldOnPlane(e.clientX, e.clientY);
+    if (!pivot) return;
 
-    // zoom factor
-    const delta = Math.sign(e.deltaY);
-    const zoomStep = 1.12; // 手感：可调 1.06~1.18
-    const factor = delta > 0 ? zoomStep : 1 / zoomStep;
+    // 缩放系数：滚轮向下(zoom out) >1；向上(zoom in) <1
+    const zoomStep = 1.12;
+    const factor = e.deltaY > 0 ? zoomStep : 1 / zoomStep;
 
-    // 1) dolly camera along view direction
-    tmpV.copy(camera.position).sub(worldBefore); // vector from hit to camera
-    tmpV.multiplyScalar(factor);
-    camera.position.copy(worldBefore).add(tmpV);
+    // 1) 沿着 pivot 缩放：相机向 pivot 前进/后退（不会旋转）
+    const before = camera.position.clone();
+    camera.position.copy(pivot).add(before.sub(pivot).multiplyScalar(factor));
 
-    camera.updateMatrixWorld();
+    // 2) 限制最近/最远距离（相机到 pivot）
+    const dist = camera.position.distanceTo(pivot);
+    if (dist < MIN_DIST) {
+      camera.position.copy(pivot).add(camera.position.clone().sub(pivot).setLength(MIN_DIST));
+    } else if (dist > MAX_DIST) {
+      camera.position.copy(pivot).add(camera.position.clone().sub(pivot).setLength(MAX_DIST));
+    }
 
-    // 2) compute world point under mouse after zoom, then pan to keep it stable
-    const worldAfter = getMouseWorldOnPlane(e);
-    if (!worldAfter) return;
+    // 3) 校正：保持“鼠标点下的世界位置”锁定不漂（非常关键）
+    const afterPivot = getMouseWorldOnPlane(e.clientX, e.clientY);
+    if (afterPivot) {
+      const correction = pivot.clone().sub(afterPivot);
+      camera.position.add(correction);
+    }
 
-    const pan = worldBefore.clone().sub(worldAfter);
-    camera.position.add(pan);
-
-    camera.updateProjectionMatrix();
+    // 相机朝向保持稳定（不跟鼠标跑，只看中心）
+    camera.lookAt(0, 0, 0);
   },
   { passive: false }
 );
 
+
 // -------------------------------------
-// Stars + Streak
+// Stars
 // -------------------------------------
 const stars = makeStars({ count: 65000, radius: 7.0, thickness: 1.6 });
 scene.add(stars);
 
-const streak = makeStreak();
-scene.add(streak);
-
 // -------------------------------------
 // Mouse move intensity (for audio trigger)
 // -------------------------------------
-const LOOK_MIX = 0.18;
-const LOOK_SMOOTH = 0.035;
-const HIT_CLAMP_RADIUS = 4.0;
-
 let lastPX = 0,
   lastPY = 0;
 let move01 = 0;
@@ -240,6 +244,11 @@ window.addEventListener("pointermove", (e) => {
 // Tick
 // -------------------------------------
 const clock = new THREE.Clock();
+const lookTarget = new THREE.Vector3(0, 0, 0);
+const lookTargetSmooth = new THREE.Vector3(0, 0, 0);
+const LOOK_MIX = 0.18;
+const LOOK_SMOOTH = 0.035;
+const HIT_CLAMP_RADIUS = 4.0;
 
 function tick() {
   const t = clock.getElapsedTime();
@@ -254,20 +263,17 @@ function tick() {
   lookTarget.lerpVectors(new THREE.Vector3(0, 0, 0), hitClamped, LOOK_MIX);
   lookTargetSmooth.lerp(lookTarget, LOOK_SMOOTH);
 
-  const dir = camera.position.clone().normalize();
-  camera.position.copy(dir.multiplyScalar(camDist));
-  camera.lookAt(lookTargetSmooth);
+  camera.lookAt(0, 0, 0);
 
   // stars
   stars.material.uniforms.uTime.value = t;
   stars.material.uniforms.uPointer.value.copy(pointer);
 
-  // streak
-  streak.material.uniforms.uTime.value = t;
-  streak.material.uniforms.uPointer.value.copy(pointer);
-
   // nebula
   nebulaSystem.update(hitPoint, t);
+
+  // meteor
+  meteorSystem.update(t);
 
   // audio trigger
   let maxInfl = 0;
@@ -363,35 +369,4 @@ function makeStars({ count, radius, thickness }) {
   const points = new THREE.Points(geo, mat);
   points.frustumCulled = false;
   return points;
-}
-
-function makeStreak() {
-  const pts = [];
-  const len = 120;
-  for (let i = 0; i < len; i++) {
-    const tt = i / (len - 1);
-    const x = THREE.MathUtils.lerp(-4.2, 4.2, tt);
-    const y = Math.sin(tt * Math.PI * 1.1) * 0.45;
-    const z = Math.cos(tt * Math.PI * 0.9) * 0.6;
-    pts.push(new THREE.Vector3(x, y, z));
-  }
-
-  const curve = new THREE.CatmullRomCurve3(pts);
-  const geo = new THREE.TubeGeometry(curve, 240, 0.02, 10, false);
-
-  const mat = new THREE.ShaderMaterial({
-    transparent: true,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    uniforms: {
-      uTime: { value: 0 },
-      uPointer: { value: new THREE.Vector2(0, 0) },
-    },
-    vertexShader: streakVert,
-    fragmentShader: streakFrag,
-  });
-
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.frustumCulled = false;
-  return mesh;
 }
