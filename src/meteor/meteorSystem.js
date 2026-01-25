@@ -2,10 +2,10 @@
 import * as THREE from "three";
 
 /**
- * New Meteor System (Ball + Gas Tail)
+ * Meteor System (Ball + Gas Tail + Pink Ribbon Triangle)
  * - Head: glowing sphere
  * - Tail: Points particle pool using /textures/meteor.png
- * - GUI controls: tailLength, headGlow, spread, strandCount
+ * - Ribbon: translucent triangle ribbon behind head, with animated hue flow
  */
 export function createMeteorSystem({
   scene,
@@ -38,18 +38,29 @@ export function createMeteorSystem({
     lifeMax: 1.4,
 
     // look (GUI targets)
-    tailLength: 3.2,     // "visual length" (maps to tail life)
-    headGlow: 3.2,       // head brightness multiplier
-    spread: 0.85,        // tail spread (0..1.2)
-    strandCount: 12,     // we reinterpret as "emit density" (4..16)
+    tailLength: 3.2, // "visual length" (maps to tail life)
+    headGlow: 3.2, // head brightness multiplier
+    spread: 0.85, // tail spread (0..1.2)
+    strandCount: 12, // we reinterpret as "emit density" (4..16)
 
     // extra look
-    headSize: 0.09,      // sphere radius
-    tailSize: 0.18,      // base particle size (world-ish)
-    tailDrag: 1.7,       // how fast tail slows down
-    tailWobble: 1.6,     // flame-like wobble
-    tailGlow: 1.6,       // tail color intensity
-    baseColor: "#ff4fd8",// default pink
+    headSize: 0.09, // sphere radius
+    tailSize: 0.18, // base particle size (world-ish)
+    tailDrag: 1.7, // how fast tail slows down
+    tailWobble: 1.6, // flame-like wobble
+    tailGlow: 1.6, // tail color intensity
+    baseColor: "#ff4fd8", // default pink
+
+    // Ribbon (NEW)
+    ribbonEnabled: true,
+    ribbonLength: 1.55, // world units behind the head
+    ribbonWidth: 0.85,  // world units at the far end
+    ribbonAlpha: 0.85,  // overall alpha (still additive)
+    ribbonGlow: 2.4,   // brightness multiplier
+    ribbonHueSpeed: 0.9, // hue animation speed
+    ribbonHueRange: 0.10, // hue variation range
+    ribbonSoftEdge: 0.12, // edge softness in UV space
+    ribbonTailFadePow: 1.6, // tail fade curve
 
     // placement
     areaRadius: 7.5,
@@ -73,7 +84,8 @@ export function createMeteorSystem({
     life: 1,
     seed: Math.random(),
     hue: 0.9,
-    head: null, // mesh
+    head: null,   // mesh
+    ribbon: null, // mesh
   }));
 
   // -------------------------
@@ -95,6 +107,130 @@ export function createMeteorSystem({
     m.renderOrder = 9998;
     root.add(m);
     meteors[i].head = m;
+  }
+
+  // -------------------------
+  // Ribbon (triangle) shader (NEW)
+  // -------------------------
+  const ribbonVert = /* glsl */ `
+    varying vec2 vUv;
+
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `;
+
+
+  const ribbonFrag = /* glsl */ `
+    precision highp float;
+    precision highp int;
+
+    uniform float uTime;
+    uniform float uAlpha;
+    uniform float uGlow;
+
+    uniform float uHueSpeed;
+    uniform float uHueRange;
+    uniform float uHueBase;   // per meteor
+    uniform float uSoftEdge;
+    uniform float uTailFadePow;
+
+    varying vec2 vUv;
+
+    vec3 hsv2rgb(vec3 c){
+      vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+      vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+      return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+    }
+
+    void main() {
+      // UV mapping we use:
+      // tip:   (0, 0.5)
+      // left:  (1, 0.0)
+      // right: (1, 1.0)
+      // => triangle boundary in uv space is: abs(v-0.5) <= 0.5 * u
+      float u = clamp(vUv.x, 0.0, 1.0);          // 0=head, 1=tail
+      float vc = vUv.y - 0.5;                    // centerline = 0
+      float halfW = 0.5 * u;                     // triangle expands linearly
+      float dEdge = halfW - abs(vc);             // >0 inside triangle
+
+      // soft edge (bigger uSoftEdge => softer)
+      float edge = smoothstep(0.0, max(1e-5, uSoftEdge), dEdge);
+
+      // tail fade (u -> 1 fades out)
+      float tailFade = pow(1.0 - u, max(0.05, uTailFadePow));
+
+      // mild center boost (thin bright spine)
+      float center = exp(-pow(abs(vc) / max(1e-5, 0.14 * halfW + 0.02), 2.0));
+
+      // animated hue flow along length
+      float flow = sin(uTime * uHueSpeed + u * 9.0 + uHueBase * 6.2831) * 0.5 + 0.5;
+      float hue = fract(uHueBase + (flow - 0.5) * uHueRange + u * 0.04);
+
+      // color in "pink-neon family" but drifting
+      vec3 colA = hsv2rgb(vec3(fract(hue + 0.00), 0.70, 1.10));
+      vec3 colB = hsv2rgb(vec3(fract(hue + 0.14), 0.85, 1.00));
+      vec3 col  = mix(colA, colB, flow);
+
+      // combine intensity
+      float a = edge * tailFade * uAlpha;
+      float inten = (0.45 + 0.85 * center) * uGlow;
+
+      // Additive-like output; keep alpha to control strength
+      gl_FragColor = vec4(col * inten, a);
+    }
+  `;
+
+  function makeRibbonMesh(initialHueBase = 0.60) {
+    // Dynamic triangle geometry (we update positions every frame)
+    const geo = new THREE.BufferGeometry();
+
+    // 3 vertices triangle
+    const positions = new Float32Array(3 * 3);
+    geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+
+    // UVs define triangle space so we can do clean triangle mask in fragment
+    // tip: (0, 0.5), left: (1, 0), right: (1, 1)
+    const uvs = new Float32Array([
+      0.0, 0.5,
+      1.0, 0.0,
+      1.0, 1.0,
+    ]);
+    geo.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+
+    const mat = new THREE.ShaderMaterial({
+      vertexShader: ribbonVert,
+      fragmentShader: ribbonFrag,
+      transparent: true,
+      depthWrite: false,
+      depthTest: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      uniforms: {
+        uTime: { value: 0 },
+        uAlpha: { value: params.ribbonAlpha },
+        uGlow: { value: params.ribbonGlow },
+        uHueSpeed: { value: params.ribbonHueSpeed },
+        uHueRange: { value: params.ribbonHueRange },
+        uHueBase: { value: initialHueBase },
+        uSoftEdge: { value: params.ribbonSoftEdge },
+        uTailFadePow: { value: params.ribbonTailFadePow },
+      },
+    });
+
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.frustumCulled = false;
+    mesh.visible = false;
+    mesh.renderOrder = 10000; // behind head & points
+    return mesh;
+  }
+
+  // Create ribbon per meteor (pool)
+  for (let i = 0; i < maxMeteors; i++) {
+    const ribbon = makeRibbonMesh(0.92 + (Math.random() - 0.5) * 0.04);
+    root.add(ribbon);
+    meteors[i].ribbon = ribbon;
   }
 
   // -------------------------
@@ -202,6 +338,7 @@ export function createMeteorSystem({
       case 3: return [p, q, v];
       case 4: return [tt, p, v];
       case 5: return [v, p, q];
+      default: return [v, tt, p];
     }
   }
 
@@ -239,6 +376,13 @@ export function createMeteorSystem({
     m.head.scale.setScalar(params.headSize);
     m.head.material.color.set(params.baseColor);
     m.head.material.opacity = 1.0;
+
+    // ribbon init
+    if (m.ribbon) {
+      m.ribbon.visible = params.ribbonEnabled;
+      // per meteor base hue for ribbon drift
+      m.ribbon.material.uniforms.uHueBase.value = m.hue;
+    }
 
     // audio
     if (params.audioEnabled && onSpawn && now - lastSpawnT > params.audioCooldown) {
@@ -309,6 +453,57 @@ export function createMeteorSystem({
     }
   }
 
+  function updateRibbonGeometry(meteor, headPos) {
+    if (!meteor.ribbon) return;
+
+    const ribbon = meteor.ribbon;
+    ribbon.visible = params.ribbonEnabled && meteor.alive;
+
+    // Sync uniforms from params (so GUI can change live)
+    const U = ribbon.material.uniforms;
+    U.uTime.value = t;
+    U.uAlpha.value = params.ribbonAlpha;
+    U.uGlow.value = params.ribbonGlow;
+    U.uHueSpeed.value = params.ribbonHueSpeed;
+    U.uHueRange.value = params.ribbonHueRange;
+    U.uSoftEdge.value = params.ribbonSoftEdge;
+    U.uTailFadePow.value = params.ribbonTailFadePow;
+
+    if (!params.ribbonEnabled) return;
+
+    // Build triangle behind head:
+    // tip = headPos
+    // base center = headPos - dir * length
+    // base left/right = baseCenter +/- side * (width * 0.5)
+    const dir = meteor.dir;
+    const len = params.ribbonLength;
+
+    // side = perpendicular on XZ plane
+    const side = new THREE.Vector3(dir.z, 0, -dir.x);
+    if (side.lengthSq() < 1e-6) side.set(1, 0, 0);
+    side.normalize();
+
+    // slightly "lift" the ribbon a bit so it reads clearly above particles
+    const lift = new THREE.Vector3(0, 1, 0).multiplyScalar(0.02);
+
+    const baseCenter = new THREE.Vector3()
+      .copy(headPos)
+      .addScaledVector(dir, -len)
+      .add(lift);
+
+    const halfW = 0.5 * params.ribbonWidth;
+
+    const p0 = new THREE.Vector3().copy(headPos).add(lift);                // tip
+    const p1 = new THREE.Vector3().copy(baseCenter).addScaledVector(side, -halfW); // left
+    const p2 = new THREE.Vector3().copy(baseCenter).addScaledVector(side,  halfW); // right
+
+    const attr = ribbon.geometry.getAttribute("position");
+    attr.setXYZ(0, p0.x, p0.y, p0.z);
+    attr.setXYZ(1, p1.x, p1.y, p1.z);
+    attr.setXYZ(2, p2.x, p2.y, p2.z);
+    attr.needsUpdate = true;
+  }
+
   // -------------------------
   // Update
   // -------------------------
@@ -320,9 +515,7 @@ export function createMeteorSystem({
     lastUpdateT = t;
 
     // spawn
-    if (!params.enabled) {
-      // still update tail fade-out if disabled
-    } else {
+    if (params.enabled) {
       spawnAccum += params.spawnRate * dt;
       while (spawnAccum >= 1.0) {
         spawnAccum -= 1.0;
@@ -337,7 +530,7 @@ export function createMeteorSystem({
       }
     }
 
-    // update meteors + emit tail
+    // update meteors + emit tail + ribbon
     for (let i = 0; i < maxMeteors; i++) {
       const m = meteors[i];
       const age = t - m.birth;
@@ -347,6 +540,7 @@ export function createMeteorSystem({
       if (age > m.life) {
         m.alive = false;
         m.head.visible = false;
+        if (m.ribbon) m.ribbon.visible = false;
         continue;
       }
 
@@ -359,17 +553,18 @@ export function createMeteorSystem({
       m.head.scale.setScalar(params.headSize);
 
       // head brightness (via opacity+color)
-      // keep color pink but boost intensity by multiplying material color
       const base = new THREE.Color(params.baseColor);
       base.multiplyScalar(params.headGlow);
       m.head.material.color.copy(base);
+
+      // ribbon update (NEW)
+      updateRibbonGeometry(m, headPos);
 
       // emit tail particles
       if (params.enabled) emitTail(headPos, m.dir, m.hue, t, dt);
     }
 
     // update particles (cpu)
-    // flame-like wobble + drag + fade
     const drag = params.tailDrag;
     const wob = params.tailWobble;
 
@@ -377,7 +572,6 @@ export function createMeteorSystem({
       const a = t - birth[i];
       const L = life[i];
       if (a < 0 || a > L) {
-        // make fully transparent by shrinking size
         siz[i] = 0.0;
         continue;
       }
@@ -397,7 +591,7 @@ export function createMeteorSystem({
       vel[i * 3 + 1] *= damp;
       vel[i * 3 + 2] *= damp;
 
-      // wobble: swirl sideways a bit (gas flame)
+      // wobble
       const s = seed[i];
       const w = Math.sin(t * (2.2 + s * 2.0) + s * 10.0) * wob * 0.015;
       pos[i * 3 + 0] += w;
@@ -407,12 +601,10 @@ export function createMeteorSystem({
       const grow = THREE.MathUtils.lerp(0.85, 1.9, 1.0 - fade2);
       siz[i] = Math.max(0.0, params.tailSize * grow * fade2);
 
-      // color fades with life (multiply)
-      col[i * 3 + 0] *= 0.995; // keep stable
+      // color stable (we keep your original approach)
+      col[i * 3 + 0] *= 0.995;
       col[i * 3 + 1] *= 0.995;
       col[i * 3 + 2] *= 0.995;
-
-      // alpha control via size shrink; PointsMaterial opacity stays 1
     }
 
     tailGeo.attributes.position.needsUpdate = true;
