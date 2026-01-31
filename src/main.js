@@ -32,7 +32,7 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+renderer.toneMappingExposure = 1;
 document.body.appendChild(renderer.domElement);
 
 // -------------------------------------
@@ -58,8 +58,12 @@ starTexture.colorSpace = THREE.SRGBColorSpace;
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
 
-const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.65, 0.22);
-composer.addPass(bloom);
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.65, 0.22);
+composer.addPass(bloomPass);
+
+bloomPass.strength = 1;
+bloomPass.radius = 1;
+bloomPass.threshold = 0.7;
 
 // -------------------------------------
 // Raycast plane (y = 0)
@@ -93,6 +97,24 @@ window.addEventListener(
 
 const bg = createDreamyBackground(scene);
 
+bg.setStyle({
+  rings: 1,
+  glitter: 1,
+  intensity: 1,
+  parallax: 1,
+});
+
+
+// -------------------------------------
+// Brackground mouse
+// -------------------------------------
+
+const mouse01 = { x: 0.5, y: 0.5 };
+
+window.addEventListener("mousemove", (e) => {
+  mouse01.x = e.clientX / window.innerWidth;
+  mouse01.y = 1.0 - e.clientY / window.innerHeight;
+});
 
 // -------------------------------------
 // Nebula system
@@ -283,6 +305,7 @@ function tick() {
 
   // background
   bg.update(t);  
+  bg.setMouse01(mouse01.x, mouse01.y);
 
   // stars
   stars.material.uniforms.uTime.value = t;
