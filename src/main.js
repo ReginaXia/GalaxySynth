@@ -14,6 +14,9 @@ import { playMeteorSfx } from "./audio/meteorSfx.js";
 import { createNebulaSystem } from "./nebula/nebulaSystem.js";
 import { createMeteorSystem } from "./meteor/meteorSystem.js";
 
+import { createDreamyBackground } from "./background/dreamyBackground";
+
+
 import starsVert from "./shaders/stars.vert.glsl?raw";
 import starsFrag from "./shaders/stars.frag.glsl?raw";
 import meteorVert from "./shaders/meteor.vert.glsl?raw";
@@ -82,6 +85,14 @@ window.addEventListener(
   },
   { once: true }
 );
+
+
+// -------------------------------------
+// Brackground
+// -------------------------------------
+
+const bg = createDreamyBackground(scene);
+
 
 // -------------------------------------
 // Nebula system
@@ -269,6 +280,9 @@ function tick() {
   lookTargetSmooth.lerp(lookTarget, LOOK_SMOOTH);
 
   camera.lookAt(0, 0, 0);
+
+  // background
+  bg.update(t);  
 
   // stars
   stars.material.uniforms.uTime.value = t;
