@@ -1,0 +1,64 @@
+// src/performance/performanceState.js
+export function createPerformanceState() {
+  const s = {
+    rotation: 0,        // -1..1
+    energy: 0,          // 0..1
+    pitch: 0.5,         // 0..1
+    texture: 0.5,       // 0..1
+    rhythmDensity: 0.3, // 0..1
+    trigger: false,     // momentary
+    triggerStrength: 0, // 0..1 (click velocity etc.)
+  };
+
+  // internal smoothing
+  const v = {
+    energyTarget: 0,
+    rotationTarget: 0,
+    pitchTarget: 0.5,
+    textureTarget: 0.5,
+    rhythmTarget: 0.3,
+  };
+
+  function clamp01(x) { return Math.max(0, Math.min(1, x)); }
+  function clamp(x, a, b) { return Math.max(a, Math.min(b, x)); }
+
+  return {
+    state: s,
+
+    // set targets (from inputs)
+    setTargets({ rotation, energy, pitch, texture, rhythmDensity } = {}) {
+      if (rotation !== undefined) v.rotationTarget = clamp(rotation, -1, 1);
+      if (energy !== undefined) v.energyTarget = clamp01(energy);
+      if (pitch !== undefined) v.pitchTarget = clamp01(pitch);
+      if (texture !== undefined) v.textureTarget = clamp01(texture);
+      if (rhythmDensity !== undefined) v.rhythmTarget = clamp01(rhythmDensity);
+    },
+
+    // trigger event (from click/space/gesture)
+    fireTrigger(strength = 1) {
+      s.trigger = true;
+      s.triggerStrength = clamp01(strength);
+    },
+
+    // one-tick pulse consumption
+    consumeTrigger() {
+      const t = s.trigger;
+      s.trigger = false;
+      return t;
+    },
+
+    // smooth update
+    update(dt) {
+      // dt in seconds
+      const k = 1 - Math.exp(-dt * 10); // smoothing speed
+      s.rotation = s.rotation + (v.rotationTarget - s.rotation) * k;
+      s.energy = s.energy + (v.energyTarget - s.energy) * k;
+      s.pitch = s.pitch + (v.pitchTarget - s.pitch) * k;
+      s.texture = s.texture + (v.textureTarget - s.texture) * k;
+      s.rhythmDensity = s.rhythmDensity + (v.rhythmTarget - s.rhythmDensity) * k;
+
+      // decay trigger strength for visuals (optional)
+      s.triggerStrength *= Math.exp(-dt * 8);
+    },
+  };
+}

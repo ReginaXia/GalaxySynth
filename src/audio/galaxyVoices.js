@@ -51,6 +51,12 @@ export function createGalaxyVoices() {
   });
   bell.volume.value = -22;
 
+  // ---- bass ----
+
+  bass.volume.value = -18; // 初始很克制
+  bass.chain(filter, drive, limiter, meter, Tone.Destination);
+
+
   // ---- Routing ----
   // pad -> filter -> chorus -> delay -> pitch -> reverb -> comp -> limiter -> out
   pad.chain(filter, chorus, delay, pitch, reverb, compressor, limiter, Tone.Destination);

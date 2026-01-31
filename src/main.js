@@ -8,7 +8,7 @@ import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPa
 import { setupGalaxyGUI } from "./ui/galaxyGui.js";
 import { setupMeteorGUI } from "./ui/meteorGui.js";
 
-import { initAudioOnFirstGesture, triggerOnMove } from "./audio.js";
+// import { initAudioOnFirstGesture, triggerOnMove } from "./audio.js";
 import { playMeteorSfx } from "./audio/meteorSfx.js";
 
 import { createNebulaSystem } from "./nebula/nebulaSystem.js";
@@ -16,6 +16,11 @@ import { createMeteorSystem } from "./meteor/meteorSystem.js";
 
 import { createDreamyBackground } from "./background/dreamyBackground";
 
+import { createPerformanceState } from "./performance/performanceState";
+import { createMouseKeyboardController } from "./input/mouseKeyboardController";
+import { createGalaxyAudioEngine } from "./audio/galaxyAudioEngine";
+
+import { createAudioMonitorUI } from "./ui/audioMonitor.js";
 
 import starsVert from "./shaders/stars.vert.glsl?raw";
 import starsFrag from "./shaders/stars.frag.glsl?raw";
@@ -82,13 +87,36 @@ window.addEventListener("pointermove", (e) => {
 // -------------------------------------
 // Audio: must start on gesture
 // -------------------------------------
-window.addEventListener(
-  "pointerdown",
-  async () => {
-    await initAudioOnFirstGesture();
-  },
-  { once: true }
-);
+// window.addEventListener(
+//   "pointerdown",
+//   async () => {
+//     await initAudioOnFirstGesture();
+//   },
+//   { once: true }
+// );
+
+// -------------------------------------
+// Sound/Audio
+// -------------------------------------
+
+const perf = createPerformanceState();
+const controller = createMouseKeyboardController(window);
+const audio = createGalaxyAudioEngine();
+const audioUI = createAudioMonitorUI();
+
+
+// ✅ 解决“听不到”的核心：用户交互解锁
+audio.bindUserStart(window);
+
+// 点击触发（也可以在你的 canvas 上绑定）
+window.addEventListener("mousedown", () => {
+  perf.fireTrigger(1.0);
+  console.log("[TRIGGER] click");
+});
+window.addEventListener("keydown", (e) => {
+  if (e.code === "Space") perf.fireTrigger(1.0);
+});
+
 
 
 // -------------------------------------
@@ -289,44 +317,74 @@ const LOOK_SMOOTH = 0.035;
 const HIT_CLAMP_RADIUS = 4.0;
 
 function tick() {
+  // dt 用于输入平滑/音频平滑
+  const dt = Math.min(0.05, clock.getDelta());
   const t = clock.getElapsedTime();
 
+  // --- raycast to plane
   raycaster.setFromCamera(pointer, camera);
   raycaster.ray.intersectPlane(plane, hitPoint);
 
-  const hitClamped = hitPoint.clone();
-  const len = hitClamped.length();
-  if (len > HIT_CLAMP_RADIUS) hitClamped.multiplyScalar(HIT_CLAMP_RADIUS / len);
-
-  lookTarget.lerpVectors(new THREE.Vector3(0, 0, 0), hitClamped, LOOK_MIX);
-  lookTargetSmooth.lerp(lookTarget, LOOK_SMOOTH);
-
-  camera.lookAt(0, 0, 0);
-
-  // background
-  bg.update(t);  
+  // --- background
+  bg.update(t);
   bg.setMouse01(mouse01.x, mouse01.y);
 
-  // stars
+  // --- stars
   stars.material.uniforms.uTime.value = t;
   stars.material.uniforms.uPointer.value.copy(pointer);
 
-  // nebula
+  // --- nebula & meteor
   nebulaSystem.update(hitPoint, t);
-
-  // meteor
   meteorSystem.update(t);
 
-  // audio trigger
-  let maxInfl = 0;
-  for (const c of nebulaSystem.clusters) maxInfl = Math.max(maxInfl, c.influence || 0);
-  triggerOnMove(move01, maxInfl);
-  move01 *= 0.9;
+  // -----------------------------
+  // ✅ Phase1: Inputs -> PerformanceState -> Audio -> Visual
+  // -----------------------------
+  // 1) 输入 -> 目标
+  const targets = controller.update(dt);
+  perf.setTargets(targets);
 
+  // 2) 平滑语义层
+  perf.update(dt);
+
+  // 3) trigger 只给音频吃一帧
+  const ps = perf.state;
+  const trig = ps.trigger;
+  if (trig) ps.trigger = false;
+
+  // 4) 音频
+  audio.setPerformance({ ...ps, trigger: trig });
+  audio.update(dt);
+
+  // 5) 音频状态（给 UI / 视觉）
+  const a = audio.getState();
+
+  // --- 低频呼吸（非常轻）
+  const bassPulse = Math.pow(a.beatPulse * (ps.energy ?? 0), 1.2);
+  scene.scale.setScalar(1.0 + bassPulse * 0.01);
+
+  // --- 背景随音乐（避免“只是装饰”）
+  bg.setStyle({
+    rings: 0.12 + a.beatPulse * 0.55,
+    glitter: 0.10 + a.beatPulse * 0.20,
+    intensity: 0.55 + a.rms * 0.25,
+    parallax: 0.55,
+  });
+
+  // --- Bloom 轻跟随（避免洗白）
+  bloomPass.strength = 0.45 + a.rms * 0.25;
+  bloomPass.threshold = 0.88;
+  bloomPass.radius = 0.25;
+
+  // --- render
   composer.render();
-  
+
+  // --- 左侧音频监控 UI
+  audioUI.update(a, perf.state);
+
   requestAnimationFrame(tick);
 }
+
 tick();
 
 // -------------------------------------
@@ -339,7 +397,7 @@ window.addEventListener("resize", () => {
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
   composer.setSize(w, h);
-  bloom.setSize(w, h);
+  bloomPass.setSize(w, h);
 });
 
 // -------------------------------------
@@ -413,3 +471,69 @@ function makeStars({ count, radius, thickness }) {
   points.frustumCulled = false;
   return points;
 }
+
+// // Animation
+
+// let last = performance.now();
+
+// function animate(t) {
+//   const now = t;
+//   const dt = Math.min(0.05, (now - last) * 0.001);
+//   last = now;
+
+//   // 1) 输入 -> 目标
+//   const targets = controller.update(dt);
+//   perf.setTargets(targets);
+
+//   // 2) 平滑语义层
+//   perf.update(dt);
+
+//   // 3) 把 trigger 变成“瞬时事件”供音频消费
+//   const ps = perf.state;
+//   const trig = ps.trigger;
+//   if (trig) ps.trigger = false; // consume for audio in this frame only
+
+//   // 4) 音频：把语义喂给 Tone
+//   //    注意：Tone 没开始前 setPerformance 也无妨
+//   audio.setPerformance({ ...ps, trigger: trig });
+//   audio.update(dt);
+
+//   // 5) 音频状态 -> 视觉绑定
+//   const a = audio.getState();
+
+//   const bassPulse = Math.pow(a.beatPulse * perf.state.energy, 1.2);
+//   scene.scale.setScalar(1.0 + bassPulse * 0.01);
+
+
+//   // 背景：ring=beatPulse，亮度=RMS（能量），glitter=拍子/触发
+//   bg.setStyle({
+//     rings: 0.12 + a.beatPulse * 0.55,
+//     glitter: 0.10 + a.beatPulse * 0.20,
+//     intensity: 0.50 + a.rms * 0.22,
+//     parallax: 0.55,
+//   });
+
+//   // 如果你有 bloomPass（UnrealBloomPass），只做很轻的跟随，避免洗白
+//   if (typeof bloomPass !== "undefined" && bloomPass) {
+//     bloomPass.strength = 0.45 + a.rms * 0.25;
+//     bloomPass.threshold = 0.88; // 你之前已经在调这个
+//     bloomPass.radius = 0.25;
+//   }
+
+//   // 流星：trigger 时发射/增强（你按你现有 API 接）
+//   // 例：
+//   // if (trig) meteorSystem.spawnBurst?.(1);
+
+//   // update your systems
+//   bg.update(now * 0.001);
+//   meteorSystem.update(now * 0.001);
+//   nebulaSystem.update?.(now * 0.001);
+
+//   // render
+//   // 如果你用 composer，就 composer.render(); 否则 renderer.render(scene,camera)
+//   if (typeof composer !== "undefined" && composer) composer.render();
+//   else renderer.render(scene, camera);
+
+//   requestAnimationFrame(animate);
+// }
+// requestAnimationFrame(animate);
