@@ -166,11 +166,19 @@ function updateHoveredStepFromMouse(clientX, clientY) {
 }
 
 // 键盘放置：1=beat, 2=perc, Backspace/Delete=清空这个 step
-window.addEventListener("pointermove", (e) => {
-  updateHoveredStepFromMouse(e.clientX, e.clientY);
-});
-
 window.addEventListener("keydown", (e) => {
+
+  // ✅ 只在鼠标位于 tempo/step ring 区域附近才允许编辑
+  if (tempoRingEl) {
+    const r = tempoRingEl.getBoundingClientRect();
+    const mx = window.__lastMouseX ?? 0;
+    const my = window.__lastMouseY ?? 0;
+    const inside =
+      mx >= r.left - 20 && mx <= r.right + 20 &&
+      my >= r.top - 20 && my <= r.bottom + 20;
+    if (!inside) return;   // ✅ 现在 return 是合法的
+  }
+
   if (e.code === "Digit1") beatSteps[hoveredStep] = !beatSteps[hoveredStep];
   if (e.code === "Digit2") percSteps[hoveredStep] = !percSteps[hoveredStep];
 
@@ -179,6 +187,7 @@ window.addEventListener("keydown", (e) => {
     percSteps[hoveredStep] = false;
   }
 });
+
 
 // 右键清空当前 step（避免浏览器菜单）
 window.addEventListener("contextmenu", (e) => {
@@ -252,6 +261,11 @@ if (tempoRing) {
   });
 
   window.addEventListener("pointermove", (e) => {
+
+    updateHoveredStepFromMouse(e.clientX, e.clientY);
+    window.__lastMouseX = e.clientX;
+    window.__lastMouseY = e.clientY;
+
     if (!draggingTempo) return;
     e.preventDefault();
 
@@ -530,6 +544,8 @@ function startStepSequencer() {
 }
 startStepSequencer();
 
+if (Tone.Transport.state !== "started") Tone.Transport.start();
+
 
 function tick() {
   // dt 用于输入平滑/音频平滑
@@ -588,6 +604,10 @@ function tick() {
       // playhead 高亮（让它“活起来”）
       stepDots[i].beat.classList.toggle("playhead", i === playheadStep && beatSteps[i]);
       stepDots[i].perc.classList.toggle("playhead", i === playheadStep && percSteps[i]);
+    
+      stepDots[i].beat.classList.toggle("hover", i === hoveredStep);
+      stepDots[i].perc.classList.toggle("hover", i === hoveredStep);
+
     }
   }
 
