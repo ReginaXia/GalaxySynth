@@ -1,5 +1,6 @@
 // src/main.js
 import * as THREE from "three";
+import * as Tone from "tone";
 
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
@@ -103,6 +104,172 @@ const perf = createPerformanceState();
 const controller = createMouseKeyboardController(window);
 const audio = createGalaxyAudioEngine();
 const audioUI = createAudioMonitorUI();
+
+// -------------------------------------
+// Step Sequencer (16-step ring) - MVP
+// -------------------------------------
+const STEPS = 16;
+const beatSteps = new Array(STEPS).fill(false); // key "1"
+const percSteps = new Array(STEPS).fill(false); // key "2"
+
+let hoveredStep = 0;
+let playheadStep = 0;
+
+// 建立 16 个点（DOM）
+const stepRing = document.getElementById("step-ring");
+const stepDots = [];
+
+function buildStepRingDots() {
+  if (!stepRing) return;
+  stepRing.innerHTML = "";
+  stepDots.length = 0;
+
+  const R = 56;        // 半径（px）
+  const cx = 70, cy = 70; // ring 中心（因为 140x140）
+
+  for (let i = 0; i < STEPS; i++) {
+    const a = (i / STEPS) * Math.PI * 2 - Math.PI / 2; // 从上方开始
+    const x = cx + Math.cos(a) * R;
+    const y = cy + Math.sin(a) * R;
+
+    // beat dot
+    const d1 = document.createElement("div");
+    d1.className = "step-dot beat off";
+    d1.style.left = `${x}px`;
+    d1.style.top = `${y}px`;
+    stepRing.appendChild(d1);
+
+    // perc dot（稍微偏内圈一点）
+    const d2 = document.createElement("div");
+    d2.className = "step-dot perc off";
+    d2.style.left = `${cx + Math.cos(a) * (R - 10)}px`;
+    d2.style.top = `${cy + Math.sin(a) * (R - 10)}px`;
+    stepRing.appendChild(d2);
+
+    stepDots.push({ beat: d1, perc: d2 });
+  }
+}
+buildStepRingDots();
+
+// 根据鼠标位置计算当前 hover 到哪个 step（用 tempo-ring 的中心更稳）
+const tempoRingEl = document.getElementById("tempo-ring");
+function updateHoveredStepFromMouse(clientX, clientY) {
+  if (!tempoRingEl) return;
+  const r = tempoRingEl.getBoundingClientRect();
+  const cx = r.left + r.width * 0.5;
+  const cy = r.top + r.height * 0.5;
+
+  const ang = Math.atan2(clientY - cy, clientX - cx); // -pi..pi
+  let t = (ang + Math.PI / 2) / (Math.PI * 2);        // 0..1 (上方=0)
+  t = (t % 1 + 1) % 1;
+  hoveredStep = Math.floor(t * STEPS) % STEPS;
+}
+
+// 键盘放置：1=beat, 2=perc, Backspace/Delete=清空这个 step
+window.addEventListener("pointermove", (e) => {
+  updateHoveredStepFromMouse(e.clientX, e.clientY);
+});
+
+window.addEventListener("keydown", (e) => {
+  if (e.code === "Digit1") beatSteps[hoveredStep] = !beatSteps[hoveredStep];
+  if (e.code === "Digit2") percSteps[hoveredStep] = !percSteps[hoveredStep];
+
+  if (e.code === "Backspace" || e.code === "Delete") {
+    beatSteps[hoveredStep] = false;
+    percSteps[hoveredStep] = false;
+  }
+});
+
+// 右键清空当前 step（避免浏览器菜单）
+window.addEventListener("contextmenu", (e) => {
+  // 只有在靠近左下 ring 的区域才拦截（防止影响全局右键）
+  if (!tempoRingEl) return;
+  const r = tempoRingEl.getBoundingClientRect();
+  const near =
+    e.clientX >= r.left - 10 && e.clientX <= r.right + 10 &&
+    e.clientY >= r.top - 10 && e.clientY <= r.bottom + 10;
+
+  if (near) {
+    e.preventDefault();
+    beatSteps[hoveredStep] = false;
+    percSteps[hoveredStep] = false;
+  }
+});
+
+
+
+
+
+// -------------------------------------
+// Tempo Ring (DOM) - init once
+// -------------------------------------
+const tempoRing = document.getElementById("tempo-ring");
+
+// 如果你还没把 ring 插到 HTML，避免直接报错
+if (!tempoRing) {
+  console.warn("[TempoRing] #tempo-ring not found in DOM.");
+}
+
+// ✅ 作为“全局目标值”，tick 里会把它喂给 perf
+let tempoTarget = perf.state.tempoBpm ?? 102;
+
+let draggingTempo = false;
+let lastAngle = 0;
+
+function getAngleFromPointerEvent(e) {
+  const r = tempoRing.getBoundingClientRect();
+  const cx = r.left + r.width * 0.5;
+  const cy = r.top + r.height * 0.5;
+  return Math.atan2(e.clientY - cy, e.clientX - cx);
+}
+
+function wrapDelta(a) {
+  if (a > Math.PI) return a - Math.PI * 2;
+  if (a < -Math.PI) return a + Math.PI * 2;
+  return a;
+}
+
+function clamp(x, a, b) {
+  return Math.max(a, Math.min(b, x));
+}
+
+// 让 ring 视觉跟着 bpm 转（简单粗暴但有效）
+function setRingVisualByBpm(bpm) {
+  if (!tempoRing) return;
+  const t = (bpm - 90) / 30;          // 90..120 -> 0..1
+  const ang = t * Math.PI * 2;        // -> 0..2π
+  tempoRing.style.transform = `rotate(${ang}rad)`;
+}
+
+if (tempoRing) {
+  // 点击更稳：给一点点透明填充（可选）
+  // tempoRing.style.background = "rgba(255,255,255,0.02)";
+
+  tempoRing.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    draggingTempo = true;
+    lastAngle = getAngleFromPointerEvent(e);
+  });
+
+  window.addEventListener("pointermove", (e) => {
+    if (!draggingTempo) return;
+    e.preventDefault();
+
+    const ang = getAngleFromPointerEvent(e);
+    const d = wrapDelta(ang - lastAngle);
+    lastAngle = ang;
+
+    const SENS = 18; // 手感参数：想更灵敏就 24，想更稳就 12
+    tempoTarget = clamp(tempoTarget + d * SENS, 90, 120);
+  });
+
+  window.addEventListener("pointerup", (e) => {
+    if (!draggingTempo) return;
+    e.preventDefault();
+    draggingTempo = false;
+  });
+}
+
 
 
 // ✅ 解决“听不到”的核心：用户交互解锁
@@ -340,6 +507,30 @@ const LOOK_MIX = 0.18;
 const LOOK_SMOOTH = 0.035;
 const HIT_CLAMP_RADIUS = 4.0;
 
+// -------------------------------------
+// Step Sequencer scheduling (Tone.Transport)
+// -------------------------------------
+let seqEventId = null;
+
+function startStepSequencer() {
+  if (seqEventId !== null) return;
+
+  // 每个 16 分音符走一步（16 step = 1 小节）
+  seqEventId = Tone.Transport.scheduleRepeat((time) => {
+    const pos = Tone.Transport.position.split(":");
+    const sixteenth = parseInt(pos[2] ?? "0", 10); // 0..3
+    const beat = parseInt(pos[1] ?? "0", 10);      // 0..3
+    const step = (beat * 4 + sixteenth) % STEPS;   // 0..15
+    playheadStep = step;
+
+    // 触发
+    if (beatSteps[step]) audio.triggerBeat(time, 1.0);
+    if (percSteps[step]) audio.triggerPerc(time, 1.0);
+  }, "16n");
+}
+startStepSequencer();
+
+
 function tick() {
   // dt 用于输入平滑/音频平滑
   const dt = Math.min(0.05, clock.getDelta());
@@ -366,13 +557,18 @@ function tick() {
   // -----------------------------
   // 1) 输入 -> 目标
   const targets = controller.update(dt);
-  perf.setTargets(targets);
+  perf.setTargets({ tempoBpm: tempoTarget });
+
 
   // 2) 平滑语义层
   perf.update(dt);
+  
+  setRingVisualByBpm(perf.state.tempoBpm);
 
     // 3) trigger 只给音频吃一帧
   const ps = perf.state;
+  console.log(ps.tempoBpm, ps.scaleKey, ps.scaleMode, ps.dreaminess, ps.activeNebulaId);
+
   const trig = ps.trigger;
   if (trig) ps.trigger = false;
 
@@ -382,6 +578,19 @@ function tick() {
 
   // 5) 音频状态：先拿到 a，再用它做任何视觉映射
   const a = audio.getState();
+
+    // --- Step ring UI update
+  if (stepDots.length === STEPS) {
+    for (let i = 0; i < STEPS; i++) {
+      stepDots[i].beat.classList.toggle("off", !beatSteps[i]);
+      stepDots[i].perc.classList.toggle("off", !percSteps[i]);
+
+      // playhead 高亮（让它“活起来”）
+      stepDots[i].beat.classList.toggle("playhead", i === playheadStep && beatSteps[i]);
+      stepDots[i].perc.classList.toggle("playhead", i === playheadStep && percSteps[i]);
+    }
+  }
+
 
   // ✅ 在这里统一定义 midi
   const midi = a.lastMidi ?? 60;

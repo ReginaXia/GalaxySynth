@@ -213,11 +213,6 @@ export function createGalaxyAudioEngine() {
 
     // ✅ 删掉“开局立刻触发”的那段 now 触发（否则一上来就嗡嗡）
 
-
-    // Start the first chord immediately (so you don't wait 2 bars)
-    const now = Tone.now();
-    pad.releaseAll(now);
-    pad.triggerAttackRelease(["A3", "E4", "G4"], "2m", now, 0.18);
   }
 
   function unscheduleAll() {
@@ -228,16 +223,32 @@ export function createGalaxyAudioEngine() {
   }
 
   // ---------------------------
+  // MANUAL TRIGGERS (for step sequencer)
+  // ---------------------------
+  function triggerBeat(time, vel = 1.0) {
+    kick.triggerAttackRelease("C1", "8n", time, 1.0 * vel);
+    beatPulse = Math.max(beatPulse, 0.9 * vel);
+  }
+
+  function triggerPerc(time, vel = 1.0) {
+    hat.triggerAttackRelease("16n", time, 0.55 * vel);
+  }
+
+
+  // ---------------------------
   // START / STOP
   // ---------------------------
-  async function start() {
+  function start() {
     if (started) return;
-    await Tone.start();
+    Tone.start();
     started = true;
 
-    scheduleAll();
+    // ✅ 今晚目标：默认安静。节奏之后由 16-step 音轨来触发。
+    // scheduleAll();
+
     Tone.Transport.start();
   }
+
 
   function stop() {
     if (!started) return;
@@ -369,6 +380,8 @@ export function createGalaxyAudioEngine() {
     update,
     getState,
     triggerMeteor,
+    triggerBeat,
+    triggerPerc,
     isStarted: () => started,
   };
 }

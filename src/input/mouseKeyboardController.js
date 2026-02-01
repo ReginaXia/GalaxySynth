@@ -17,6 +17,54 @@ export function createMouseKeyboardController(domElement = window) {
     rhythmDensity: 0.3,
   };
 
+  //Tempo ring
+  let isDraggingTempo = false;
+  let lastAngle = 0;
+
+  const TEMPO_RING_CENTER = { x: 0.5, y: 0.5 }; // 屏幕中心（NDC 或 0..1）
+  const TEMPO_RING_RADIUS = 0.25;
+  const TEMPO_RING_WIDTH = 0.05;
+
+  function onMouseDown(e) {
+    const p = getNormalizedMouse(e); // 0..1
+    const dx = p.x - TEMPO_RING_CENTER.x;
+    const dy = p.y - TEMPO_RING_CENTER.y;
+    const r = Math.sqrt(dx*dx + dy*dy);
+
+    if (Math.abs(r - TEMPO_RING_RADIUS) < TEMPO_RING_WIDTH) {
+      isDraggingTempo = true;
+      lastAngle = Math.atan2(dy, dx);
+    }
+  }
+
+  function onMouseMove(e) {
+    if (!isDraggingTempo) return;
+
+    const p = getNormalizedMouse(e);
+    const dx = p.x - TEMPO_RING_CENTER.x;
+    const dy = p.y - TEMPO_RING_CENTER.y;
+    const angle = Math.atan2(dy, dx);
+
+    let dTheta = angle - lastAngle;
+
+    // 防止突然跳
+    if (dTheta > Math.PI) dTheta -= Math.PI * 2;
+    if (dTheta < -Math.PI) dTheta += Math.PI * 2;
+
+    lastAngle = angle;
+
+    // ⭐ 核心映射：角度变化 → bpm
+    const BPM_SENSITIVITY = 30; // 你之后可以微调
+    targets.tempoBpm =
+      perf.state.tempoBpm + dTheta * BPM_SENSITIVITY;
+  }
+
+  function onMouseUp() {
+    isDraggingTempo = false;
+  }
+
+
+
   let lastX = 0, lastY = 0, lastT = performance.now();
 
   function onMove(e) {

@@ -14,10 +14,75 @@
         color:rgba(255,255,255,.65);
         user-select:none;
       }
+
+      #tempo-ring{
+        position: fixed;
+        left: 40px;
+        bottom: 40px;
+        width: 140px;
+        height: 140px;
+        border-radius: 50%;
+        border: 2px solid rgba(255,255,255,0.55);
+        box-shadow: 0 0 20px rgba(255,255,255,0.12);
+        z-index: 999999;
+        pointer-events: auto;
+        user-select: none;
+        touch-action: none;
+      }
+
+      /* 一个小点当作刻度 */
+      #tempo-handle{
+        position: absolute;
+        left: 50%;
+        top: 8px;
+        width: 10px;
+        height: 10px;
+        transform: translateX(-50%);
+        border-radius: 50%;
+        background: rgba(255,255,255,0.95);
+        box-shadow: 0 0 12px rgba(255,255,255,0.5);
+      }
+
+      /* 16-step ring：放在 tempo ring 里面一圈 */
+      #step-ring{
+        position: fixed;
+        left: 40px;
+        bottom: 40px;
+        width: 140px;
+        height: 140px;
+        z-index: 999998;          /* 比 tempo-ring 略低一点 */
+        pointer-events: none;     /* 事件仍由 tempo-ring 处理（更稳） */
+      }
+
+      .step-dot{
+        position: absolute;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        opacity: 0.75;
+        transform: translate(-50%, -50%);
+      }
+
+      .step-dot.beat{ background: rgba(255,255,255,0.85); }
+      .step-dot.perc{ background: rgba(160,220,255,0.85); }
+
+      .step-dot.off{ opacity: 0.12; }
+      .step-dot.playhead{
+        box-shadow: 0 0 12px rgba(255,255,255,0.65);
+        opacity: 1.0;
+      }
+
     </style>
   </head>
   <body>
     <div class="hint">Galaxy Synth · Step① 粒子场（鼠标移动会微扰动）</div>
     <script type="module" src="/src/main.js"></script>
+    
+    <div id="tempo-ring">
+      <div id="tempo-handle"></div>
+    </div>
+
+    <div id="step-ring"></div>
+
   </body>
 </html>

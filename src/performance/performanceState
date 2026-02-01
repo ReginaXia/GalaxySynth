@@ -8,6 +8,13 @@ export function createPerformanceState() {
     rhythmDensity: 0.3, // 0..1
     trigger: false,     // momentary
     triggerStrength: 0, // 0..1 (click velocity etc.)
+
+    // ✅ NEW (core truth)
+    activeNebulaId: 0,  // currently selected instrument/nebula
+    tempoBpm: 102,      // 90..120 (Tempo Ring)
+    scaleKey: "C",      // e.g. "C", "D"
+    scaleMode: "major", // "major" | "minor"
+    dreaminess: 0.35,   // 0..1
   };
 
   // internal smoothing
@@ -17,6 +24,10 @@ export function createPerformanceState() {
     pitchTarget: 0.5,
     textureTarget: 0.5,
     rhythmTarget: 0.3,
+
+    // ✅ NEW targets (smoothed)
+    tempoTarget: 102,
+    dreamTarget: 0.35,
   };
 
   function clamp01(x) { return Math.max(0, Math.min(1, x)); }
@@ -26,13 +37,36 @@ export function createPerformanceState() {
     state: s,
 
     // set targets (from inputs)
-    setTargets({ rotation, energy, pitch, texture, rhythmDensity } = {}) {
+    setTargets({
+      rotation,
+      energy,
+      pitch,
+      texture,
+      rhythmDensity,
+
+      // ✅ NEW (optional)
+      tempoBpm,
+      dreaminess,
+      activeNebulaId,
+      scaleKey,
+      scaleMode,
+    } = {}) {
       if (rotation !== undefined) v.rotationTarget = clamp(rotation, -1, 1);
       if (energy !== undefined) v.energyTarget = clamp01(energy);
       if (pitch !== undefined) v.pitchTarget = clamp01(pitch);
       if (texture !== undefined) v.textureTarget = clamp01(texture);
       if (rhythmDensity !== undefined) v.rhythmTarget = clamp01(rhythmDensity);
+
+      // ✅ tempo/dream are smoothed
+      if (tempoBpm !== undefined) v.tempoTarget = clamp(tempoBpm, 90, 120);
+      if (dreaminess !== undefined) v.dreamTarget = clamp01(dreaminess);
+
+      // ✅ selection/key/mode are immediate (no smoothing needed)
+      if (activeNebulaId !== undefined) s.activeNebulaId = activeNebulaId | 0;
+      if (scaleKey !== undefined) s.scaleKey = String(scaleKey);
+      if (scaleMode !== undefined) s.scaleMode = String(scaleMode);
     },
+
 
     // trigger event (from click/space/gesture)
     fireTrigger(strength = 1) {
@@ -50,12 +84,19 @@ export function createPerformanceState() {
     // smooth update
     update(dt) {
       // dt in seconds
-      const k = 1 - Math.exp(-dt * 10); // smoothing speed
+      const k = 1 - Math.exp(-dt * 10); // smoothing speed for core params
       s.rotation = s.rotation + (v.rotationTarget - s.rotation) * k;
       s.energy = s.energy + (v.energyTarget - s.energy) * k;
       s.pitch = s.pitch + (v.pitchTarget - s.pitch) * k;
       s.texture = s.texture + (v.textureTarget - s.texture) * k;
       s.rhythmDensity = s.rhythmDensity + (v.rhythmTarget - s.rhythmDensity) * k;
+
+      // ✅ tempo & dream: slower smoothing (feel more "musical")
+      const kt = 1 - Math.exp(-dt * 6);
+      s.tempoBpm = s.tempoBpm + (v.tempoTarget - s.tempoBpm) * kt;
+
+      const kd = 1 - Math.exp(-dt * 4);
+      s.dreaminess = s.dreaminess + (v.dreamTarget - s.dreaminess) * kd;
 
       // decay trigger strength for visuals (optional)
       s.triggerStrength *= Math.exp(-dt * 8);
