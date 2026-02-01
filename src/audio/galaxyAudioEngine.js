@@ -109,9 +109,9 @@ export function createGalaxyAudioEngine() {
   }).connect(gainBass);
 
   const lead = new Tone.PluckSynth({
-    attackNoise: 1.2,
-    dampening: 3200,
-    resonance: 0.92,
+    attackNoise: 0.3,
+    dampening: 1800,
+    resonance: 0.6,
   }).connect(gainLead);
 
   // ---------------------------
@@ -252,6 +252,12 @@ export function createGalaxyAudioEngine() {
     // Hat density / feel
     hatGate = dens;
     gainHat.gain.rampTo(lerp(0.35, 0.90, dens), 0.08);
+
+    // 在 setPerformance 里
+    const padCutoff = lerp(600, 2400, 0.5 * tex + 0.5 * energySmoothed);
+    pad.set({
+      filter: { frequency: padCutoff }
+    });
 
     // Global bus tone mapping (this is where texture/energy really shows)
     // cutoff: higher = brighter

@@ -117,6 +117,16 @@ window.addEventListener("keydown", (e) => {
   if (e.code === "Space") perf.fireTrigger(1.0);
 });
 
+// -------------------------------------
+// mood
+// -------------------------------------
+
+const bgMood = {
+  hue: 0.85,
+  hueTarget: 0.85,
+  energy: 0.0,
+};
+
 
 
 // -------------------------------------
@@ -238,7 +248,7 @@ function hsvToRgb(h, s, v) {
 }
 
 // ✅ 背景色平滑（避免音符跳变像闪烁）
-let bgHue = 0.85; // 默认偏粉紫
+// let bgHue = 0.85; // 默认偏粉紫
 
 
 
@@ -370,12 +380,23 @@ function tick() {
   const trig = ps.trigger;
   if (trig) ps.trigger = false;
 
-  // 4) 音频
+  // 4) 音频（先更新音频）
   audio.setPerformance({ ...ps, trigger: trig });
   audio.update(dt);
 
-  // 5) 音频状态（给 UI / 视觉）
+  // 5) 音频状态（先拿 a，再用）
   const a = audio.getState();
+
+  // ✅ 用 a 去驱动 mood（现在安全）
+  if (trig) {
+    const midi = a.lastMidi ?? 60;
+    const pitchClass = (midi % 12 + 12) % 12;
+    bgMood.hueTarget = pitchClass / 12;
+  }
+
+  // 非常重要：速度要慢（梦幻）
+  bgMood.hue += (bgMood.hueTarget - bgMood.hue) * (1 - Math.exp(-dt * 1.5));
+  bgMood.energy += (a.rms - bgMood.energy) * (1 - Math.exp(-dt * 2.0));
 
   // -----------------------------
   // ✅ 音阶/音高 -> 背景 Tint
@@ -393,11 +414,15 @@ function tick() {
   const targetHue = pitchClass / 12; // 0..1
 
   // 平滑：dt 越大步子越大；8~12 的速度很舒服
-  bgHue += (targetHue - bgHue) * (1 - Math.exp(-dt * 10.0));
+  // bgHue += (targetHue - bgHue) * (1 - Math.exp(-dt * 10.0));
 
-  const sat = 0.85;
+  const sat = 0.85
   const val = 0.18 + (a.rms ?? 0) * 0.55; // 音量越大越亮
-  const tint = hsvToRgb(bgHue, sat, val);
+  const tint = hsvToRgb(
+    bgMood.hue,
+    0.65,
+    0.20 + bgMood.energy * 0.35
+  );
 
 
   // --- 低频呼吸（非常轻）
@@ -406,11 +431,11 @@ function tick() {
 
   // --- 背景随音乐（避免“只是装饰”）
   bg.setStyle({
-    rings: 0.12 + a.beatPulse * 0.55,
-    glitter: 0.10 + a.beatPulse * 0.20,
-    intensity: 0.55 + a.rms * 0.25,
-    parallax: 0.55,
     tint,
+    rings: 0.15 + bgMood.energy * 0.25,
+    glitter: 0.08,            // ⬅️ 刻意压低
+    intensity: 0.6,
+    parallax: 0.5,
   });
 
   // --- Bloom 轻跟随（避免洗白）
