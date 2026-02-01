@@ -108,6 +108,7 @@ const nebulaRaycaster = new THREE.Raycaster();
 let nebulaHit = null; // 存当前命中的物体（可用于后续“active nebula”）
 
 let activeNebulaKey = "C_pluck";
+let interactionMode = "orbit"; 
 
 const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.0);
 const hitPoint = new THREE.Vector3();
@@ -234,7 +235,19 @@ window.addEventListener("keydown", (e) => {
     beatSteps[hoveredStep] = false;
     percSteps[hoveredStep] = false;
   }
+
+  if (e.key === "Escape") {
+    interactionMode = "orbit";
+    activeNebulaKey = null; // ✅ ESC 退出当前星云控制
+  }
 });
+
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    activeNebulaKey = null;
+  }
+});
+
 
 
 // 右键清空当前 step（避免浏览器菜单）
@@ -418,6 +431,41 @@ console.log("vert len", meteorVert.length, "frag len", meteorFrag.length);
 
 setupMeteorGUI(meteorSystem);
 
+
+
+function getPointerNDCFromEvent(e) {
+  const rect = canvas.getBoundingClientRect();
+  const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  const y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+  return new THREE.Vector2(x, y);
+}
+
+function pickNebulaAtEvent(e) {
+  const ndc = getPointerNDCFromEvent(e);
+  nebulaRaycaster.setFromCamera(ndc, camera);
+
+  const hits = nebulaRaycaster.intersectObject(nebulaSystem.root, true);
+  const pick = hits.find(h => h?.object?.userData?.galaxyId);
+
+  if (!pick) return null;
+
+  // 额外做一次“屏幕距离阈值”过滤，避免命中容器/大面
+  const p = pick.point.clone().project(camera);
+  const dx = p.x - ndc.x;
+  const dy = p.y - ndc.y;
+  const NDC_THRESH = 0.12;
+  const ok = (dx*dx + dy*dy) < (NDC_THRESH * NDC_THRESH);
+
+  if (!ok) return null;
+
+  return {
+    galaxyId: pick.object.userData.galaxyId,
+    hit: pick,
+  };
+}
+
+
+
 // -------------------------------------
 // Drag rotate nebula world
 // -------------------------------------
@@ -428,17 +476,46 @@ let lastX = 0;
 let lastY = 0;
 
 canvas.addEventListener("pointerdown", (e) => {
-  // 点到 GUI 不旋转
   if (e.target.closest?.(".lil-gui") || e.target.closest?.(".dg")) return;
 
-  isDragging = true;
-  lastX = e.clientX;
-  lastY = e.clientY;
+  // ✅ Alt + 左键：永远是旋转（不管当前选没选星云）
+  if (e.altKey && e.button === 0) {
+    isDragging = true;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    canvas.setPointerCapture(e.pointerId);
+    return;
+  }
 
-  canvas.setPointerCapture(e.pointerId);
+  // ✅ 普通左键：做“即时 pick”（不依赖 hoveredNebulaKey）
+  if (e.button === 0) {
+    const pick = pickNebulaAtEvent(e);
+
+    if (pick?.galaxyId) {
+      activeNebulaKey = pick.galaxyId;
+
+      // 可选：确认音（你之前已经做过）
+      // const inst = voices.getNebulaInstrument(activeNebulaKey);
+      // inst?.triggerAttackRelease("C5", "16n", Tone.now(), 0.9);
+
+      // 进入演奏：不旋转
+      return;
+    } else {
+      // 点空白：取消选中
+      activeNebulaKey = null;
+      // 点空白本身不旋转；想旋转请按 Alt（手感更一致）
+      return;
+    }
+  }
 });
 
+
+
 canvas.addEventListener("pointermove", (e) => {
+  const rect = canvas.getBoundingClientRect();
+  pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+
   if (!isDragging) return;
 
   const dx = e.clientX - lastX;
@@ -448,20 +525,15 @@ canvas.addEventListener("pointermove", (e) => {
 
   nebulaSystem.root.rotation.y += dx * 0.005;
   nebulaSystem.root.rotation.x += dy * 0.005;
-
-  nebulaSystem.root.rotation.x = THREE.MathUtils.clamp(
-    nebulaSystem.root.rotation.x,
-    -1.25,
-    1.25
-  );
+  nebulaSystem.root.rotation.x = THREE.MathUtils.clamp(nebulaSystem.root.rotation.x, -1.25, 1.25);
 });
+
 
 canvas.addEventListener("pointerup", (e) => {
   isDragging = false;
-  try {
-    canvas.releasePointerCapture(e.pointerId);
-  } catch {}
+  try { canvas.releasePointerCapture(e.pointerId); } catch {}
 });
+
 
 function hsvToRgb(h, s, v) {
   h = ((h % 1) + 1) % 1;
@@ -649,7 +721,8 @@ function tick() {
   stars.material.uniforms.uPointer.value.copy(pointer);
 
   // --- nebula & meteor
-  nebulaSystem.update(hitPoint, t);
+  const disturbPoint = (nebulaHit?.point ? nebulaHit.point : hitPoint);
+  nebulaSystem.update(disturbPoint, t);
   meteorSystem.update(t);
 
   // -----------------------------
@@ -673,11 +746,11 @@ function tick() {
   const activeInst = activeNebulaKey ? voices.getNebulaInstrumentName(activeNebulaKey) : "-";
 
   debugHud.textContent =
-    `hover:  ${hoveredNebulaKey ?? "-"} (${hoverInst})\n` +
-    `active: ${activeNebulaKey ?? "-"} (${activeInst})\n` +
+    `mode:  ${interactionMode}\n` +
+    `hover:  ${hoveredNebulaKey ?? "-"}\n` +
+    `active: ${activeNebulaKey ?? "-"}\n` +
     `hit:    ${hasNebulaHit ? "yes" : "no"}\n` +
     `down:   ${pointerDown ? "yes" : "no"}`;
-
 
 
   const trig = ps.trigger;
@@ -687,7 +760,13 @@ function tick() {
   // click 发生时：如果命中星云，就切 activeNebulaId（用 hoveredNebulaKey）
   if (trig && hoveredNebulaKey) {
     const prev = activeNebulaKey;
-    activeNebulaKey = hoveredNebulaKey;
+
+    // if (hoveredNebulaKey) {
+    //   activeNebulaKey = hoveredNebulaKey;
+    //   interactionMode = "play";   // ✅ 选中星云 → 锁定演奏模式
+    // } else {
+    //   interactionMode = "orbit";  // ✅ 点空白 → 解锁旋转
+    // }
 
     // 立刻给一个“音色确认音”：点击就能听到变化
     if (prev !== activeNebulaKey) {

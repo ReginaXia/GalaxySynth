@@ -388,19 +388,62 @@ export function createGalaxyAudioEngine() {
     if (!instrument) return;
 
     const STEPS = 24;
-    const st = nebulaState.get(galaxyId) ?? { lastStep: -1 };
+    const BASE_ROOT = "C4";
 
+    // ---- state ----
+    const st =
+      nebulaState.get(galaxyId) ??
+      {
+        lastStep: -1,
+        lastTheta: theta01,
+        lastTime: now,
+      };
+
+    // ---- step quantization ----
     const step = quantize(theta01, STEPS);
-    if (step === st.lastStep) return;
+    if (step === st.lastStep) {
+      st.lastTheta = theta01;
+      st.lastTime = now;
+      nebulaState.set(galaxyId, st);
+      return;
+    }
 
+    // ---- direction & speed ----
+    let dTheta = theta01 - st.lastTheta;
+    if (dTheta > 0.5) dTheta -= 1;
+    if (dTheta < -0.5) dTheta += 1;
+
+    const dt = Math.max(0.001, now - st.lastTime);
+    const speed = Math.abs(dTheta) / dt; // “转速感”
+
+    const direction = Math.sign(dTheta) || 1;
+
+    // ---- musical mapping ----
+    // step → pitch, direction controls up/down
+    const signedStep = direction > 0 ? step : STEPS - step;
+    const p01 = signedStep / STEPS;
+    const note = pitch01ToNote(p01, BASE_ROOT);
+
+    // ---- expression ----
+    // 快速转 = 更亮、更响
+    const velocity = clamp01(0.35 + speed * 1.4);
+    const dur = Math.max(0.035, 0.14 - speed * 0.08);
+
+    // 如果是 Synth，动态推亮一点（不破坏其他 synth）
+    if (instrument.filter?.frequency) {
+      const cutoff = lerp(800, 4200, velocity);
+      instrument.filter.frequency.rampTo(cutoff, 0.05);
+    }
+
+    instrument.triggerAttackRelease(note, dur, now, velocity);
+
+    // ---- update state ----
     st.lastStep = step;
+    st.lastTheta = theta01;
+    st.lastTime = now;
     nebulaState.set(galaxyId, st);
-
-    const p01 = step / STEPS;
-    const note = pitch01ToNote(p01, "C4");
-
-    instrument.triggerAttackRelease(note, "16n", now, 0.8);
   }
+
 
 
   return {
