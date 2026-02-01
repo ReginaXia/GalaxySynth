@@ -223,6 +223,24 @@ canvas.addEventListener("pointerup", (e) => {
   } catch {}
 });
 
+function hsvToRgb(h, s, v) {
+  h = ((h % 1) + 1) % 1;
+  const i = Math.floor(h * 6);
+  const f = h * 6 - i;
+  const p = v * (1 - s);
+  const q = v * (1 - f * s);
+  const t = v * (1 - (1 - f) * s);
+  const m = i % 6;
+  const r = [v, q, p, p, t, v][m];
+  const g = [t, v, v, q, p, p][m];
+  const b = [p, p, t, v, v, q][m];
+  return [r, g, b];
+}
+
+// ✅ 背景色平滑（避免音符跳变像闪烁）
+let bgHue = 0.85; // 默认偏粉紫
+
+
 
 // -------------------------------------
 // Zoom to cursor
@@ -359,6 +377,29 @@ function tick() {
   // 5) 音频状态（给 UI / 视觉）
   const a = audio.getState();
 
+  // -----------------------------
+  // ✅ 音阶/音高 -> 背景 Tint
+  // 需要 audio.getState() 提供 lastMidi 或 lastDegree
+  // lastMidi: 0..127 (推荐)
+  // lastDegree: 1..7 (也行)
+  // // -----------------------------
+  // const lastMidi = (a.lastMidi ?? 60);     // 没有就用 C4
+  // const pitchClass = ((lastMidi % 12) + 12) % 12; // 0..11
+
+  const midi = a.lastMidi ?? 60;
+  const pitchClass = ((midi % 12) + 12) % 12; // 0..11
+
+  // 让 12 个音对应 12 个 hue，变化会很强烈
+  const targetHue = pitchClass / 12; // 0..1
+
+  // 平滑：dt 越大步子越大；8~12 的速度很舒服
+  bgHue += (targetHue - bgHue) * (1 - Math.exp(-dt * 10.0));
+
+  const sat = 0.85;
+  const val = 0.18 + (a.rms ?? 0) * 0.55; // 音量越大越亮
+  const tint = hsvToRgb(bgHue, sat, val);
+
+
   // --- 低频呼吸（非常轻）
   const bassPulse = Math.pow(a.beatPulse * (ps.energy ?? 0), 1.2);
   scene.scale.setScalar(1.0 + bassPulse * 0.01);
@@ -369,6 +410,7 @@ function tick() {
     glitter: 0.10 + a.beatPulse * 0.20,
     intensity: 0.55 + a.rms * 0.25,
     parallax: 0.55,
+    tint,
   });
 
   // --- Bloom 轻跟随（避免洗白）

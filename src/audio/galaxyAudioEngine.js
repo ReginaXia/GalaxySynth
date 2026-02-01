@@ -138,6 +138,7 @@ export function createGalaxyAudioEngine() {
     beatPulse: 0,  // 0..1 decays
     lastNote: null,
     lastNoteTime: 0,
+    lastMidi: 60,
 
     level: { kick: 0, hat: 0, pad: 0, bass: 0, lead: 0 },
 
@@ -287,6 +288,8 @@ export function createGalaxyAudioEngine() {
       const note = pitch01ToNote(ps.pitch ?? 0.5, "A3");
       out.lastNote = note;
       out.lastNoteTime = Tone.now();
+
+      out.lastMidi = Tone.Frequency(note).toMidi();
 
       // Make it impossible to miss (you can tune down later)
       const strength = clamp01(ps.triggerStrength ?? 1);

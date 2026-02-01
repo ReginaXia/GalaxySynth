@@ -30,6 +30,8 @@ export function createDreamyBackground(scene) {
       uParallax: { value: 0.6 }, // 0..1
       uRings: { value: 0.7 },    // 0..1
       uGlitter: { value: 0.6 },  // 0..1
+
+      uTint: { value: new THREE.Vector3(1.0, 0.45, 0.85) },
     },
   });
 
@@ -54,13 +56,21 @@ export function createDreamyBackground(scene) {
       mat.uniforms.uMouse.value.set(x, y);
     },
 
-    // Quick style tuning (all optional)
-    setStyle({ parallax, rings, glitter, intensity } = {}) {
+    // ✅ add tint
+    setStyle({ parallax, rings, glitter, intensity, tint } = {}) {
       if (parallax !== undefined) mat.uniforms.uParallax.value = parallax;
       if (rings !== undefined) mat.uniforms.uRings.value = rings;
       if (glitter !== undefined) mat.uniforms.uGlitter.value = glitter;
       if (intensity !== undefined) mat.uniforms.uIntensity.value = intensity;
+
+      if (tint !== undefined) {
+        // tint: [r,g,b] or THREE.Color-ish
+        if (Array.isArray(tint)) mat.uniforms.uTint.value.set(tint[0], tint[1], tint[2]);
+        else if (tint?.isColor) mat.uniforms.uTint.value.set(tint.r, tint.g, tint.b);
+        else if (tint?.x !== undefined) mat.uniforms.uTint.value.set(tint.x, tint.y, tint.z);
+      }
     },
+
 
     // handy getters (optional)
     getUniforms() {

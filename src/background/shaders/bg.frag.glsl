@@ -9,6 +9,8 @@ uniform float uParallax; // 0..1
 uniform float uRings;    // 0..1
 uniform float uGlitter;  // 0..1
 
+uniform vec3 uTint;
+
 varying vec2 vUv;
 
 float hash(vec2 p) {
@@ -109,5 +111,7 @@ void main() {
   vec3 gcol = hsv2rgb(vec3(gh, 0.35, 1.0));
   col += gcol * sparkle * 0.18;
 
+  col *= uTint;
+  
   gl_FragColor = vec4(col, 1.0);
 }
