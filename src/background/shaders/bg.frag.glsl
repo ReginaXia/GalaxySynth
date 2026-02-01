@@ -91,7 +91,7 @@ void main(){
   vec3 pastel = mix(pastelB, pastelA, blobs);
 
   // Lift shadows so it doesn't look like "dyed black"
-  //pastel = mix(pastel, vec3(0.96, 0.95, 0.98), 0.06);
+  pastel = mix(pastel, vec3(0.95, 0.96, 1.00), 0.05);
 
   // Optional rings (very soft, non-nightclub)
   float ring = 0.0;

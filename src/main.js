@@ -383,28 +383,40 @@ function tick() {
   // 5) 音频状态：先拿到 a，再用它做任何视觉映射
   const a = audio.getState();
 
-  // -----------------------------
-  // Mood mapping (slow, dreamy)
-  // -----------------------------
-  // 当 trigger 发生时，更新目标色相（仅更新 target，不直接改 hue）
-  if (trig) {
-    const midi = a.lastMidi ?? 60;
-    const pitchClass = (midi % 12 + 12) % 12;
-    bgMood.hueTarget = pitchClass / 12;
-  }
+  // ✅ 在这里统一定义 midi
+  const midi = a.lastMidi ?? 60;
+
+  // 之后随便用
+  const pitchClass = ((midi % 12) + 12) % 12;
+  const hueSpan = 0.18;
+  const hueBase = 0.86;
+  bgMood.hueTarget = hueBase + (pitchClass / 12) * hueSpan;
+
 
   // 慢慢 lerp（关键：速度小，避免夜店闪）
   bgMood.hue += (bgMood.hueTarget - bgMood.hue) * (1 - Math.exp(-dt * 1.2));
-  bgMood.energy += (a.rms - bgMood.energy) * (1 - Math.exp(-dt * 1.6));
 
-  // 交互能量（即使没声音，也能让背景“显现”）
+  // ✅ 先定义 interact
   const interact = Math.max(ps.energy ?? 0, (ps.texture ?? 0) * 0.35);
+
+  // ✅ 再用它算 rawE
+  const rawE = Math.max(a.rms ?? 0, interact * 0.65);
+
+  // 慢 attack / 更慢 release，避免跟鼓点跳
+  const atk = 1 - Math.exp(-dt * 1.2);   // 变亮速度（慢）
+  const rel = 1 - Math.exp(-dt * 0.55);  // 变暗速度（更慢）
+  bgMood.energy += (rawE - bgMood.energy) * (rawE > bgMood.energy ? atk : rel);
+
 
   // 音频能量（如果 Tone 还没响，这里可能很低）
   const audioE = a.rms ?? 0;
 
   // ✅ emergence：音频 or 交互，只要有一个起来就显现
-  const emergence = THREE.MathUtils.clamp(Math.max(audioE * 1.35, interact * 0.90), 0, 1);
+  // const emergence = THREE.MathUtils.clamp(Math.max(audioE * 1.35, interact * 0.90), 0, 1);
+  let emergence = THREE.MathUtils.clamp(bgMood.energy * 1.25, 0, 1);
+  // 压顶：让 0.7~1.0 的区域不要变成白墙
+  emergence = 1.0 - Math.exp(-emergence * 2.2);
+
 
   // ✅ tint：用 bgMood.hue（你已经在慢慢 lerp）
   const tint = hsvToRgb(bgMood.hue, 0.55, 0.90);
@@ -412,22 +424,22 @@ function tick() {
   bg.setStyle({
     tint,
     emergence,
-    rings: 0.10 + emergence * 0.20,
-    glitter: 0.06,
+    rings: 0.10 + emergence * 0.18,
+    glitter: 0.05,
     intensity: 1.0,
     parallax: 0.5,
   });
 
 
-
   // --- 低频呼吸（非常轻，避免蹦迪）
   const bassPulse = Math.pow(a.beatPulse * (ps.energy ?? 0), 1.2);
-  scene.scale.setScalar(1.0 + bassPulse * 0.006);
+  scene.scale.setScalar(1.0 + bassPulse * 0.0015);
 
   // --- Bloom：只跟随 rms（慢），别跟 beatPulse
-  bloomPass.strength += ((0.20 + bgMood.energy * 0.18) - bloomPass.strength) * (1 - Math.exp(-dt * 2.0));
-  bloomPass.threshold = 0.95;
-  bloomPass.radius = 0.18;
+  bloomPass.strength += ((0.16 + bgMood.energy * 0.14) - bloomPass.strength) * (1 - Math.exp(-dt * 1.6));
+  bloomPass.threshold = 0.97;
+  bloomPass.radius = 0.14;
+
 
 
   // --- render

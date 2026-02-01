@@ -31,6 +31,9 @@ function pitch01ToNote(p01, root = "A3") {
 
 export function createGalaxyAudioEngine() {
   let started = false;
+  let rhythmEnabled = false;   // kick/hat/bass
+  let padEnabled = false;      // pad drone
+
 
   // ---------------------------
   // MASTER & GLOBAL FX
@@ -108,11 +111,26 @@ export function createGalaxyAudioEngine() {
     },
   }).connect(gainBass);
 
-  const lead = new Tone.PluckSynth({
-    attackNoise: 0.3,
-    dampening: 1800,
-    resonance: 0.6,
+  const lead = new Tone.Synth({
+    oscillator: { type: "triangle" },
+    envelope: { attack: 0.04, decay: 0.12, sustain: 0.35, release: 0.55 },
   }).connect(gainLead);
+
+  // ---------------------------
+  // meteor
+  // ---------------------------
+
+  const meteorNoise = new Tone.Noise("pink").start();
+  const meteorFilter = new Tone.Filter({ type: "bandpass", frequency: 800, Q: 1.8 });
+  const meteorEnv = new Tone.AmplitudeEnvelope({ attack: 0.01, decay: 0.25, sustain: 0.0, release: 0.25 });
+  meteorNoise.chain(meteorFilter, meteorEnv, busFilter); // 或接一个单独 gainFX
+
+  function triggerMeteor(strength = 1, brightness = 0.6) {
+  const s = clamp01(strength);
+  meteorFilter.frequency.setValueAtTime(lerp(500, 2200, clamp01(brightness)), Tone.now());
+  meteorEnv.triggerAttackRelease(lerp(0.18, 0.5, s));
+}
+
 
   // ---------------------------
   // DEFAULT MIX (important!)
@@ -170,27 +188,31 @@ export function createGalaxyAudioEngine() {
     evtKick = Tone.Transport.scheduleRepeat((time) => {
       kick.triggerAttackRelease("C1", "8n", time, 1.2);
       // Bass follows kick on root
-      bass.triggerAttackRelease("A1", "8n", time, 0.85);
+      // bass.triggerAttackRelease("A1", "8n", time, 0.85);
 
       beatPulse = 1.0;
     }, "4n");
 
     // Hat every 8th note; density is controlled by volume + gating randomness
     evtHat = Tone.Transport.scheduleRepeat((time) => {
-      // density gate: higher density => more likely to play
+      if (!rhythmEnabled) return;
+
       const r = Math.random();
       const prob = lerp(0.15, 0.98, hatGate);
-      if (r < prob) {
-        hat.triggerAttackRelease("16n", time, 0.55);
-      }
+      if (r < prob) hat.triggerAttackRelease("16n", time, 0.55);
     }, "8n");
 
+
     // Pad: "breathing refresh" every 2 bars
-    const chord = ["A3", "E4", "G4"];
     evtPad = Tone.Transport.scheduleRepeat((time) => {
+      if (!padEnabled) return;
+
       pad.releaseAll(time);
-      pad.triggerAttackRelease(chord, "2m", time, 0.18);
+      pad.triggerAttackRelease(["A3","E4","G4"], "2m", time, 0.18);
     }, "2m");
+
+    // ✅ 删掉“开局立刻触发”的那段 now 触发（否则一上来就嗡嗡）
+
 
     // Start the first chord immediately (so you don't wait 2 bars)
     const now = Tone.now();
@@ -242,8 +264,12 @@ export function createGalaxyAudioEngine() {
   function setPerformance(ps) {
     // ps: { energy, texture, rhythmDensity, rotation, pitch, trigger, triggerStrength }
     const e = clamp01(ps.energy ?? 0);
-    const tex = clamp01(ps.texture ?? 0.5);
     const dens = clamp01(ps.rhythmDensity ?? 0.3);
+
+    rhythmEnabled = dens > 0.08 && e > 0.10;
+    padEnabled = e > 0.08;
+
+    const tex = clamp01(ps.texture ?? 0.5);
     const rot = Math.max(-1, Math.min(1, ps.rotation ?? 0));
 
     // smooth energy to avoid zipper noise
@@ -301,7 +327,10 @@ export function createGalaxyAudioEngine() {
       const strength = clamp01(ps.triggerStrength ?? 1);
       const vel = lerp(0.55, 1.15, strength);
 
-      lead.triggerAttackRelease(note, "8n", Tone.now(), vel);
+      const bassNote = Tone.Frequency(note).transpose(-24).toNote();
+      bass.triggerAttackRelease(bassNote, "8n", Tone.now(), 0.35);
+
+      lead.triggerAttackRelease(note, "8n", Tone.now(), vel * 0.85);
     }
 
     // expose style for UI
@@ -339,6 +368,7 @@ export function createGalaxyAudioEngine() {
     setPerformance,
     update,
     getState,
+    triggerMeteor,
     isStarted: () => started,
   };
 }
