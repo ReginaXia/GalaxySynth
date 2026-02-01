@@ -17,7 +17,9 @@ export function setupGalaxyGUI({ camera, renderer, nebulaSystem }) {
     }
   }
   function writeStore(store) {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(store)); } catch {}
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+    } catch {}
   }
   function savePerGalaxy(id, data) {
     const store = readStore();
@@ -32,9 +34,13 @@ export function setupGalaxyGUI({ camera, renderer, nebulaSystem }) {
   for (const c of nebulaSystem.clusters) {
     const saved = loadPerGalaxy(c.id);
     if (saved) {
-      // rebuild + palette + transform
       if (saved.transform) nebulaSystem.setClusterTransform(c.id, saved.transform);
-      if (saved.shape) nebulaSystem.rebuildCluster(c.id, { shape: saved.shape, layers: saved.layers, palette: saved.palette });
+      if (saved.shape)
+        nebulaSystem.rebuildCluster(c.id, {
+          shape: saved.shape,
+          layers: saved.layers,
+          palette: saved.palette,
+        });
       else {
         if (saved.palette) nebulaSystem.setClusterPalette(c.id, saved.palette);
       }
@@ -46,27 +52,17 @@ export function setupGalaxyGUI({ camera, renderer, nebulaSystem }) {
   raycaster.params.Points.threshold = 0.12;
   const mouse = new THREE.Vector2();
 
-  let downX = 0, downY = 0;
-  window.addEventListener("pointerdown", (e) => { downX = e.clientX; downY = e.clientY; });
-  window.addEventListener("pointerup", (e) => {
-    const dx = e.clientX - downX, dy = e.clientY - downY;
-    if (Math.sqrt(dx*dx + dy*dy) < 4) tryPick(e);
+  let downX = 0,
+    downY = 0;
+  window.addEventListener("pointerdown", (e) => {
+    downX = e.clientX;
+    downY = e.clientY;
   });
-
-  function tryPick(e) {
-    const rect = renderer.domElement.getBoundingClientRect();
-    mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    mouse.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
-    raycaster.setFromCamera(mouse, camera);
-    const hits = raycaster.intersectObjects(nebulaSystem.pickables, true);
-    if (!hits.length) return;
-    const id = hits[0].object.userData.galaxyId;
-    if (!id) return;
-    state.active = id;
-    nebulaSystem.setActive(id);
-    pullStateFromActive();
-    updateAllDisplays(gui);
-  }
+  window.addEventListener("pointerup", (e) => {
+    const dx = e.clientX - downX,
+      dy = e.clientY - downY;
+    if (Math.sqrt(dx * dx + dy * dy) < 4) tryPick(e);
+  });
 
   // -------- state --------
   const state = {
@@ -137,7 +133,10 @@ export function setupGalaxyGUI({ camera, renderer, nebulaSystem }) {
     state.hueJitter = pal.hueJitter;
     state.rainbowMix = pal.rainbowMix;
     state.hueScale = pal.hueScale;
-    state.pal0 = pal.c0; state.pal1 = pal.c1; state.pal2 = pal.c2; state.pal3 = pal.c3;
+    state.pal0 = pal.c0;
+    state.pal1 = pal.c1;
+    state.pal2 = pal.c2;
+    state.pal3 = pal.c3;
 
     // layers
     state.outerOpacity = p.layers.outer.opacity;
@@ -160,7 +159,10 @@ export function setupGalaxyGUI({ camera, renderer, nebulaSystem }) {
         hueJitter: state.hueJitter,
         rainbowMix: state.rainbowMix,
         hueScale: state.hueScale,
-        c0: state.pal0, c1: state.pal1, c2: state.pal2, c3: state.pal3,
+        c0: state.pal0,
+        c1: state.pal1,
+        c2: state.pal2,
+        c3: state.pal3,
       },
       layers: {
         outer: { opacity: state.outerOpacity, size: state.outerSize },
@@ -200,7 +202,6 @@ export function setupGalaxyGUI({ camera, renderer, nebulaSystem }) {
 
     nebulaSystem.setClusterPalette(id, snapshot().palette);
 
-    // layer uniforms 其实在 rebuild 时会写入 preset；这里为了实时反馈也直接写 preset + rebuild（轻）
     nebulaSystem.rebuildCluster(id, {
       shape: activeCluster().preset.shape,
       palette: snapshot().palette,
@@ -223,6 +224,30 @@ export function setupGalaxyGUI({ camera, renderer, nebulaSystem }) {
   // -------- GUI --------
   const gui = new GUI({ title: "GalaxySynth" });
 
+  // ===============================
+  // Nebula Attraction (搓碟引力)
+  // ===============================
+  // 注意：nebulaSystem 必须在 return 里暴露 attractionUI 才能用
+  // nebulaSystem.attractionUI = { outerStrength, coreStrength, starsStrength, radius }
+  const fAttract = gui.addFolder("Nebula Attraction");
+  fAttract.open();
+
+  // 做个小防御：如果 attractionUI 还没加进 nebulaSystem，就提示但不崩
+  if (nebulaSystem.attractionUI) {
+    fAttract
+      .add(nebulaSystem.attractionUI, "outerStrength", 0.0, 0.08, 0.001)
+      .name("outer strength");
+    fAttract
+      .add(nebulaSystem.attractionUI, "coreStrength", 0.0, 0.08, 0.001)
+      .name("core strength");
+    fAttract
+      .add(nebulaSystem.attractionUI, "starsStrength", 0.0, 0.12, 0.001)
+      .name("stars strength");
+    fAttract.add(nebulaSystem.attractionUI, "radius", 0.5, 3.0, 0.01).name("radius");
+  } else {
+    fAttract.add({ note: "nebulaSystem.attractionUI missing" }, "note").name("⚠ setup required");
+  }
+
   // Active dropdown (dynamic)
   function activeOptions() {
     const opts = {};
@@ -239,47 +264,62 @@ export function setupGalaxyGUI({ camera, renderer, nebulaSystem }) {
 
   // Cluster manager
   const fCluster = gui.addFolder("Cluster");
-  fCluster.add({ Add: () => {
-    const newId = nebulaSystem.addCluster({
-      x: 0, y: nebulaSystem.planeY, z: 0,
-      scale: 1,
-      preset: structuredCloneSafe(activeCluster().preset),
-    });
-    // refresh dropdown
-    gui.remove(activeCtrl);
-    activeCtrl = gui.add(state, "active", activeOptions()).name("Active Galaxy");
-    activeCtrl.onChange(() => {
-      nebulaSystem.setActive(state.active);
-      pullStateFromActive();
-      updateAllDisplays(gui);
-    });
+  fCluster
+    .add(
+      {
+        Add: () => {
+          const newId = nebulaSystem.addCluster({
+            x: 0,
+            y: nebulaSystem.planeY,
+            z: 0,
+            scale: 1,
+            preset: structuredCloneSafe(activeCluster().preset),
+          });
 
-    state.active = newId;
-    nebulaSystem.setActive(newId);
-    pullStateFromActive();
-    updateAllDisplays(gui);
-  } }, "Add").name("Add Galaxy (Duplicate Active)");
+          gui.remove(activeCtrl);
+          activeCtrl = gui.add(state, "active", activeOptions()).name("Active Galaxy");
+          activeCtrl.onChange(() => {
+            nebulaSystem.setActive(state.active);
+            pullStateFromActive();
+            updateAllDisplays(gui);
+          });
 
-  fCluster.add({ Remove: () => {
-    if (nebulaSystem.clusters.length <= 1) return alert("至少保留一个星云");
-    const id = state.active;
-    if (!confirm(`Remove galaxy ${id}?`)) return;
-    nebulaSystem.removeCluster(id);
+          state.active = newId;
+          nebulaSystem.setActive(newId);
+          pullStateFromActive();
+          updateAllDisplays(gui);
+        },
+      },
+      "Add"
+    )
+    .name("Add Galaxy (Duplicate Active)");
 
-    // refresh dropdown
-    gui.remove(activeCtrl);
-    activeCtrl = gui.add(state, "active", activeOptions()).name("Active Galaxy");
-    activeCtrl.onChange(() => {
-      nebulaSystem.setActive(state.active);
-      pullStateFromActive();
-      updateAllDisplays(gui);
-    });
+  fCluster
+    .add(
+      {
+        Remove: () => {
+          if (nebulaSystem.clusters.length <= 1) return alert("至少保留一个星云");
+          const id = state.active;
+          if (!confirm(`Remove galaxy ${id}?`)) return;
+          nebulaSystem.removeCluster(id);
 
-    state.active = nebulaSystem.getActiveId();
-    nebulaSystem.setActive(state.active);
-    pullStateFromActive();
-    updateAllDisplays(gui);
-  } }, "Remove").name("Remove Active");
+          gui.remove(activeCtrl);
+          activeCtrl = gui.add(state, "active", activeOptions()).name("Active Galaxy");
+          activeCtrl.onChange(() => {
+            nebulaSystem.setActive(state.active);
+            pullStateFromActive();
+            updateAllDisplays(gui);
+          });
+
+          state.active = nebulaSystem.getActiveId();
+          nebulaSystem.setActive(state.active);
+          pullStateFromActive();
+          updateAllDisplays(gui);
+        },
+      },
+      "Remove"
+    )
+    .name("Remove Active");
 
   // Shape
   const fShape = gui.addFolder("Shape (Rebuild)");
@@ -322,6 +362,22 @@ export function setupGalaxyGUI({ camera, renderer, nebulaSystem }) {
   savePerGalaxy(state.active, snapshot());
 
   return { gui, state, destroy: () => gui.destroy() };
+
+  // -------- helpers --------
+  function tryPick(e) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+    raycaster.setFromCamera(mouse, camera);
+    const hits = raycaster.intersectObjects(nebulaSystem.pickables, true);
+    if (!hits.length) return;
+    const id = hits[0].object.userData.galaxyId;
+    if (!id) return;
+    state.active = id;
+    nebulaSystem.setActive(id);
+    pullStateFromActive();
+    updateAllDisplays(gui);
+  }
 }
 
 /* -------- utils -------- */

@@ -173,6 +173,13 @@ export function createNebulaSystem({ scene, planeY = 0.0, starTexture }) {
   // 供 picking 用
   const pickables = [];
 
+  const attractionUI = {
+    outerStrength: 0.018,
+    coreStrength: 0.016,
+    starsStrength: 0.018,
+    radius: 1.55,
+  };
+
   function setActive(id) {
     activeId = id;
   }
@@ -284,8 +291,9 @@ export function createNebulaSystem({ scene, planeY = 0.0, starTexture }) {
         points: c.outer,
         basePositions: c.outer.userData.basePositions,
         targetLocal: pLocal,
-        strength: 0.01 * inflOuter,
-        swirl: 0.35 * inflOuter,
+        strength: attractionUI.outerStrength * inflOuter,
+        swirl: 0.3 * inflOuter,
+        radius: attractionUI.radius,
         t,
       });
 
@@ -293,9 +301,21 @@ export function createNebulaSystem({ scene, planeY = 0.0, starTexture }) {
         points: c.core,
         basePositions: c.core.userData.basePositions,
         targetLocal: pLocal,
-        strength: 0.01 * inflCore,
+        strength: attractionUI.outerStrength * inflCore,
         swirl: 0.22 * inflCore,
+        radius: attractionUI.radius,
         t: t + 13.7,
+      });
+
+      // NEW: starbase / armStars 也跟着被搓动
+      applyAttraction({
+        points: c.armStars,
+        basePositions: c.armStars.userData.basePositions,
+        targetLocal: pLocal,
+        strength: attractionUI.outerStrength * inflOuter, // 比 outer/core 略大一点，更显眼
+        swirl: 0.28 * inflOuter,
+        radius: attractionUI.radius,
+        t: t + 7.3,
       });
 
       // opacity 本身也可被 GUI 改，所以这里只做轻微增强，不强行覆盖
@@ -443,6 +463,8 @@ export function createNebulaSystem({ scene, planeY = 0.0, starTexture }) {
 
     update,
     planeY,
+
+    attractionUI,
   };
 }
 
@@ -764,7 +786,7 @@ function applyPaletteUniforms(mat, palette) {
 
 /* ========= Mouse attraction (same) ========= */
 
-function applyAttraction({ points, basePositions, targetLocal, strength, swirl, t }) {
+function applyAttraction({ points, basePositions, targetLocal, strength, swirl, radius, t }) {
   const posAttr = points.geometry.attributes.position;
   const arr = posAttr.array;
 
@@ -774,7 +796,8 @@ function applyAttraction({ points, basePositions, targetLocal, strength, swirl, 
     return;
   }
 
-  const R = 1.25;
+  //扰动力度
+  // const R = attractionUI.radius;
 
   for (let i = 0; i < arr.length; i += 3) {
     const bx = basePositions[i + 0];
@@ -792,7 +815,7 @@ function applyAttraction({ points, basePositions, targetLocal, strength, swirl, 
     const dx = targetLocal.x - bx;
     const dz = targetLocal.z - bz;
     const d = Math.sqrt(dx * dx + dz * dz);
-    const w = smoothstep(R, 0.0, d);
+    const w = smoothstep(radius, 0.0, d);
 
     if (w > 0.0001) {
       x += dx * strength * w;
