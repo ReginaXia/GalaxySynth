@@ -29,6 +29,33 @@ import meteorVert from "./shaders/meteor.vert.glsl?raw";
 import meteorFrag from "./shaders/meteor.frag.glsl?raw";
 
 console.log("MAIN JS LOADED");
+// --- Debug HUD (show active/hover)
+const debugHud = document.createElement("div");
+debugHud.style.cssText = `
+  position:fixed;
+  top:12px;
+  left:50%;
+  transform:translateX(-50%);
+  z-index:9999;
+
+  padding:8px 14px;
+  border-radius:999px;
+
+  background:rgba(0,0,0,0.45);
+  color:#fff;
+
+  font:12px/1.35 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas;
+  pointer-events:none;
+  white-space:pre;
+  text-align:center;
+`;
+
+
+debugHud.textContent = "HUD ready";
+
+
+document.body.appendChild(debugHud);
+
 
 // -------------------------------------
 // Renderer
@@ -75,6 +102,11 @@ bloomPass.threshold = 0.7;
 // Raycast plane (y = 0)
 // -------------------------------------
 const raycaster = new THREE.Raycaster();
+const nebulaRaycaster = new THREE.Raycaster();
+let nebulaHit = null; // 存当前命中的物体（可用于后续“active nebula”）
+
+let activeNebulaKey = "C_pluck";
+
 const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.0);
 const hitPoint = new THREE.Vector3();
 
@@ -84,6 +116,17 @@ window.addEventListener("pointermove", (e) => {
   pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
   pointer.y = -((e.clientY / window.innerHeight) * 2 - 1);
 });
+
+
+// -------------------------------------
+// 全局pointDown
+// -------------------------------------
+
+let pointerDown = false;
+window.addEventListener("pointerdown", () => (pointerDown = true));
+window.addEventListener("pointerup",   () => (pointerDown = false));
+
+
 
 // -------------------------------------
 // Audio: must start on gesture
@@ -294,6 +337,7 @@ window.addEventListener("mousedown", () => {
   perf.fireTrigger(1.0);
   console.log("[TRIGGER] click");
 });
+
 window.addEventListener("keydown", (e) => {
   if (e.code === "Space") perf.fireTrigger(1.0);
 });
@@ -556,6 +600,41 @@ function tick() {
   raycaster.setFromCamera(pointer, camera);
   raycaster.ray.intersectPlane(plane, hitPoint);
 
+  // --- raycast to nebula (lead only when hovering nebula)
+  nebulaRaycaster.setFromCamera(pointer, camera);
+
+  // 射线打到 nebulaSystem.root 的所有子物体（true 表示递归）
+  const hits = nebulaRaycaster.intersectObject(nebulaSystem.root, true);
+
+  // 1) 只接受带 galaxyId 的命中（避免命中巨大“背景/点云容器”导致全屏都 hit）
+  const pick = hits.find(h => h?.object?.userData?.galaxyId);
+
+  // 2) 再加一个“屏幕距离阈值”，离开星云就立刻判定为 no
+  let nebulaHitLocal = null;
+  let hoveredNebulaKey = null;
+
+  if (pick) {
+    // 把命中点投影到 NDC，和鼠标 pointer(NDC) 比距离
+    const p = pick.point.clone().project(camera);   // p.x/p.y 是 NDC
+    const dx = p.x - pointer.x;
+    const dy = p.y - pointer.y;
+
+    // 阈值：越小越严格（0.08~0.18 之间都合理）
+    const NDC_THRESH = 0.12;
+    const ok = (dx*dx + dy*dy) < (NDC_THRESH * NDC_THRESH);
+
+    if (ok) {
+      nebulaHitLocal = pick;
+      hoveredNebulaKey = pick.object.userData.galaxyId;
+    }
+  }
+
+  nebulaHit = nebulaHitLocal;
+  const hasNebulaHit = !!nebulaHit;
+
+
+
+
   // --- background
   bg.update(t);
   bg.setMouse01(mouse01.x, mouse01.y);
@@ -583,14 +662,54 @@ function tick() {
 
     // 3) trigger 只给音频吃一帧
   const ps = perf.state;
-  console.log(ps.tempoBpm, ps.scaleKey, ps.scaleMode, ps.dreaminess, ps.activeNebulaId);
+
+  // --- Debug HUD update (must be inside tick)
+  debugHud.textContent =
+    `hover:  ${hoveredNebulaKey ?? "-"}\n` +
+    `active: ${activeNebulaKey ?? "-"}\n` +
+    `hit:    ${hasNebulaHit ? "yes" : "no"}\n` +
+    `down:   ${pointerDown ? "yes" : "no"}`;
+
 
   const trig = ps.trigger;
   if (trig) ps.trigger = false;
 
-  // 4) 音频：先喂，再更新
-  audio.setPerformance({ ...ps, trigger: trig });
+
+  // click 发生时：如果命中星云，就切 activeNebulaId（用 hoveredNebulaKey）
+  if (trig && hoveredNebulaKey) {
+    activeNebulaKey = hoveredNebulaKey;
+  }
+
+
+
+  // ✅ click 发生时：如果命中星云，就切换 activeNebulaId（用 hoveredNebulaKey）
+  // if (trig && hasNebulaHit && hoveredNebulaKey) {
+  //   perf.setTargets({ activeNebulaId: hoveredNebulaKey });
+  // }
+
+
+
+  // 4) 音频：先喂，再更新（Lead Gate: only when hovering nebula）
+  const psForAudio = { ...ps, trigger: trig };
+
+  // ✅ 只有 hover 到的 nebula == activeNebula 才允许驱动 lead
+  const isActiveNebulaHovered =
+    pointerDown &&
+    hasNebulaHit &&
+    hoveredNebulaKey &&
+    hoveredNebulaKey === activeNebulaKey
+
+
+  if (!isActiveNebulaHovered) {
+    psForAudio.energy = 0;
+    psForAudio.texture = 0;
+    psForAudio.pitch = 0;
+    psForAudio.rotation = 0;
+  }
+
+  audio.setPerformance(psForAudio);
   audio.update(dt);
+
 
   // 5) 音频状态：先拿到 a，再用它做任何视觉映射
   const a = audio.getState();
@@ -625,10 +744,9 @@ function tick() {
   // 慢慢 lerp（关键：速度小，避免夜店闪）
   bgMood.hue += (bgMood.hueTarget - bgMood.hue) * (1 - Math.exp(-dt * 1.2));
 
-  // ✅ 先定义 interact
+  // ✅ 再用它算 rawE
   const interact = Math.max(ps.energy ?? 0, (ps.texture ?? 0) * 0.35);
 
-  // ✅ 再用它算 rawE
   const rawE = Math.max(a.rms ?? 0, interact * 0.65);
 
   // 慢 attack / 更慢 release，避免跟鼓点跳
