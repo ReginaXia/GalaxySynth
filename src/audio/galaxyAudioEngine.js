@@ -14,6 +14,11 @@ function nz(v) {
 
 // Safe scale: minor pentatonic (never too wrong)
 const MINOR_PENTA = [0, 3, 5, 7, 10]; // semitones
+
+function quantize(v, steps) {
+  return Math.floor(clamp01(v) * steps);
+}
+
 function pitch01ToNote(p01, root = "A3") {
   const octaves = 2;
   const stepsPerOct = MINOR_PENTA.length;
@@ -31,6 +36,8 @@ function pitch01ToNote(p01, root = "A3") {
 
 export function createGalaxyAudioEngine() {
   let started = false;
+  const nebulaState = new Map();
+
   let rhythmEnabled = false;   // kick/hat/bass
   let padEnabled = false;      // pad drone
 
@@ -371,6 +378,30 @@ export function createGalaxyAudioEngine() {
   function getState() {
     return { ...out, level: { ...out.level }, style: { ...out.style } };
   }
+  
+  function playNebulaScratch({
+    galaxyId,
+    theta01,
+    instrument,
+    now = Tone.now(),
+  }) {
+    if (!instrument) return;
+
+    const STEPS = 24;
+    const st = nebulaState.get(galaxyId) ?? { lastStep: -1 };
+
+    const step = quantize(theta01, STEPS);
+    if (step === st.lastStep) return;
+
+    st.lastStep = step;
+    nebulaState.set(galaxyId, st);
+
+    const p01 = step / STEPS;
+    const note = pitch01ToNote(p01, "C4");
+
+    instrument.triggerAttackRelease(note, "16n", now, 0.8);
+  }
+
 
   return {
     start,
@@ -382,6 +413,7 @@ export function createGalaxyAudioEngine() {
     triggerMeteor,
     triggerBeat,
     triggerPerc,
+    playNebulaScratch,
     isStarted: () => started,
   };
 }

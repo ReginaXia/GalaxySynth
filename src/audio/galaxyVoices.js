@@ -6,6 +6,50 @@ import * as Tone from "tone";
  * 原则：不尖、不吵、但有 shimmer / chorus / 轻微 delay 的“仙境空间”
  */
 export function createGalaxyVoices() {
+
+  // -------------------------------------
+  // Nebula instruments (scratch voices)
+  // -------------------------------------
+
+  function hashString(str) {
+    let h = 2166136261;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+
+  function pickInstrument(key) {
+    const list = ["violin", "cello", "organ", "harp", "piano"];
+    return list[hashString(key) % list.length];
+  }
+
+  const nebulaInstruments = {
+    violin: new Tone.Synth({
+      oscillator: { type: "sawtooth" },
+      envelope: { attack: 0.02, decay: 0.15, sustain: 0.4, release: 0.8 },
+    }),
+    cello: new Tone.Synth({
+      oscillator: { type: "triangle" },
+      envelope: { attack: 0.04, decay: 0.2, sustain: 0.5, release: 1.2 },
+    }),
+    organ: new Tone.Synth({
+      oscillator: { type: "square" },
+      envelope: { attack: 0.01, decay: 0.1, sustain: 0.8, release: 0.6 },
+    }),
+    harp: new Tone.PluckSynth(),
+    piano: new Tone.Synth({
+      oscillator: { type: "sine" },
+      envelope: { attack: 0.005, decay: 0.25, sustain: 0.0, release: 1.4 },
+    }),
+  };
+
+  Object.values(nebulaInstruments).forEach(inst => {
+    inst.volume.value = -14;
+  });
+
+
   // ---- FX (先声明，避免引用顺序问题) ----
   const chorus = new Tone.Chorus({
     frequency: 0.45,
@@ -51,10 +95,12 @@ export function createGalaxyVoices() {
   });
   bell.volume.value = -22;
 
-  // ---- bass ----
 
-  bass.volume.value = -18; // 初始很克制
-  bass.chain(filter, drive, limiter, meter, Tone.Destination);
+  // ---- Nebula scratch instruments routing ----
+  // 让 violin/cello/organ/harp/piano 也走同一套空间效果，声音才“融入银河”
+  Object.values(nebulaInstruments).forEach((inst) => {
+    inst.chain(delay, pitch, reverb, compressor, limiter, Tone.Destination);
+  });
 
 
   // ---- Routing ----
@@ -111,8 +157,21 @@ export function createGalaxyVoices() {
     bell.triggerAttackRelease(note, "16n", Tone.now(), vel);
     }
 
+  function getNebulaInstrumentName(galaxyId) {
+  return pickInstrument(galaxyId);
+  }
+
+  function getNebulaInstrument(galaxyId) {
+    const name = getNebulaInstrumentName(galaxyId);
+    return nebulaInstruments[name];
+  }
+
+
   return {
     setDreaminess,
     spark,
-    };
+    getNebulaInstrument,
+    getNebulaInstrumentName,
+  };
+
 }

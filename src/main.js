@@ -21,6 +21,8 @@ import { createPerformanceState } from "./performance/performanceState";
 import { createMouseKeyboardController } from "./input/mouseKeyboardController";
 import { createGalaxyAudioEngine } from "./audio/galaxyAudioEngine";
 
+import { createGalaxyVoices } from "./audio/galaxyVoices.js";
+
 import { createAudioMonitorUI } from "./ui/audioMonitor.js";
 
 import starsVert from "./shaders/stars.vert.glsl?raw";
@@ -146,7 +148,10 @@ window.addEventListener("pointerup",   () => (pointerDown = false));
 const perf = createPerformanceState();
 const controller = createMouseKeyboardController(window);
 const audio = createGalaxyAudioEngine();
+const voices = createGalaxyVoices();
 const audioUI = createAudioMonitorUI();
+const audioVoices = createGalaxyVoices();
+
 
 // -------------------------------------
 // Step Sequencer (16-step ring) - MVP
@@ -664,11 +669,15 @@ function tick() {
   const ps = perf.state;
 
   // --- Debug HUD update (must be inside tick)
+  const hoverInst = hoveredNebulaKey ? voices.getNebulaInstrumentName(hoveredNebulaKey) : "-";
+  const activeInst = activeNebulaKey ? voices.getNebulaInstrumentName(activeNebulaKey) : "-";
+
   debugHud.textContent =
-    `hover:  ${hoveredNebulaKey ?? "-"}\n` +
-    `active: ${activeNebulaKey ?? "-"}\n` +
+    `hover:  ${hoveredNebulaKey ?? "-"} (${hoverInst})\n` +
+    `active: ${activeNebulaKey ?? "-"} (${activeInst})\n` +
     `hit:    ${hasNebulaHit ? "yes" : "no"}\n` +
     `down:   ${pointerDown ? "yes" : "no"}`;
+
 
 
   const trig = ps.trigger;
@@ -677,8 +686,17 @@ function tick() {
 
   // click 发生时：如果命中星云，就切 activeNebulaId（用 hoveredNebulaKey）
   if (trig && hoveredNebulaKey) {
+    const prev = activeNebulaKey;
     activeNebulaKey = hoveredNebulaKey;
+
+    // 立刻给一个“音色确认音”：点击就能听到变化
+    if (prev !== activeNebulaKey) {
+      const inst = voices.getNebulaInstrument(activeNebulaKey);
+      // 选一个固定音高，避免你以为“音高变了=音色变了”
+      inst?.triggerAttackRelease("C5", "16n", Tone.now(), 0.9);
+    }
   }
+
 
 
 
@@ -698,6 +716,29 @@ function tick() {
     hasNebulaHit &&
     hoveredNebulaKey &&
     hoveredNebulaKey === activeNebulaKey
+
+
+  if (isActiveNebulaHovered && nebulaHit) {
+    const hitPos = nebulaHit.object.getWorldPosition(new THREE.Vector3());
+    const screen = hitPos.clone().project(camera);
+
+    const dx = pointer.x - screen.x;
+    const dy = pointer.y - screen.y;
+
+    let ang = Math.atan2(dy, dx); // -pi..pi
+    if (ang < 0) ang += Math.PI * 2;
+    const theta01 = ang / (Math.PI * 2);
+
+    const instrument =
+      audioVoices?.getNebulaInstrument?.(activeNebulaKey);
+
+    audio.playNebulaScratch({
+      galaxyId: activeNebulaKey,
+      theta01,
+      instrument,
+    });
+  }
+
 
 
   if (!isActiveNebulaHovered) {
