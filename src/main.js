@@ -247,10 +247,6 @@ function hsvToRgb(h, s, v) {
   return [r, g, b];
 }
 
-// ✅ 背景色平滑（避免音符跳变像闪烁）
-// let bgHue = 0.85; // 默认偏粉紫
-
-
 
 // -------------------------------------
 // Zoom to cursor
@@ -375,79 +371,71 @@ function tick() {
   // 2) 平滑语义层
   perf.update(dt);
 
-  // 3) trigger 只给音频吃一帧
+    // 3) trigger 只给音频吃一帧
   const ps = perf.state;
   const trig = ps.trigger;
   if (trig) ps.trigger = false;
 
-  // 4) 音频（先更新音频）
+  // 4) 音频：先喂，再更新
   audio.setPerformance({ ...ps, trigger: trig });
   audio.update(dt);
 
-  // 5) 音频状态（先拿 a，再用）
+  // 5) 音频状态：先拿到 a，再用它做任何视觉映射
   const a = audio.getState();
 
-  // ✅ 用 a 去驱动 mood（现在安全）
+  // -----------------------------
+  // Mood mapping (slow, dreamy)
+  // -----------------------------
+  // 当 trigger 发生时，更新目标色相（仅更新 target，不直接改 hue）
   if (trig) {
     const midi = a.lastMidi ?? 60;
     const pitchClass = (midi % 12 + 12) % 12;
     bgMood.hueTarget = pitchClass / 12;
   }
 
-  // 非常重要：速度要慢（梦幻）
-  bgMood.hue += (bgMood.hueTarget - bgMood.hue) * (1 - Math.exp(-dt * 1.5));
-  bgMood.energy += (a.rms - bgMood.energy) * (1 - Math.exp(-dt * 2.0));
+  // 慢慢 lerp（关键：速度小，避免夜店闪）
+  bgMood.hue += (bgMood.hueTarget - bgMood.hue) * (1 - Math.exp(-dt * 1.2));
+  bgMood.energy += (a.rms - bgMood.energy) * (1 - Math.exp(-dt * 1.6));
 
-  // -----------------------------
-  // ✅ 音阶/音高 -> 背景 Tint
-  // 需要 audio.getState() 提供 lastMidi 或 lastDegree
-  // lastMidi: 0..127 (推荐)
-  // lastDegree: 1..7 (也行)
-  // // -----------------------------
-  // const lastMidi = (a.lastMidi ?? 60);     // 没有就用 C4
-  // const pitchClass = ((lastMidi % 12) + 12) % 12; // 0..11
+  // 交互能量（即使没声音，也能让背景“显现”）
+  const interact = Math.max(ps.energy ?? 0, (ps.texture ?? 0) * 0.35);
 
-  const midi = a.lastMidi ?? 60;
-  const pitchClass = ((midi % 12) + 12) % 12; // 0..11
+  // 音频能量（如果 Tone 还没响，这里可能很低）
+  const audioE = a.rms ?? 0;
 
-  // 让 12 个音对应 12 个 hue，变化会很强烈
-  const targetHue = pitchClass / 12; // 0..1
+  // ✅ emergence：音频 or 交互，只要有一个起来就显现
+  const emergence = THREE.MathUtils.clamp(Math.max(audioE * 1.35, interact * 0.90), 0, 1);
 
-  // 平滑：dt 越大步子越大；8~12 的速度很舒服
-  // bgHue += (targetHue - bgHue) * (1 - Math.exp(-dt * 10.0));
+  // ✅ tint：用 bgMood.hue（你已经在慢慢 lerp）
+  const tint = hsvToRgb(bgMood.hue, 0.55, 0.90);
 
-  const sat = 0.85
-  const val = 0.18 + (a.rms ?? 0) * 0.55; // 音量越大越亮
-  const tint = hsvToRgb(
-    bgMood.hue,
-    0.65,
-    0.20 + bgMood.energy * 0.35
-  );
-
-
-  // --- 低频呼吸（非常轻）
-  const bassPulse = Math.pow(a.beatPulse * (ps.energy ?? 0), 1.2);
-  scene.scale.setScalar(1.0 + bassPulse * 0.01);
-
-  // --- 背景随音乐（避免“只是装饰”）
   bg.setStyle({
     tint,
-    rings: 0.15 + bgMood.energy * 0.25,
-    glitter: 0.08,            // ⬅️ 刻意压低
-    intensity: 0.6,
+    emergence,
+    rings: 0.10 + emergence * 0.20,
+    glitter: 0.06,
+    intensity: 1.0,
     parallax: 0.5,
   });
 
-  // --- Bloom 轻跟随（避免洗白）
-  bloomPass.strength = 0.45 + a.rms * 0.25;
-  bloomPass.threshold = 0.88;
-  bloomPass.radius = 0.25;
+
+
+  // --- 低频呼吸（非常轻，避免蹦迪）
+  const bassPulse = Math.pow(a.beatPulse * (ps.energy ?? 0), 1.2);
+  scene.scale.setScalar(1.0 + bassPulse * 0.006);
+
+  // --- Bloom：只跟随 rms（慢），别跟 beatPulse
+  bloomPass.strength += ((0.20 + bgMood.energy * 0.18) - bloomPass.strength) * (1 - Math.exp(-dt * 2.0));
+  bloomPass.threshold = 0.95;
+  bloomPass.radius = 0.18;
+
 
   // --- render
   composer.render();
 
   // --- 左侧音频监控 UI
   audioUI.update(a, perf.state);
+
 
   requestAnimationFrame(tick);
 }
