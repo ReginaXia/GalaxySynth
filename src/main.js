@@ -108,6 +108,16 @@ const nebulaRaycaster = new THREE.Raycaster();
 let nebulaHit = null; // 存当前命中的物体（可用于后续“active nebula”）
 
 let activeNebulaKey = "C_pluck";
+
+// -------------------------------------
+// Active nebula scratch disk (fixed center + tolerance radius)
+// -------------------------------------
+let activeDiskCenterW = null;   // THREE.Vector3 (world)
+let activeDiskRadiusW = 1.8;    // world radius (rough)
+let activeDiskOuterNDC = 0.18;  // screen-space radius (ndc), computed per-frame
+let activeDiskInnerNDC = 0.02;  // deadzone radius (ndc), computed per-frame
+
+
 let interactionMode = "orbit"; 
 
 const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.0);
@@ -409,6 +419,47 @@ const nebulaSystem = createNebulaSystem({
 
 setupGalaxyGUI({ camera, renderer, nebulaSystem });
 
+function cacheActiveDiskFromNebula(galaxyId) {
+  if (!galaxyId) {
+    activeDiskCenterW = null;
+    return;
+  }
+
+  const c = nebulaSystem.getCluster?.(galaxyId);
+  if (!c) return;
+
+  // 固定中心：用 group 的世界坐标（不会被命中点抖动影响）
+  activeDiskCenterW = c.group.getWorldPosition(new THREE.Vector3());
+
+  // 半径：用 sizeScale 推一个“盘面范围”（你可以之后再调这个系数）
+  const sizeScale = c.preset?.shape?.sizeScale ?? 1.0;
+  const groupScale = c.group.scale?.x ?? 1.0;
+
+  // 这个系数决定“容错盘面”的大致半径，先给一个偏稳的值
+  activeDiskRadiusW = 1.9 * sizeScale * groupScale;
+}
+
+function updateActiveDiskNdcRadii() {
+  if (!activeDiskCenterW) return;
+
+  // 将中心投影到 NDC
+  const centerN = activeDiskCenterW.clone().project(camera);
+
+  // 取相机右方向，在世界里偏移一个 radiusW，投影后得到屏幕半径（NDC）
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion).normalize();
+  const edgeW = activeDiskCenterW.clone().add(right.multiplyScalar(activeDiskRadiusW));
+  const edgeN = edgeW.project(camera);
+
+  const r = Math.hypot(edgeN.x - centerN.x, edgeN.y - centerN.y);
+
+  // 外圈半径：允许演奏的最大范围（加个下限避免太小）
+  activeDiskOuterNDC = Math.max(0.10, Math.min(0.35, r));
+
+  // 内圈死区：中心太近角度不稳定，留个 deadzone
+  activeDiskInnerNDC = activeDiskOuterNDC * 0.18;
+}
+
+
 // -------------------------------------
 // Meteors
 // -------------------------------------
@@ -494,6 +545,9 @@ canvas.addEventListener("pointerdown", (e) => {
     if (pick?.galaxyId) {
       activeNebulaKey = pick.galaxyId;
 
+      cacheActiveDiskFromNebula(activeNebulaKey);
+
+
       // 可选：确认音（你之前已经做过）
       // const inst = voices.getNebulaInstrument(activeNebulaKey);
       // inst?.triggerAttackRelease("C5", "16n", Tone.now(), 0.9);
@@ -503,6 +557,7 @@ canvas.addEventListener("pointerdown", (e) => {
     } else {
       // 点空白：取消选中
       activeNebulaKey = null;
+      activeDiskCenterW = null;
       // 点空白本身不旋转；想旋转请按 Alt（手感更一致）
       return;
     }
@@ -722,7 +777,24 @@ function tick() {
 
   // --- nebula & meteor
   const disturbPoint = (nebulaHit?.point ? nebulaHit.point : hitPoint);
-  nebulaSystem.update(disturbPoint, t);
+  
+  let disturb = hitPoint;
+
+  if (pointerDown && activeNebulaKey && activeDiskCenterW) {
+    const centerN = activeDiskCenterW.clone().project(camera);
+    const dx = pointer.x - centerN.x;
+    const dy = pointer.y - centerN.y;
+    const dist = Math.hypot(dx, dy);
+
+    const inDisk = dist <= activeDiskOuterNDC;
+    if (inDisk) {
+      // 用 raycast 平面的 hitPoint 也行；这里保留 disturb = hitPoint
+      disturb = hitPoint;
+    }
+  }
+
+  nebulaSystem.update(disturb, t);
+
   meteorSystem.update(t);
 
   // -----------------------------
@@ -795,6 +867,34 @@ function tick() {
     hasNebulaHit &&
     hoveredNebulaKey &&
     hoveredNebulaKey === activeNebulaKey
+
+
+  // 每帧更新一次盘面 NDC 半径（跟随相机缩放）
+  updateActiveDiskNdcRadii();
+
+  if (pointerDown && activeNebulaKey && activeDiskCenterW) {
+    const centerN = activeDiskCenterW.clone().project(camera);
+
+    const dx = pointer.x - centerN.x;
+    const dy = pointer.y - centerN.y;
+    const dist = Math.hypot(dx, dy);
+
+    // ✅ 容错演奏盘：在 outer 半径内、且避开中心死区
+    const inDisk = dist <= activeDiskOuterNDC && dist >= activeDiskInnerNDC;
+
+    if (inDisk) {
+      let ang = Math.atan2(dy, dx);
+      if (ang < 0) ang += Math.PI * 2;
+      const theta01 = ang / (Math.PI * 2);
+
+      const instrument = voices?.getNebulaInstrument?.(activeNebulaKey);
+      audio.playNebulaScratch({
+        galaxyId: activeNebulaKey,
+        theta01,
+        instrument,
+      });
+    }
+  }
 
 
   if (isActiveNebulaHovered && nebulaHit) {
