@@ -360,20 +360,6 @@ if (tempoRing) {
 // ✅ 解决“听不到”的核心：用户交互解锁
 audio.bindUserStart(window);
 
-// 点击触发（也可以在你的 canvas 上绑定）
-window.addEventListener("mousedown", () => {
-  perf.fireTrigger(1.0);
-  console.log("[TRIGGER] click");
-});
-
-window.addEventListener("keydown", (e) => {
-  if (e.code === "Space") perf.fireTrigger(1.0);
-});
-
-// -------------------------------------
-// mood
-// -------------------------------------
-
 const bgMood = {
   hue: 0.85,
   hueTarget: 0.85,
@@ -777,7 +763,7 @@ function tick() {
 
   // --- nebula & meteor
   const disturbPoint = (nebulaHit?.point ? nebulaHit.point : hitPoint);
-  
+
   let disturb = hitPoint;
 
   if (pointerDown && activeNebulaKey && activeDiskCenterW) {
@@ -813,16 +799,32 @@ function tick() {
     // 3) trigger 只给音频吃一帧
   const ps = perf.state;
 
+  const aHud = audio.getState();
+  const s = aHud.scratch;
+
+
   // --- Debug HUD update (must be inside tick)
   const hoverInst = hoveredNebulaKey ? voices.getNebulaInstrumentName(hoveredNebulaKey) : "-";
   const activeInst = activeNebulaKey ? voices.getNebulaInstrumentName(activeNebulaKey) : "-";
 
+  const noteStr = aHud.lastNote ?? "-";
+  const midiStr = (typeof aHud.lastMidi === "number") ? aHud.lastMidi : "-";
+  const stepStr = s ? `${s.step + 1}/${s.steps}` : "-";
+  const octStr  = s ? `${s.octaveOffset}` : "-";
+
   debugHud.textContent =
-    `mode:  ${interactionMode}\n` +
+    `mode:   ${interactionMode}\n` +
     `hover:  ${hoveredNebulaKey ?? "-"}\n` +
     `active: ${activeNebulaKey ?? "-"}\n` +
     `hit:    ${hasNebulaHit ? "yes" : "no"}\n` +
-    `down:   ${pointerDown ? "yes" : "no"}`;
+    `down:   ${pointerDown ? "yes" : "no"}\n` +
+    `\n` +
+    `note:   ${noteStr}  (midi ${midiStr})\n` +
+    `step:   ${stepStr}  degree:${s?.degree ?? "-"}\n` +
+    `oct:    ${octStr}\n` +
+    `theta:  ${(s?.theta01 ?? 0).toFixed(3)}\n` +
+    `r:      ${(s?.r01 ?? 0).toFixed(3)}\n` +
+    `vel:    ${(s?.velocity ?? 0).toFixed(2)} dur:${(s?.dur ?? 0).toFixed(3)}`;
 
 
   const trig = ps.trigger;
@@ -887,36 +889,46 @@ function tick() {
       if (ang < 0) ang += Math.PI * 2;
       const theta01 = ang / (Math.PI * 2);
 
+      // ✅ r01: 0(靠近中心) -> 1(靠近外圈)
+      const r01 = THREE.MathUtils.clamp(
+        (dist - activeDiskInnerNDC) /
+          Math.max(1e-6, (activeDiskOuterNDC - activeDiskInnerNDC)),
+        0,
+        1
+      );
+
       const instrument = voices?.getNebulaInstrument?.(activeNebulaKey);
       audio.playNebulaScratch({
         galaxyId: activeNebulaKey,
         theta01,
+        r01,
         instrument,
       });
     }
+
   }
 
 
-  if (isActiveNebulaHovered && nebulaHit) {
-    const hitPos = nebulaHit.object.getWorldPosition(new THREE.Vector3());
-    const screen = hitPos.clone().project(camera);
+  // if (isActiveNebulaHovered && nebulaHit) {
+  //   const hitPos = nebulaHit.object.getWorldPosition(new THREE.Vector3());
+  //   const screen = hitPos.clone().project(camera);
 
-    const dx = pointer.x - screen.x;
-    const dy = pointer.y - screen.y;
+  //   const dx = pointer.x - screen.x;
+  //   const dy = pointer.y - screen.y;
 
-    let ang = Math.atan2(dy, dx); // -pi..pi
-    if (ang < 0) ang += Math.PI * 2;
-    const theta01 = ang / (Math.PI * 2);
+  //   let ang = Math.atan2(dy, dx); // -pi..pi
+  //   if (ang < 0) ang += Math.PI * 2;
+  //   const theta01 = ang / (Math.PI * 2);
 
-    const instrument =
-      audioVoices?.getNebulaInstrument?.(activeNebulaKey);
+  //   const instrument =
+  //     audioVoices?.getNebulaInstrument?.(activeNebulaKey);
 
-    audio.playNebulaScratch({
-      galaxyId: activeNebulaKey,
-      theta01,
-      instrument,
-    });
-  }
+  //   audio.playNebulaScratch({
+  //     galaxyId: activeNebulaKey,
+  //     theta01,
+  //     instrument,
+  //   });
+  // }
 
 
 

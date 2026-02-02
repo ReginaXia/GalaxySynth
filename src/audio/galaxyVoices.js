@@ -27,21 +27,22 @@ export function createGalaxyVoices() {
 
   const nebulaInstruments = {
     violin: new Tone.Synth({
-      oscillator: { type: "sawtooth" },
-      envelope: { attack: 0.02, decay: 0.15, sustain: 0.4, release: 0.8 },
+      oscillator: { type: "triangle" },
+      envelope: { attack: 0.03, decay: 0.18, sustain: 0.35, release: 1.0 },
     }),
+
     cello: new Tone.Synth({
       oscillator: { type: "triangle" },
       envelope: { attack: 0.04, decay: 0.2, sustain: 0.5, release: 1.2 },
     }),
     organ: new Tone.Synth({
-      oscillator: { type: "square" },
-      envelope: { attack: 0.01, decay: 0.1, sustain: 0.8, release: 0.6 },
+      oscillator: { type: "sine" },
+      envelope: { attack: 0.02, decay: 0.12, sustain: 0.75, release: 0.9 },
     }),
     harp: new Tone.PluckSynth(),
     piano: new Tone.Synth({
       oscillator: { type: "sine" },
-      envelope: { attack: 0.005, decay: 0.25, sustain: 0.0, release: 1.4 },
+      envelope: { attack: 0.008, decay: 0.25, sustain: 0.0, release: 1.6 },
     }),
   };
 
@@ -65,7 +66,8 @@ export function createGalaxyVoices() {
   });
 
   // Shimmer-ish：用 PitchShift + Reverb 做“亮晶晶空气”
-  const pitch = new Tone.PitchShift({ pitch: 12, windowSize: 0.1, wet: 0.12 });
+  // const pitch = new Tone.PitchShift({ pitch: 12, windowSize: 0.1, wet: 0.12 });
+  const pitch = new Tone.PitchShift({ pitch: 12, windowSize: 0.06, wet: 0.05 });
   const reverb = new Tone.Reverb({ decay: 10.5, wet: 0.55 });
 
   const delay = new Tone.FeedbackDelay({
@@ -152,6 +154,12 @@ export function createGalaxyVoices() {
     pad.volume.rampTo(-20 + v01 * 6, 0.2);
   }
 
+  function setShimmer(v01) {
+    // 0..1
+    pitch.wet.rampTo(0.02 + v01 * 0.10, 0.2);
+  }
+
+
   function spark(vel = 0.6) {
     const note = scale[(Math.random() * scale.length) | 0];
     bell.triggerAttackRelease(note, "16n", Tone.now(), vel);
@@ -169,6 +177,7 @@ export function createGalaxyVoices() {
 
   return {
     setDreaminess,
+    setShimmer,
     spark,
     getNebulaInstrument,
     getNebulaInstrumentName,

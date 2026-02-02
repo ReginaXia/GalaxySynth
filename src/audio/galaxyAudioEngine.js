@@ -12,16 +12,53 @@ function nz(v) {
   return clamp01(v);
 }
 
-// Safe scale: minor pentatonic (never too wrong)
-const MINOR_PENTA = [0, 3, 5, 7, 10]; // semitones
-
-function quantize(v, steps) {
-  return Math.floor(clamp01(v) * steps);
+function wrapStep(i, steps) {
+  const s = Math.max(1, steps | 0);
+  return ((i % s) + s) % s;
 }
 
+// Hysteresis quantizer: "stick" to lastStep until you pass boundary by margin
+function quantizeWithHysteresis(theta01, steps, lastStep, margin = 0.18) {
+  const s = Math.max(1, steps | 0);
+
+  // continuous position in [0, s)
+  const x = clamp01(theta01) * s;
+
+  // if no history, fall back
+  if (lastStep == null || lastStep < 0) return Math.floor(x) % s;
+
+  // compare to center of last step (lastStep + 0.5), wrap diff to shortest direction
+  let d = x - (lastStep + 0.5);
+  // wrap to [-s/2, s/2]
+  d = ((d + s / 2) % s) - s / 2;
+
+  // if still inside the "sticky" zone, keep lastStep
+  // Each bin width is 1; boundary is at ±0.5 from center.
+  const keepZone = 0.5 - margin; // margin越大越“吸附”
+  if (Math.abs(d) <= keepZone) return wrapStep(lastStep, s);
+
+  // otherwise, move one step toward direction
+  const next = lastStep + (d > 0 ? 1 : -1);
+  return wrapStep(next, s);
+}
+
+
+
+// Safe scale: minor pentatonic (never too wrong)
+// const MINOR_PENTA = [0, 3, 5, 7, 10];
+const MAJOR_SCALE = [0, 2, 4, 5, 7, 9, 11]; // semitones
+
+function quantize(v, steps) {
+  const s = Math.max(1, steps | 0);
+  // ✅ round-to-nearest, centers each bin (DJ 手感更稳)
+  const x = clamp01(v) * s;
+  return Math.min(s - 1, Math.floor(x + 0.5) % s);
+}
+
+
 function pitch01ToNote(p01, root = "A3") {
-  const octaves = 2;
-  const stepsPerOct = MINOR_PENTA.length;
+  const octaves = 1;
+  const stepsPerOct = MAJOR_SCALE.length;
   const totalSteps = stepsPerOct * octaves;
 
   const idx = Math.max(
@@ -29,7 +66,7 @@ function pitch01ToNote(p01, root = "A3") {
     Math.min(totalSteps - 1, Math.floor(clamp01(p01) * totalSteps))
   );
   const octave = Math.floor(idx / stepsPerOct);
-  const degree = MINOR_PENTA[idx % stepsPerOct];
+  const degree = MAJOR_SCALE[idx % stepsPerOct];
 
   return Tone.Frequency(root).transpose(octave * 12 + degree).toNote();
 }
@@ -37,6 +74,7 @@ function pitch01ToNote(p01, root = "A3") {
 export function createGalaxyAudioEngine() {
   let started = false;
   const nebulaState = new Map();
+  let lastScratchTime = 0;
 
   let rhythmEnabled = false;   // kick/hat/bass
   let padEnabled = false;      // pad drone
@@ -164,6 +202,20 @@ export function createGalaxyAudioEngine() {
     lastNote: null,
     lastNoteTime: 0,
     lastMidi: 60,
+
+    scratch: {
+      galaxyId: null,
+      step: -1,
+      steps: 7,
+      degree: 0,
+      theta01: 0,
+      r01: 0.5,
+      octaveOffset: 0,
+      instrument: "-",
+      velocity: 0,
+      dur: 0,
+    },
+
 
     level: { kick: 0, hat: 0, pad: 0, bass: 0, lead: 0 },
 
@@ -333,24 +385,6 @@ export function createGalaxyAudioEngine() {
     // Lead stays clear
     gainLead.gain.rampTo(lerp(0.75, 1.05, energySmoothed), 0.05);
 
-    // Trigger -> Lead note
-    if (ps.trigger) {
-      const note = pitch01ToNote(ps.pitch ?? 0.5, "A3");
-      out.lastNote = note;
-      out.lastNoteTime = Tone.now();
-
-      out.lastMidi = Tone.Frequency(note).toMidi();
-
-      // Make it impossible to miss (you can tune down later)
-      const strength = clamp01(ps.triggerStrength ?? 1);
-      const vel = lerp(0.55, 1.15, strength);
-
-      const bassNote = Tone.Frequency(note).transpose(-24).toNote();
-      bass.triggerAttackRelease(bassNote, "8n", Tone.now(), 0.35);
-
-      lead.triggerAttackRelease(note, "8n", Tone.now(), vel * 0.85);
-    }
-
     // expose style for UI
     out.style.bpm = Tone.Transport.bpm.value;
     out.style.cutoff = cutoff;
@@ -382,12 +416,38 @@ export function createGalaxyAudioEngine() {
   function playNebulaScratch({
     galaxyId,
     theta01,
+    r01 = 0.5,
     instrument,
     now = Tone.now(),
   }) {
     if (!instrument) return;
 
-    const STEPS = 24;
+    // Tone.js requires start times to be strictly increasing per instrument.
+    // When multiple notes trigger within the same frame, Tone.now() can be equal.
+    // So we enforce a tiny epsilon step.
+    let safeNow = Tone.now();
+    const EPS = 0.0008; // ~0.8ms
+    if (safeNow <= lastScratchTime) safeNow = lastScratchTime + EPS;
+    lastScratchTime = safeNow;
+    now = safeNow;
+
+
+    // 0(中心)更高、1(外圈)更低：invert
+    const inv = clamp01(1 - r01);
+
+    // octaveOffset: 中心 +12 或 +24，外圈 0 或 -12
+    // 先给你一个“好听且不极端”的范围：外圈低一八度，中心高一八度
+    let octaveOffset = 0;
+    if (r01 < 0.33) octaveOffset = +12;      // 中心：高八度
+    else if (r01 < 0.66) octaveOffset = 0;   // 中间：本八度
+    else octaveOffset = -12;                 // 外圈：低八度
+
+
+    const baseMidi = Tone.Frequency("C4").toMidi();
+    const rootMidi = baseMidi + octaveOffset;
+    const rootNote = Tone.Frequency(rootMidi, "midi").toNote();
+
+    const STEPS = MAJOR_SCALE.length;
     const BASE_ROOT = "C4";
 
     // ---- state ----
@@ -400,13 +460,23 @@ export function createGalaxyAudioEngine() {
       };
 
     // ---- step quantization ----
-    const step = quantize(theta01, STEPS);
+    // DJ-like sticky stepping (better feel, avoids edge jitter)
+    // ---- step quantization ----
+    // DJ-like sticky stepping (better feel, avoids edge jitter)
+    const step = quantizeWithHysteresis(theta01, STEPS, st.lastStep, 0.18);
+
+    // ✅ 如果 step 没变：不重触发音，但要更新状态（否则 dt/dTheta 会乱）
     if (step === st.lastStep) {
       st.lastTheta = theta01;
       st.lastTime = now;
       nebulaState.set(galaxyId, st);
       return;
     }
+
+    // step changed -> commit
+    st.lastStep = step;
+
+
 
     // ---- direction & speed ----
     let dTheta = theta01 - st.lastTheta;
@@ -419,23 +489,37 @@ export function createGalaxyAudioEngine() {
     const direction = Math.sign(dTheta) || 1;
 
     // ---- musical mapping ----
-    // step → pitch, direction controls up/down
-    const signedStep = direction > 0 ? step : STEPS - step;
-    const p01 = signedStep / STEPS;
-    const note = pitch01ToNote(p01, BASE_ROOT);
+    // ---- musical mapping ----
+    // ✅ 直接用离散音阶 degree，避免 step/7 造成的浮点 floor 偏差
+    const degree = MAJOR_SCALE[step]; // 0,2,4,5,7,9,11
+    const note = Tone.Frequency(rootNote).transpose(degree).toNote();
+
 
     // ---- expression ----
     // 快速转 = 更亮、更响
-    const velocity = clamp01(0.35 + speed * 1.4);
-    const dur = Math.max(0.035, 0.14 - speed * 0.08);
-
-    // 如果是 Synth，动态推亮一点（不破坏其他 synth）
-    if (instrument.filter?.frequency) {
-      const cutoff = lerp(800, 4200, velocity);
-      instrument.filter.frequency.rampTo(cutoff, 0.05);
-    }
+    const velocity = clamp01(0.25 + speed * 0.9);
+    const dur = Math.max(0.08, 0.22 - speed * 0.06);  
 
     instrument.triggerAttackRelease(note, dur, now, velocity);
+
+        // ---- expose for HUD / visuals ----
+    out.lastNote = note;
+    out.lastNoteTime = now;
+    out.lastMidi = Tone.Frequency(note).toMidi();
+
+    out.scratch = {
+      galaxyId,
+      step,
+      steps: STEPS,
+      degree,
+      theta01,
+      r01,
+      octaveOffset,
+      instrument,
+      velocity,
+      dur,
+    };
+
 
     // ---- update state ----
     st.lastStep = step;
