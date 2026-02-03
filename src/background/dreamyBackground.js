@@ -6,10 +6,12 @@ import bgVert from "./shaders/bg.vert.glsl?raw";
 import bgFrag from "./shaders/bg.frag.glsl?raw";
 
 /**
- * Dreamy Background (upgraded)
+ * Dreamy Background (Audio-driven)
  * - Fullscreen quad
- * - Pastel gradient space emerges from black
- * - Controlled by: tint (vec3) + emergence (0..1)
+ * - Deep space when idle, liquid pastel when playing
+ * - Controlled by:
+ *   - setStyle(): parallax/rings/glitter/intensity/tint/emergence
+ *   - setAudioDrive(): leadE/pitch01/vel01/theta01 (all 0..1)
  */
 export function createDreamyBackground(scene) {
   const geo = new THREE.PlaneGeometry(2, 2);
@@ -29,15 +31,22 @@ export function createDreamyBackground(scene) {
       uRings: { value: 0.7 },    // 0..1
       uGlitter: { value: 0.6 },  // 0..1
 
-      // ✅ NEW: overall color direction (0..1 rgb)
+      // color direction (0..1 rgb)
       uTint: { value: new THREE.Vector3(1.0, 1.0, 1.0) },
 
-      // ✅ NEW: 0 = pure black, 1 = full pastel space
+      // 0 = deep space, 1 = full pastel space
       uEmergence: { value: 0.0 },
+
+      // audio-driven (0..1)
+      uLeadE: { value: 0.0 },
+      uPitch01: { value: 0.5 },
+      uVel01: { value: 0.0 },
+      uTheta01: { value: 0.0 },
     },
   });
-  mat.toneMapped = false;
 
+  // Background should NOT be tone-mapped (prevents milky wash)
+  mat.toneMapped = false;
 
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
@@ -72,6 +81,14 @@ export function createDreamyBackground(scene) {
       if (emergence !== undefined) {
         mat.uniforms.uEmergence.value = emergence;
       }
+    },
+
+    // Audio-driven controls (all optional)
+    setAudioDrive({ leadE, pitch01, vel01, theta01 } = {}) {
+      if (leadE !== undefined) mat.uniforms.uLeadE.value = leadE;
+      if (pitch01 !== undefined) mat.uniforms.uPitch01.value = pitch01;
+      if (vel01 !== undefined) mat.uniforms.uVel01.value = vel01;
+      if (theta01 !== undefined) mat.uniforms.uTheta01.value = theta01;
     },
 
     getUniforms() {

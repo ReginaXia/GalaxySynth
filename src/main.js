@@ -976,33 +976,29 @@ function tick() {
   // 慢慢 lerp（关键：速度小，避免夜店闪）
   bgMood.hue += (bgMood.hueTarget - bgMood.hue) * (1 - Math.exp(-dt * 1.2));
 
-  // ✅ 再用它算 rawE
+  
+  
+
   // -----------------------------
-  // Background (Lead-driven, clean)
+  // Background (Lead-driven, clean)  ✅ FIX ORDER
   // -----------------------------
-  // --- derive lead energy from last note time (since audio state has no leadEnergy) ---
-  const nowTone = Tone.now();
-  const lastT = (typeof a.lastNoteTime === "number") ? a.lastNoteTime : -1e9;
-  const age = Math.max(0, nowTone - lastT);
 
-  // 0..1 envelope that decays slowly (NewJeans/250 "breathing")
-  // tau 越大，背景回落越慢；建议 0.9~1.4
-  const tau = 1.15;
-  let leadE = Math.exp(-age / tau);
+  // 先定义 interact（给一点交互权重：拖动/质感）
+  const interact = Math.max(psForAudio.energy ?? 0, (psForAudio.texture ?? 0) * 0.35);
 
-  // 用 velocity 稍微加强“弹奏感”（可选，但很好用）
-  const vel = (a.scratch && typeof a.scratch.velocity === "number") ? a.scratch.velocity : 0.6;
-  leadE *= (0.25 + 0.75 * THREE.MathUtils.clamp(vel, 0, 1));
+  // 先定义 rawE（lead 为主 + 交互为辅）
+  const leadLvl = Math.max(0, a?.level?.lead ?? 0);          // 0..1
+  const leadE_bg = THREE.MathUtils.clamp(leadLvl * 1.8, 0, 1);
+  const rawE = Math.max(leadE_bg, interact * 0.35);
 
-  // 防止极小值抖动，直接截断
-  if (leadE < 0.01) leadE = 0.0;
+  // attack / release（唯美呼吸）
+  const atk = 1 - Math.exp(-dt * 1.6);
+  const rel = 1 - Math.exp(-dt * 0.7);
+
+  // ✅ 现在 rawE 已经有了，才更新 bgMood.energy
+  bgMood.energy += (rawE - bgMood.energy) * (rawE > bgMood.energy ? atk : rel);
 
 
-  // 1) 让背景“慢出现、慢消失”，像呼吸，不跟鼓点跳
-  // attack 慢一点、release 更慢（NewJeans/250 的气口）
-  const atk = 1 - Math.exp(-dt * 1.0);
-  const rel = 1 - Math.exp(-dt * 0.45);
-  bgMood.energy += (leadE - bgMood.energy) * (leadE > bgMood.energy ? atk : rel);
 
   // 2) hue：由最后一个 lead note 决定（可预测、不会随机炫技）
   const lastMidi = (typeof a.lastMidi === "number") ? a.lastMidi : 60; // fallback C4
@@ -1015,27 +1011,87 @@ function tick() {
 
   // 3) emergence：压顶 + 非线性，避免奶白墙
   // 你会得到：小能量时几乎黑；弹奏起来才渐变出现；大能量也不会白爆
-  let emergence = THREE.MathUtils.clamp(bgMood.energy, 0, 1);
-  emergence = 1.0 - Math.exp(-emergence * 2.0);         // 把 0.7~1.0 压扁
+  // emergence 更像“雾气显现”：低能量也能看见一点，高能量快速变亮但不爆
+  let emergence = THREE.MathUtils.clamp(bgMood.energy * 1.55, 0, 1);
+  emergence = 1.0 - Math.exp(-emergence * 3.2)
+  
+  // 音高越高：更亮更鲜；音高越低：更深邃
+  const pitch01 = THREE.MathUtils.clamp((midi - 48) / 36, 0, 1); // 约 C3..C6
+  const sat = 0.42 + 0.28 * emergence;                           // 越弹越“彩”
+  const val = 0.18 + 0.85 * (0.35 + 0.65 * pitch01) * (0.35 + 0.65 * emergence);
+  const tint = hsvToRgb(bgMood.hue, sat, val);
+
+
+  // 让它更“生命感”：一点点底噪 + 更顺滑
+  emergence = THREE.MathUtils.smoothstep(emergence, 0.02, 0.95);
+
   emergence = THREE.MathUtils.clamp(emergence, 0, 0.78); // ⭐星云可读性保护：背景最多到 0.78
 
-  // 4) tint：更清透、更少“奶白”
-  // 饱和度不要太高，明度不要顶满
-  const tint = hsvToRgb(bgMood.hue, 0.42, 0.78);
+  // // 4) tint：更清透、更少“奶白”
+  // // 饱和度不要太高，明度不要顶满
+  // const tint = hsvToRgb(bgMood.hue, 0.42, 0.78);
 
   // 5) 让“没弹奏时几乎全黑”
   const emergenceFloor = 0.0; // 想要一点点环境光可设 0.03
   const em = emergenceFloor + (emergence - emergenceFloor);
 
-  // 6) 背景细节：少 rings、少 glitter（避免夜店感）
-  bg.setStyle({
-    tint,
-    emergence: em,
-    rings: 0.06 + em * 0.10,      // 更少、更克制
-    glitter: 0.02 + em * 0.03,    // 很轻的颗粒
-    intensity: 1.0,
-    parallax: 0.35,
+
+  // theta: use current performance rotation (0..1)
+  const theta01 = THREE.MathUtils.euclideanModulo(psForAudio.rotation ?? 0, 1);
+
+  // vel: estimate speed from theta delta
+  if (!window.__bgDrive) window.__bgDrive = { lastTheta: theta01, vel: 0 };
+  const d = Math.abs(theta01 - window.__bgDrive.lastTheta);
+  const dWrap = Math.min(d, 1 - d);
+  const instVel = THREE.MathUtils.clamp(dWrap / Math.max(1e-4, dt) * 0.25, 0, 1);
+  window.__bgDrive.vel += (instVel - window.__bgDrive.vel) * (1 - Math.exp(-dt * 10.0));
+  window.__bgDrive.lastTheta = theta01;
+  const vel01 = window.__bgDrive.vel;
+
+
+  bg.setAudioDrive({
+    leadE: bgMood.energy,
+    pitch01,
+    vel01,
+    theta01,
   });
+
+
+  bg.setStyle({
+    tint,                   // 你已有：由 midi/hue 计算
+    emergence,              // 现在会在不弹奏时回到 0
+    rings: 0.04 + emergence * 0.10,
+    glitter: 0.02 + emergence * 0.03,
+    intensity: 1.0,
+    parallax: 0.55,
+  });
+
+
+
+  // --- Protect nebula readability when background gets bright
+  const bgBright = emergence;                       // 0..1
+  const boost = 1.0 + bgBright * 0.28;              // 轻微增强颜色力度
+  const opBoost = 1.0 + bgBright * 0.18;            // 轻微增强不透明度
+
+  nebulaSystem.clusters?.forEach((c) => {
+    if (!c?.preset) return;
+
+    // outer/core/stars 的基础 opacity 来自 preset
+    const o0 = c.preset.layers.outer.opacity;
+    const c0 = c.preset.layers.core.opacity;
+    const s0 = c.preset.layers.stars.opacity;
+
+    // 颜色更“立住”
+    if (c.outer?.material?.uniforms?.uColorStrength) c.outer.material.uniforms.uColorStrength.value = (c.preset.palette.strength ?? 1.1) * boost;
+    if (c.core?.material?.uniforms?.uColorStrength)  c.core.material.uniforms.uColorStrength.value  = (c.preset.palette.strength ?? 1.1) * boost;
+    if (c.armStars?.material?.uniforms?.uColorStrength) c.armStars.material.uniforms.uColorStrength.value = (c.preset.palette.strength ?? 1.1) * boost;
+
+    // 不透明度轻微上调（别太大，否则发白）
+    if (c.outer?.material?.uniforms?.uOpacity) c.outer.material.uniforms.uOpacity.value = o0 * opBoost;
+    if (c.core?.material?.uniforms?.uOpacity)  c.core.material.uniforms.uOpacity.value  = c0 * opBoost;
+    if (c.armStars?.material?.uniforms?.uOpacity) c.armStars.material.uniforms.uOpacity.value = s0 * opBoost;
+  });
+
 
   // 7) Bloom：只跟随 lead 能量（慢），并且整体更低
   // 这样“弹奏有光”但不会糊掉星云
