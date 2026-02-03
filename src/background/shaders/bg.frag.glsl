@@ -190,19 +190,31 @@ void main(){
 
   vec3 col = pastel;
 
-  // tint
-  col = mix(col, col * uTint, 0.55);
+  // ---------------------------
+  // Clarity / anti-milky pass
+  // ---------------------------
 
-  // highlights
-  col += ring * vec3(1.0, 0.98, 1.0);
-  col += g * vec3(1.0);
 
-  // presence
-  float presence = 0.10 + 0.90 * leadA;
-  col *= clamp(uIntensity, 0.0, 1.6) * (0.55 + 0.85 * presence);
+  col = mix(col, col * uTint, 0.22);
 
-  // soft knee: protect nebula readability
-  col = col / (1.0 + col * 0.85);
+  float presence = 0.06 + 0.64 * leadA;
+
+  // ✅ 高音略降亮，避免“白糊罩住”
+  // （注意：这里第三个参数必须是 pitchA）
+  float pitchDim = mix(1.00, 0.78, pitchA);
+
+  col *= clamp(uIntensity, 0.0, 1.35) * (0.62 + 0.70 * presence) * pitchDim;
+
+  // ✅ 不能用 m（前面已经有 vec2 m 了），换成 mx
+  float mx = max(col.r, max(col.g, col.b));
+  col = col / (1.0 + mx * 0.95);
+
+
+
+  float luma = dot(col, vec3(0.2126, 0.7152, 0.0722));
+  col = mix(vec3(luma), col, 1.12);
+  col = clamp(col, 0.0, 1.0);
+
 
   // deep space base (idle)
   vec3 deepCol = vec3(0.015, 0.012, 0.030);

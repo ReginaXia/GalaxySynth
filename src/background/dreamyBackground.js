@@ -18,8 +18,8 @@ export function createDreamyBackground(scene) {
 
       uMouse: { value: new THREE.Vector2(0.5, 0.5) },
       uParallax: { value: 0.6 },
-      uRings: { value: 0.65 },
-      uGlitter: { value: 0.45 },
+      uRings: { value: 0.38 },
+      uGlitter: { value: 0.20 },
 
       uTint: { value: new THREE.Vector3(1.0, 1.0, 1.0) },
       uEmergence: { value: 0.0 },

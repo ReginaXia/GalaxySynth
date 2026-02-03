@@ -958,20 +958,20 @@ function tick() {
   if (bgNote.lastMidi === null) bgNote.lastMidi = midi;
 
   // --- 先准备 vel01（必须在前面）
-  const theta01_bg = THREE.MathUtils.euclideanModulo(psForAudio.rotation ?? 0, 1);
+  const theta01 = THREE.MathUtils.euclideanModulo(psForAudio.rotation ?? 0, 1);
 
   if (!window.__bgDrive) {
-    window.__bgDrive = { lastTheta: theta01_bg, vel: 0 };
+    window.__bgDrive = { lastTheta: theta01, vel: 0 };
   }
 
-  const d = Math.abs(theta01_bg - window.__bgDrive.lastTheta);
+  const d = Math.abs(theta01 - window.__bgDrive.lastTheta);
   const dWrap = Math.min(d, 1 - d);
   const instVel = THREE.MathUtils.clamp(dWrap / Math.max(1e-4, dt) * 0.25, 0, 1);
 
   window.__bgDrive.vel +=
     (instVel - window.__bgDrive.vel) * (1 - Math.exp(-dt * 10.0));
 
-  window.__bgDrive.lastTheta = theta01_bg;
+  window.__bgDrive.lastTheta = theta01;
   const vel01 = window.__bgDrive.vel;
 
   // --- 再做颜料注入（现在 vel01 已经安全）
@@ -980,7 +980,7 @@ function tick() {
 
     bgNote.hue = ((midi % 12) / 12 + 0.08) % 1.0;
 
-    const ang = theta01_bg * Math.PI * 2;
+    const ang = theta01 * Math.PI * 2;
     bgNote.pos.x = 0.5 + Math.cos(ang) * 0.28;
     bgNote.pos.y = 0.5 + Math.sin(ang) * 0.28;
 
@@ -1042,8 +1042,8 @@ function tick() {
 
   // 先定义 rawE（lead 为主 + 交互为辅）
   const leadLvl = Math.max(0, a?.level?.lead ?? 0);          // 0..1
-  const leadE_bg = THREE.MathUtils.clamp(leadLvl * 1.8, 0, 1);
-  const rawE = Math.max(leadE_bg, interact * 0.35);
+  const leadE = THREE.MathUtils.clamp(leadLvl * 1.8, 0, 1);
+  const rawE = Math.max(leadE, interact * 0.35);
 
   // attack / release（唯美呼吸）
   const atk = 1 - Math.exp(-dt * 1.6);
@@ -1091,7 +1091,7 @@ function tick() {
 
 
   // theta: use current performance rotation (0..1)
-  const theta01 = THREE.MathUtils.euclideanModulo(psForAudio.rotation ?? 0, 1);
+  bg.setStyle({ emergence: leadE, intensity: 0.95 - 0.25 * pitch01 });
 
   // vel: estimate speed from theta delta
   if (!window.__bgDrive) window.__bgDrive = { lastTheta: theta01, vel: 0 };
