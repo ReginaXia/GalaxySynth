@@ -977,47 +977,72 @@ function tick() {
   bgMood.hue += (bgMood.hueTarget - bgMood.hue) * (1 - Math.exp(-dt * 1.2));
 
   // ✅ 再用它算 rawE
-  const interact = Math.max(ps.energy ?? 0, (ps.texture ?? 0) * 0.35);
+  // -----------------------------
+  // Background (Lead-driven, clean)
+  // -----------------------------
+  // --- derive lead energy from last note time (since audio state has no leadEnergy) ---
+  const nowTone = Tone.now();
+  const lastT = (typeof a.lastNoteTime === "number") ? a.lastNoteTime : -1e9;
+  const age = Math.max(0, nowTone - lastT);
 
-  const rawE = Math.max(a.rms ?? 0, interact * 0.65);
+  // 0..1 envelope that decays slowly (NewJeans/250 "breathing")
+  // tau 越大，背景回落越慢；建议 0.9~1.4
+  const tau = 1.15;
+  let leadE = Math.exp(-age / tau);
 
-  // 慢 attack / 更慢 release，避免跟鼓点跳
-  const atk = 1 - Math.exp(-dt * 1.2);   // 变亮速度（慢）
-  const rel = 1 - Math.exp(-dt * 0.55);  // 变暗速度（更慢）
-  bgMood.energy += (rawE - bgMood.energy) * (rawE > bgMood.energy ? atk : rel);
+  // 用 velocity 稍微加强“弹奏感”（可选，但很好用）
+  const vel = (a.scratch && typeof a.scratch.velocity === "number") ? a.scratch.velocity : 0.6;
+  leadE *= (0.25 + 0.75 * THREE.MathUtils.clamp(vel, 0, 1));
 
-
-  // 音频能量（如果 Tone 还没响，这里可能很低）
-  const audioE = a.rms ?? 0;
-
-  // ✅ emergence：音频 or 交互，只要有一个起来就显现
-  // const emergence = THREE.MathUtils.clamp(Math.max(audioE * 1.35, interact * 0.90), 0, 1);
-  let emergence = THREE.MathUtils.clamp(bgMood.energy * 1.25, 0, 1);
-  // 压顶：让 0.7~1.0 的区域不要变成白墙
-  emergence = 1.0 - Math.exp(-emergence * 2.2);
+  // 防止极小值抖动，直接截断
+  if (leadE < 0.01) leadE = 0.0;
 
 
-  // ✅ tint：用 bgMood.hue（你已经在慢慢 lerp）
-  const tint = hsvToRgb(bgMood.hue, 0.55, 0.90);
+  // 1) 让背景“慢出现、慢消失”，像呼吸，不跟鼓点跳
+  // attack 慢一点、release 更慢（NewJeans/250 的气口）
+  const atk = 1 - Math.exp(-dt * 1.0);
+  const rel = 1 - Math.exp(-dt * 0.45);
+  bgMood.energy += (leadE - bgMood.energy) * (leadE > bgMood.energy ? atk : rel);
 
+  // 2) hue：由最后一个 lead note 决定（可预测、不会随机炫技）
+  const lastMidi = (typeof a.lastMidi === "number") ? a.lastMidi : 60; // fallback C4
+  // 以半音类映射到 hue（0..1），再加一点偏移让颜色更“梦幻但干净”
+  const hueFromNote = ((lastMidi % 12) / 12 + 0.08) % 1.0;
+
+  // hue 也做缓动，避免突然变色
+  bgMood.hueTarget = hueFromNote;
+  bgMood.hue += (bgMood.hueTarget - bgMood.hue) * (1 - Math.exp(-dt * 0.9));
+
+  // 3) emergence：压顶 + 非线性，避免奶白墙
+  // 你会得到：小能量时几乎黑；弹奏起来才渐变出现；大能量也不会白爆
+  let emergence = THREE.MathUtils.clamp(bgMood.energy, 0, 1);
+  emergence = 1.0 - Math.exp(-emergence * 2.0);         // 把 0.7~1.0 压扁
+  emergence = THREE.MathUtils.clamp(emergence, 0, 0.78); // ⭐星云可读性保护：背景最多到 0.78
+
+  // 4) tint：更清透、更少“奶白”
+  // 饱和度不要太高，明度不要顶满
+  const tint = hsvToRgb(bgMood.hue, 0.42, 0.78);
+
+  // 5) 让“没弹奏时几乎全黑”
+  const emergenceFloor = 0.0; // 想要一点点环境光可设 0.03
+  const em = emergenceFloor + (emergence - emergenceFloor);
+
+  // 6) 背景细节：少 rings、少 glitter（避免夜店感）
   bg.setStyle({
     tint,
-    emergence,
-    rings: 0.10 + emergence * 0.18,
-    glitter: 0.05,
+    emergence: em,
+    rings: 0.06 + em * 0.10,      // 更少、更克制
+    glitter: 0.02 + em * 0.03,    // 很轻的颗粒
     intensity: 1.0,
-    parallax: 0.5,
+    parallax: 0.35,
   });
 
+  // 7) Bloom：只跟随 lead 能量（慢），并且整体更低
+  // 这样“弹奏有光”但不会糊掉星云
+  bloomPass.strength += ((0.06 + bgMood.energy * 0.10) - bloomPass.strength) * (1 - Math.exp(-dt * 1.4));
+  bloomPass.threshold = 0.985;
+  bloomPass.radius = 0.12;
 
-  // --- 低频呼吸（非常轻，避免蹦迪）
-  const bassPulse = Math.pow(a.beatPulse * (ps.energy ?? 0), 1.2);
-  scene.scale.setScalar(1.0 + bassPulse * 0.0015);
-
-  // --- Bloom：只跟随 rms（慢），别跟 beatPulse
-  bloomPass.strength += ((0.16 + bgMood.energy * 0.14) - bloomPass.strength) * (1 - Math.exp(-dt * 1.6));
-  bloomPass.threshold = 0.97;
-  bloomPass.radius = 0.14;
 
 
 
