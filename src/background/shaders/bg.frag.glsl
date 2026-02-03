@@ -1,4 +1,3 @@
-// src/background/shaders/bg.frag.glsl
 precision highp float;
 
 uniform float uTime;
@@ -9,14 +8,20 @@ uniform float uParallax;   // 0..1
 uniform float uRings;      // 0..1
 uniform float uGlitter;    // 0..1
 
-uniform vec3  uTint;       // 0..1 rgb
-uniform float uEmergence;  // 0..1 (0=deep space, 1=pastel space)
+uniform vec3  uTint;       // 0..1
+uniform float uEmergence;  // 0..1
 
 // Audio-driven (0..1)
-uniform float uLeadE;      // lead envelope / strength
-uniform float uPitch01;    // low->high
-uniform float uVel01;      // slow->fast
-uniform float uTheta01;    // ring angle (0..1)
+uniform float uLeadE;
+uniform float uPitch01;
+uniform float uVel01;
+uniform float uTheta01;
+
+// Note injection (0..1)
+uniform float uPulse;
+uniform float uNoteHue;
+uniform float uNoteSeed;
+uniform vec2  uNotePos;
 
 varying vec2 vUv;
 
@@ -52,11 +57,10 @@ float fbm(vec2 p){
   return v;
 }
 
-// Pastel palette (NewJeans-ish, creamy)
+// creamy pastel palette
 vec3 palettePastel(float t){
-  // 4 anchors: pink, cream yellow, icy blue, lilac
-  vec3 c1 = vec3(1.00, 0.84, 0.92); // pink cream
-  vec3 c2 = vec3(1.00, 0.96, 0.74); // warm cream yellow
+  vec3 c1 = vec3(1.00, 0.84, 0.92); // pink
+  vec3 c2 = vec3(1.00, 0.96, 0.74); // cream yellow
   vec3 c3 = vec3(0.80, 0.93, 1.00); // icy blue
   vec3 c4 = vec3(0.90, 0.84, 1.00); // lilac
 
@@ -66,29 +70,34 @@ vec3 palettePastel(float t){
   return mix(c3, c4, (t - 0.66) / 0.34);
 }
 
+vec3 hsv2rgb(vec3 c){
+  vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+  vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+  return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+
 void main(){
-  // --- audio controls (single declaration to avoid redefinition)
   float leadA  = clamp(uLeadE,   0.0, 1.0);
   float pitchA = clamp(uPitch01, 0.0, 1.0);
   float velA   = clamp(uVel01,   0.0, 1.0);
+  float pulseA = clamp(uPulse,   0.0, 1.0);
 
-  // --- screen uv
   vec2 uv = vUv;
 
-  // Mouse parallax (subtle)
+  // subtle parallax
   vec2 m = uMouse - 0.5;
   uv += m * 0.06 * uParallax;
 
-  // Direction from theta (ring angle)
+  // theta -> direction
   float ang = 6.2831853 * fract(uTheta01);
   vec2 dir = vec2(cos(ang), sin(ang));
 
-  // Advection (flow) used inside noise domain (keeps it stable on screen)
-  float spd = (0.06 + 0.22 * velA) * (0.15 + 0.85 * leadA);
+  // stable flow
+  float spd = (0.06 + 0.24 * velA) * (0.20 + 0.80 * leadA);
   vec2 adv = dir * (uTime * spd * 0.12);
 
-  // Liquid warp (lead+vel stronger, pitch adds slight variation)
-  float t = uTime * (0.05 + 0.04 * velA);
+  // liquid warp
+  float t = uTime * (0.05 + 0.05 * velA);
   vec2 nuv = uv + adv;
 
   vec2 warp = vec2(
@@ -96,34 +105,65 @@ void main(){
     fbm(nuv * 2.1 + vec2(10.0,-t))
   );
 
-  // "stir" push: feels like you are mixing paint in space
+  // stirring (drag feel)
   float stir = (0.020 + 0.090 * leadA) * (0.25 + 0.75 * velA);
   uv += dir * stir;
   uv += (warp - 0.5) * (0.055 + 0.110 * leadA);
 
-  // Core field -> pastel gradient "volume"
+  // ---------------------------
+  // Base pastel world
+  // ---------------------------
   float n1 = fbm((uv + adv * 0.8) * 1.4 + vec2(0.0, t));
   float n2 = fbm((uv - adv * 0.6) * 2.6 + vec2(4.0, -t * 1.2));
   float field = 0.55 * n1 + 0.45 * n2;
 
-  // Big soft blobs (gives that "gel" shape)
   vec2 p = uv - 0.5;
   float r = length(p);
   float blobs = smoothstep(
-    0.56,
-    0.10,
+    0.56, 0.10,
     r + 0.18 * sin(3.0 * p.x + uTime * 0.2) + 0.10 * (n2 - 0.5)
   );
 
-  // Pitch-shifts the palette so high notes feel brighter/warmer
   float palShiftA = 0.10 * sin(uTime * 0.07) + pitchA * 0.38;
   float palShiftB = 0.55 + pitchA * 0.22;
 
   vec3 pastelA = palettePastel(field * 1.2 + palShiftA);
   vec3 pastelB = palettePastel(field * 1.2 + palShiftB);
-  vec3 pastel = mix(pastelB, pastelA, blobs);
+  vec3 pastel  = mix(pastelB, pastelA, blobs);
 
-  // Subtle "film" sheen (only while playing)
+  // ---------------------------
+  // Note-driven paint injection (4 colors / note)
+  // ---------------------------
+  vec2 inject = uNotePos + 0.06 * (warp - 0.5) + dir * (0.02 + 0.06 * velA) * pulseA;
+
+  float s = uNoteSeed;
+  vec2 o1 = vec2(fract(s*13.1), fract(s*7.7))   - 0.5;
+  vec2 o2 = vec2(fract(s*5.3),  fract(s*19.9))  - 0.5;
+  vec2 o3 = vec2(fract(s*17.2), fract(s*3.9))   - 0.5;
+  vec2 o4 = vec2(fract(s*11.7), fract(s*9.1))   - 0.5;
+
+  float b1 = exp(-12.0 * length(uv - (inject + o1*0.22)));
+  float b2 = exp(-10.0 * length(uv - (inject + o2*0.26)));
+  float b3 = exp(-11.0 * length(uv - (inject + o3*0.24)));
+  float b4 = exp(- 9.0 * length(uv - (inject + o4*0.30)));
+
+  vec3 c1 = hsv2rgb(vec3(fract(uNoteHue + 0.00), 0.55, 1.0));
+  vec3 c2 = hsv2rgb(vec3(fract(uNoteHue + 0.18), 0.55, 1.0));
+  vec3 c3 = hsv2rgb(vec3(fract(uNoteHue + 0.36), 0.55, 1.0));
+  vec3 c4 = hsv2rgb(vec3(fract(uNoteHue + 0.62), 0.55, 1.0));
+
+  vec3 paint = (b1*c1 + b2*c2 + b3*c3 + b4*c4);
+  float paintW = clamp((b1 + b2 + b3 + b4), 0.0, 1.0);
+
+  // pulse controls injection strength
+  paintW *= (0.12 + 0.88 * pulseA);
+
+  // normalize and mix
+  vec3 paintNorm  = paint / max(1e-3, paintW);
+  vec3 paintBlend = mix(pastel, paintNorm, 0.70);
+  pastel = mix(pastel, paintBlend, paintW);
+
+  // iridescent sheen (only while playing)
   float sheen = fbm((uv + adv) * 3.6 + vec2(1.7, -uTime * 0.10));
   vec3 ir = vec3(
     0.55 + 0.45 * sin(6.2831853 * (sheen + 0.00 + pitchA * 0.15)),
@@ -132,7 +172,7 @@ void main(){
   );
   pastel = mix(pastel, pastel * (0.78 + 0.42 * ir), 0.14 * leadA);
 
-  // Optional rings (very soft, non-nightclub)
+  // rings (soft)
   float ring = 0.0;
   if(uRings > 0.001){
     float rr = length((uv - 0.5) * vec2(1.1, 1.0));
@@ -141,37 +181,35 @@ void main(){
     ring *= uRings * 0.35;
   }
 
-  // Glitter (keep extremely low)
+  // glitter (very small)
   float g = 0.0;
   if(uGlitter > 0.001){
     float h = hash21(uv * vec2(900.0, 520.0) + uTime * 0.3);
     g = smoothstep(0.995, 1.0, h) * uGlitter * 0.18;
   }
 
-  // Apply tint gently (tilt the whole world color)
   vec3 col = pastel;
+
+  // tint
   col = mix(col, col * uTint, 0.55);
 
-  // Add ring & glitter as airy highlights
+  // highlights
   col += ring * vec3(1.0, 0.98, 1.0);
   col += g * vec3(1.0);
 
-  // Presence (lead drives visibility), but still returns to deep space when not playing
+  // presence
   float presence = 0.10 + 0.90 * leadA;
   col *= clamp(uIntensity, 0.0, 1.6) * (0.55 + 0.85 * presence);
 
-  // Soft knee (prevents milky wash / preserves nebula readability)
+  // soft knee: protect nebula readability
   col = col / (1.0 + col * 0.85);
 
-  // Deep space base (visible when not playing)
+  // deep space base (idle)
   vec3 deepCol = vec3(0.015, 0.012, 0.030);
   deepCol += 0.020 * vec3(0.12, 0.18, 0.40) * (1.0 - pitchA);
 
-  // Emergence controls deep -> pastel (fully fades back when emergence=0)
   float e = clamp(uEmergence, 0.0, 1.0);
   e = smoothstep(0.0, 1.0, e);
-
-  // When emergence is 0, you get deep space (not pure black)
   col = mix(deepCol, col, e);
 
   gl_FragColor = vec4(col, 1.0);

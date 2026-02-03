@@ -673,6 +673,15 @@ window.addEventListener("pointermove", (e) => {
   move01 = Math.min(1, speed / 60);
 });
 
+const bgNote = {
+  lastMidi: null,
+  pulse: 0,
+  hue: 0,
+  seed: 0.1,
+  pos: { x: 0.5, y: 0.5 },
+};
+
+
 // -------------------------------------
 // Tick
 // -------------------------------------
@@ -756,6 +765,8 @@ function tick() {
   // --- background
   bg.update(t);
   bg.setMouse01(mouse01.x, mouse01.y);
+
+  
 
   // --- stars
   stars.material.uniforms.uTime.value = t;
@@ -909,29 +920,6 @@ function tick() {
   }
 
 
-  // if (isActiveNebulaHovered && nebulaHit) {
-  //   const hitPos = nebulaHit.object.getWorldPosition(new THREE.Vector3());
-  //   const screen = hitPos.clone().project(camera);
-
-  //   const dx = pointer.x - screen.x;
-  //   const dy = pointer.y - screen.y;
-
-  //   let ang = Math.atan2(dy, dx); // -pi..pi
-  //   if (ang < 0) ang += Math.PI * 2;
-  //   const theta01 = ang / (Math.PI * 2);
-
-  //   const instrument =
-  //     audioVoices?.getNebulaInstrument?.(activeNebulaKey);
-
-  //   audio.playNebulaScratch({
-  //     galaxyId: activeNebulaKey,
-  //     theta01,
-  //     instrument,
-  //   });
-  // }
-
-
-
   if (!isActiveNebulaHovered) {
     psForAudio.energy = 0;
     psForAudio.texture = 0;
@@ -962,9 +950,75 @@ function tick() {
     }
   }
 
+  // --- Lead → Background paint injection -----------------
 
-  // ✅ 在这里统一定义 midi
   const midi = a.lastMidi ?? 60;
+
+  // 初始化
+  if (bgNote.lastMidi === null) bgNote.lastMidi = midi;
+
+  // --- 先准备 vel01（必须在前面）
+  const theta01_bg = THREE.MathUtils.euclideanModulo(psForAudio.rotation ?? 0, 1);
+
+  if (!window.__bgDrive) {
+    window.__bgDrive = { lastTheta: theta01_bg, vel: 0 };
+  }
+
+  const d = Math.abs(theta01_bg - window.__bgDrive.lastTheta);
+  const dWrap = Math.min(d, 1 - d);
+  const instVel = THREE.MathUtils.clamp(dWrap / Math.max(1e-4, dt) * 0.25, 0, 1);
+
+  window.__bgDrive.vel +=
+    (instVel - window.__bgDrive.vel) * (1 - Math.exp(-dt * 10.0));
+
+  window.__bgDrive.lastTheta = theta01_bg;
+  const vel01 = window.__bgDrive.vel;
+
+  // --- 再做颜料注入（现在 vel01 已经安全）
+  if (midi !== bgNote.lastMidi) {
+    bgNote.lastMidi = midi;
+
+    bgNote.hue = ((midi % 12) / 12 + 0.08) % 1.0;
+
+    const ang = theta01_bg * Math.PI * 2;
+    bgNote.pos.x = 0.5 + Math.cos(ang) * 0.28;
+    bgNote.pos.y = 0.5 + Math.sin(ang) * 0.28;
+
+    const leadLvl = Math.max(0, a?.level?.lead ?? 0);
+    bgNote.pulse = THREE.MathUtils.clamp(
+      leadLvl * 1.6 + vel01 * 0.4,
+      0.2,
+      1.0
+    );
+
+    bgNote.seed = Math.random();
+  }
+
+
+  // ⏳ 注入的“生命期”：慢慢融化
+  bgNote.pulse *= Math.exp(-dt * 1.4);
+
+  // 喂给背景 shader
+  bg.setNotePulse({
+    pulse: bgNote.pulse,
+    hue: bgNote.hue,
+    seed: bgNote.seed,
+    x: bgNote.pos.x,
+    y: bgNote.pos.y,
+  });
+
+
+  // 2) pulse 衰减（2~3 秒融化扩散）
+  bgNote.pulse *= Math.exp(-dt * 1.8);
+
+  // 3) 喂给 shader
+  bg.setNotePulse({
+    pulse: bgNote.pulse,
+    hue: bgNote.hue,
+    seed: bgNote.seed,
+    x: bgNote.pos.x,
+    y: bgNote.pos.y,
+  });
 
   // 之后随便用
   const pitchClass = ((midi % 12) + 12) % 12;
@@ -1041,12 +1095,12 @@ function tick() {
 
   // vel: estimate speed from theta delta
   if (!window.__bgDrive) window.__bgDrive = { lastTheta: theta01, vel: 0 };
-  const d = Math.abs(theta01 - window.__bgDrive.lastTheta);
-  const dWrap = Math.min(d, 1 - d);
-  const instVel = THREE.MathUtils.clamp(dWrap / Math.max(1e-4, dt) * 0.25, 0, 1);
+  // const d = Math.abs(theta01 - window.__bgDrive.lastTheta);
+  // const dWrap = Math.min(d, 1 - d);
+  // const instVel = THREE.MathUtils.clamp(dWrap / Math.max(1e-4, dt) * 0.25, 0, 1);
   window.__bgDrive.vel += (instVel - window.__bgDrive.vel) * (1 - Math.exp(-dt * 10.0));
   window.__bgDrive.lastTheta = theta01;
-  const vel01 = window.__bgDrive.vel;
+  // const vel01 = window.__bgDrive.vel;
 
 
   bg.setAudioDrive({

@@ -1,18 +1,8 @@
-// src/background/dreamyBackground.js
 import * as THREE from "three";
 
-// Vite: load shader as raw strings
 import bgVert from "./shaders/bg.vert.glsl?raw";
 import bgFrag from "./shaders/bg.frag.glsl?raw";
 
-/**
- * Dreamy Background (Audio-driven)
- * - Fullscreen quad
- * - Deep space when idle, liquid pastel when playing
- * - Controlled by:
- *   - setStyle(): parallax/rings/glitter/intensity/tint/emergence
- *   - setAudioDrive(): leadE/pitch01/vel01/theta01 (all 0..1)
- */
 export function createDreamyBackground(scene) {
   const geo = new THREE.PlaneGeometry(2, 2);
 
@@ -24,28 +14,30 @@ export function createDreamyBackground(scene) {
     transparent: false,
     uniforms: {
       uTime: { value: 0 },
-      uIntensity: { value: 0.7 },
+      uIntensity: { value: 1.0 },
 
-      uMouse: { value: new THREE.Vector2(0.5, 0.5) }, // 0..1
-      uParallax: { value: 0.6 }, // 0..1
-      uRings: { value: 0.7 },    // 0..1
-      uGlitter: { value: 0.6 },  // 0..1
+      uMouse: { value: new THREE.Vector2(0.5, 0.5) },
+      uParallax: { value: 0.6 },
+      uRings: { value: 0.65 },
+      uGlitter: { value: 0.45 },
 
-      // color direction (0..1 rgb)
       uTint: { value: new THREE.Vector3(1.0, 1.0, 1.0) },
-
-      // 0 = deep space, 1 = full pastel space
       uEmergence: { value: 0.0 },
 
-      // audio-driven (0..1)
       uLeadE: { value: 0.0 },
       uPitch01: { value: 0.5 },
       uVel01: { value: 0.0 },
       uTheta01: { value: 0.0 },
+
+      // note injection
+      uPulse: { value: 0.0 },
+      uNoteHue: { value: 0.0 },
+      uNoteSeed: { value: 0.1 },
+      uNotePos: { value: new THREE.Vector2(0.5, 0.5) },
     },
   });
 
-  // Background should NOT be tone-mapped (prevents milky wash)
+  // Prevent milky wash from tonemapping
   mat.toneMapped = false;
 
   const mesh = new THREE.Mesh(geo, mat);
@@ -65,7 +57,6 @@ export function createDreamyBackground(scene) {
       mat.uniforms.uMouse.value.set(x, y);
     },
 
-    // Quick style tuning (all optional)
     setStyle({ parallax, rings, glitter, intensity, tint, emergence } = {}) {
       if (parallax !== undefined) mat.uniforms.uParallax.value = parallax;
       if (rings !== undefined) mat.uniforms.uRings.value = rings;
@@ -78,17 +69,22 @@ export function createDreamyBackground(scene) {
         else if (tint?.x !== undefined) mat.uniforms.uTint.value.set(tint.x, tint.y, tint.z);
       }
 
-      if (emergence !== undefined) {
-        mat.uniforms.uEmergence.value = emergence;
-      }
+      if (emergence !== undefined) mat.uniforms.uEmergence.value = emergence;
     },
 
-    // Audio-driven controls (all optional)
     setAudioDrive({ leadE, pitch01, vel01, theta01 } = {}) {
       if (leadE !== undefined) mat.uniforms.uLeadE.value = leadE;
       if (pitch01 !== undefined) mat.uniforms.uPitch01.value = pitch01;
       if (vel01 !== undefined) mat.uniforms.uVel01.value = vel01;
       if (theta01 !== undefined) mat.uniforms.uTheta01.value = theta01;
+    },
+
+    // ✅ note injection driver
+    setNotePulse({ pulse, hue, seed, x, y } = {}) {
+      if (pulse !== undefined) mat.uniforms.uPulse.value = pulse;
+      if (hue !== undefined) mat.uniforms.uNoteHue.value = hue;
+      if (seed !== undefined) mat.uniforms.uNoteSeed.value = seed;
+      if (x !== undefined && y !== undefined) mat.uniforms.uNotePos.value.set(x, y);
     },
 
     getUniforms() {
