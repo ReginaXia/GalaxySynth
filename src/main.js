@@ -74,6 +74,7 @@ document.body.appendChild(renderer.domElement);
 // Scene / Camera
 // -------------------------------------
 const scene = new THREE.Scene();
+const bg = createDreamyBackground(scene);
 scene.background = new THREE.Color(0x000000);
 
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.05, 2000);
@@ -372,14 +373,16 @@ const bgMood = {
 // Brackground
 // -------------------------------------
 
-const bg = createDreamyBackground(scene);
+// ✅ background audio uniforms handle
+const bgU = bg.getUniforms();
 
-bg.setStyle({
-  rings: 1,
-  glitter: 1,
-  intensity: 1,
-  parallax: 1,
-});
+// ✅ background “note paint” state
+let bgPulse = 0.0;
+let bgSeed = 0.123;
+let lastMidiSeen = -999;
+let lastTheta01 = 0.0;
+let lastVel01 = 0.0;
+let lastPitch01 = 0.5;
 
 
 // -------------------------------------
@@ -761,10 +764,12 @@ function tick() {
 
 
 
-
   // --- background
   bg.update(t);
-  bg.setMouse01(mouse01.x, mouse01.y);
+  const mx01 = pointer.x * 0.5 + 0.5;
+  const my01 = pointer.y * 0.5 + 0.5;
+  bg.setMouse01(mx01, my01);
+
 
   
 
@@ -932,7 +937,7 @@ function tick() {
 
 
   // 5) 音频状态：先拿到 a，再用它做任何视觉映射
-  const a = audio.getState();
+  // const a = audio.getState();
 
     // --- Step ring UI update
   if (stepDots.length === STEPS) {
@@ -950,181 +955,137 @@ function tick() {
     }
   }
 
-  // --- Lead → Background paint injection -----------------
 
+  
+    // -----------------------------
+  // Background (Lead-driven, single pipeline) ✅ CLEAN
+  // -----------------------------
+  const a = audio.getState();
+
+  // mouse01 (0..1) for background parallax / note injection
+  const mouse01 = {
+    x: (pointer.x * 0.5 + 0.5),
+    y: (pointer.y * 0.5 + 0.5),
+  };
+  bg.setMouse01(mouse01.x, mouse01.y);
+
+
+
+
+
+
+
+  // -----------------------------
+  // Background (Lead-driven) ✅ SINGLE SOURCE OF TRUTH
+  // Replace the whole old bg blocks with this.
+  // -----------------------------
+
+  // 0) midi
   const midi = a.lastMidi ?? 60;
 
-  // 初始化
-  if (bgNote.lastMidi === null) bgNote.lastMidi = midi;
+  // 1) lead energy -> visual (抬一下，否则永远很暗)
+  const leadLvl = Math.max(0, a?.level?.lead ?? 0); // 0..1
+  const leadVis = THREE.MathUtils.clamp(Math.pow(leadLvl, 0.35) * 2.2, 0, 1);
 
-  // --- 先准备 vel01（必须在前面）
-  const theta01 = THREE.MathUtils.euclideanModulo(psForAudio.rotation ?? 0, 1);
+  // 2) theta01 from performance rotation (你 hover/drag 才会给 rotation)
+  const theta01_bg = THREE.MathUtils.euclideanModulo(psForAudio.rotation ?? 0, 1);
 
-  if (!window.__bgDrive) {
-    window.__bgDrive = { lastTheta: theta01, vel: 0 };
+  // 3) vel01 from theta delta (smooth) —— 唯美流动，不 DJ 抖
+  if (!window.__bgDrive2) window.__bgDrive2 = { lastTheta: theta01_bg, vel: 0 };
+  {
+    const d0 = Math.abs(theta01_bg - window.__bgDrive2.lastTheta);
+    const dWrap = Math.min(d0, 1 - d0);
+    const instVel = THREE.MathUtils.clamp(dWrap / Math.max(1e-4, dt) * 0.18, 0, 1);
+    window.__bgDrive2.vel += (instVel - window.__bgDrive2.vel) * (1 - Math.exp(-dt * 10.0));
+    window.__bgDrive2.lastTheta = theta01_bg;
+  }
+  const vel01_bg = window.__bgDrive2.vel;
+
+  // 4) pitch01 from midi (C3..C6)
+  const pitch01_bg = THREE.MathUtils.clamp((midi - 48) / 36, 0, 1);
+
+  // 5) note injection state (每个新音注入颜料)
+  if (!window.__bgNote2) {
+    window.__bgNote2 = {
+      lastMidi: null,
+      hue: 0.86,
+      seed: 0.13,
+      pulse: 0.0,
+      pos: { x: 0.5, y: 0.5 },
+    };
+  }
+  const bn = window.__bgNote2;
+
+  if (bn.lastMidi === null) bn.lastMidi = midi;
+
+  if (midi !== bn.lastMidi) {
+    bn.lastMidi = midi;
+
+    // hue 跟音高走（稳定，不夜店闪）
+    bn.hue = ((midi % 12) / 12 + 0.08) % 1.0;
+    bn.seed = Math.random();
+
+    // 注入位置：沿搓盘方向在环上打进去
+    const ang = theta01_bg * Math.PI * 2;
+    bn.pos.x = 0.5 + Math.cos(ang) * 0.28;
+    bn.pos.y = 0.5 + Math.sin(ang) * 0.28;
+
+    // pulse：新音越明显，越“融化”
+    bn.pulse = THREE.MathUtils.clamp(0.35 + leadVis * 0.9 + vel01_bg * 0.35, 0.2, 1.0);
   }
 
-  const d = Math.abs(theta01 - window.__bgDrive.lastTheta);
-  const dWrap = Math.min(d, 1 - d);
-  const instVel = THREE.MathUtils.clamp(dWrap / Math.max(1e-4, dt) * 0.25, 0, 1);
+  // 衰减（慢一点更唯美）
+  bn.pulse *= Math.exp(-dt * 1.6);
 
-  window.__bgDrive.vel +=
-    (instVel - window.__bgDrive.vel) * (1 - Math.exp(-dt * 10.0));
-
-  window.__bgDrive.lastTheta = theta01;
-  const vel01 = window.__bgDrive.vel;
-
-  // --- 再做颜料注入（现在 vel01 已经安全）
-  if (midi !== bgNote.lastMidi) {
-    bgNote.lastMidi = midi;
-
-    bgNote.hue = ((midi % 12) / 12 + 0.08) % 1.0;
-
-    const ang = theta01 * Math.PI * 2;
-    bgNote.pos.x = 0.5 + Math.cos(ang) * 0.28;
-    bgNote.pos.y = 0.5 + Math.sin(ang) * 0.28;
-
-    const leadLvl = Math.max(0, a?.level?.lead ?? 0);
-    bgNote.pulse = THREE.MathUtils.clamp(
-      leadLvl * 1.6 + vel01 * 0.4,
-      0.2,
-      1.0
-    );
-
-    bgNote.seed = Math.random();
-  }
-
-
-  // ⏳ 注入的“生命期”：慢慢融化
-  bgNote.pulse *= Math.exp(-dt * 1.4);
-
-  // 喂给背景 shader
-  bg.setNotePulse({
-    pulse: bgNote.pulse,
-    hue: bgNote.hue,
-    seed: bgNote.seed,
-    x: bgNote.pos.x,
-    y: bgNote.pos.y,
-  });
-
-
-  // 2) pulse 衰减（2~3 秒融化扩散）
-  bgNote.pulse *= Math.exp(-dt * 1.8);
-
-  // 3) 喂给 shader
-  bg.setNotePulse({
-    pulse: bgNote.pulse,
-    hue: bgNote.hue,
-    seed: bgNote.seed,
-    x: bgNote.pos.x,
-    y: bgNote.pos.y,
-  });
-
-  // 之后随便用
-  const pitchClass = ((midi % 12) + 12) % 12;
-  const hueSpan = 0.18;
-  const hueBase = 0.86;
-  bgMood.hueTarget = hueBase + (pitchClass / 12) * hueSpan;
-
-
-  // 慢慢 lerp（关键：速度小，避免夜店闪）
-  bgMood.hue += (bgMood.hueTarget - bgMood.hue) * (1 - Math.exp(-dt * 1.2));
-
-  
-  
-
-  // -----------------------------
-  // Background (Lead-driven, clean)  ✅ FIX ORDER
-  // -----------------------------
-
-  // 先定义 interact（给一点交互权重：拖动/质感）
-  const interact = Math.max(psForAudio.energy ?? 0, (psForAudio.texture ?? 0) * 0.35);
-
-  // 先定义 rawE（lead 为主 + 交互为辅）
-  const leadLvl = Math.max(0, a?.level?.lead ?? 0);          // 0..1
-  const leadE = THREE.MathUtils.clamp(leadLvl * 1.8, 0, 1);
-  const rawE = Math.max(leadE, interact * 0.35);
-
-  // attack / release（唯美呼吸）
-  const atk = 1 - Math.exp(-dt * 1.6);
-  const rel = 1 - Math.exp(-dt * 0.7);
-
-  // ✅ 现在 rawE 已经有了，才更新 bgMood.energy
-  bgMood.energy += (rawE - bgMood.energy) * (rawE > bgMood.energy ? atk : rel);
-
-
-
-  // 2) hue：由最后一个 lead note 决定（可预测、不会随机炫技）
-  const lastMidi = (typeof a.lastMidi === "number") ? a.lastMidi : 60; // fallback C4
-  // 以半音类映射到 hue（0..1），再加一点偏移让颜色更“梦幻但干净”
-  const hueFromNote = ((lastMidi % 12) / 12 + 0.08) % 1.0;
-
-  // hue 也做缓动，避免突然变色
-  bgMood.hueTarget = hueFromNote;
-  bgMood.hue += (bgMood.hueTarget - bgMood.hue) * (1 - Math.exp(-dt * 0.9));
-
-  // 3) emergence：压顶 + 非线性，避免奶白墙
-  // 你会得到：小能量时几乎黑；弹奏起来才渐变出现；大能量也不会白爆
-  // emergence 更像“雾气显现”：低能量也能看见一点，高能量快速变亮但不爆
-  let emergence = THREE.MathUtils.clamp(bgMood.energy * 1.55, 0, 1);
-  emergence = 1.0 - Math.exp(-emergence * 3.2)
-  
-  // 音高越高：更亮更鲜；音高越低：更深邃
-  const pitch01 = THREE.MathUtils.clamp((midi - 48) / 36, 0, 1); // 约 C3..C6
-  const sat = 0.42 + 0.28 * emergence;                           // 越弹越“彩”
-  const val = 0.18 + 0.85 * (0.35 + 0.65 * pitch01) * (0.35 + 0.65 * emergence);
-  const tint = hsvToRgb(bgMood.hue, sat, val);
-
-
-  // 让它更“生命感”：一点点底噪 + 更顺滑
-  emergence = THREE.MathUtils.smoothstep(emergence, 0.02, 0.95);
-
-  emergence = THREE.MathUtils.clamp(emergence, 0, 0.78); // ⭐星云可读性保护：背景最多到 0.78
-
-  // // 4) tint：更清透、更少“奶白”
-  // // 饱和度不要太高，明度不要顶满
-  // const tint = hsvToRgb(bgMood.hue, 0.42, 0.78);
-
-  // 5) 让“没弹奏时几乎全黑”
-  const emergenceFloor = 0.0; // 想要一点点环境光可设 0.03
-  const em = emergenceFloor + (emergence - emergenceFloor);
-
-
-  // theta: use current performance rotation (0..1)
-  bg.setStyle({ emergence: leadE, intensity: 0.95 - 0.25 * pitch01 });
-
-  // vel: estimate speed from theta delta
-  if (!window.__bgDrive) window.__bgDrive = { lastTheta: theta01, vel: 0 };
-  // const d = Math.abs(theta01 - window.__bgDrive.lastTheta);
-  // const dWrap = Math.min(d, 1 - d);
-  // const instVel = THREE.MathUtils.clamp(dWrap / Math.max(1e-4, dt) * 0.25, 0, 1);
-  window.__bgDrive.vel += (instVel - window.__bgDrive.vel) * (1 - Math.exp(-dt * 10.0));
-  window.__bgDrive.lastTheta = theta01;
-  // const vel01 = window.__bgDrive.vel;
-
-
+  // 6) feed background shader (only ONE pipeline)
   bg.setAudioDrive({
-    leadE: bgMood.energy,
-    pitch01,
-    vel01,
-    theta01,
+    leadE: leadVis,
+    pitch01: pitch01_bg,
+    vel01: vel01_bg,
+    theta01: theta01_bg,
   });
 
+  bg.setNotePulse({
+    pulse: bn.pulse,
+    hue: bn.hue,
+    seed: bn.seed,
+    x: bn.pos.x,
+    y: bn.pos.y,
+  });
+
+  // 7) style
+  // 没弹奏就回深邃；弹奏就亮起来（但不会糊白）
+  const emergence = leadVis;
+  const intensity = 0.90 + 0.22 * emergence + 0.10 * pitch01_bg;
 
   bg.setStyle({
-    tint,                   // 你已有：由 midi/hue 计算
-    emergence,              // 现在会在不弹奏时回到 0
-    rings: 0.04 + emergence * 0.10,
-    glitter: 0.02 + emergence * 0.03,
-    intensity: 1.0,
-    parallax: 0.55,
+    emergence,
+    intensity,
+    parallax: 0.65,
+    rings: 0.35,
+    glitter: 0.35,
   });
 
 
 
-  // --- Protect nebula readability when background gets bright
-  const bgBright = emergence;                       // 0..1
-  const boost = 1.0 + bgBright * 0.28;              // 轻微增强颜色力度
+
+
+
+
+
+
+  console.log("bg", leadVis.toFixed(3), theta01_bg.toFixed(3), vel01_bg.toFixed(3), pitch01_bg.toFixed(3));
+
+
+  
+
+
+
+
+
+  const bgBright = leadVis;                 // ✅ 用我们刚刚算的 leadVis
+  const boost = 1.0 + bgBright * 0.22;      // 更克制一点，不会发白
+
   const opBoost = 1.0 + bgBright * 0.18;            // 轻微增强不透明度
 
   nebulaSystem.clusters?.forEach((c) => {

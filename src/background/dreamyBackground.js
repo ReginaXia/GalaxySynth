@@ -1,8 +1,15 @@
+// src/background/dreamyBackground.js
 import * as THREE from "three";
 
+// Vite: load shader as raw strings
 import bgVert from "./shaders/bg.vert.glsl?raw";
 import bgFrag from "./shaders/bg.frag.glsl?raw";
 
+/**
+ * Dreamy Background (audio-driven)
+ * - Fullscreen quad
+ * - Lead drives emergence + liquid paint injection
+ */
 export function createDreamyBackground(scene) {
   const geo = new THREE.PlaneGeometry(2, 2);
 
@@ -14,30 +21,32 @@ export function createDreamyBackground(scene) {
     transparent: false,
     uniforms: {
       uTime: { value: 0 },
-      uIntensity: { value: 1.0 },
+      uIntensity: { value: 0.9 },
 
-      uMouse: { value: new THREE.Vector2(0.5, 0.5) },
-      uParallax: { value: 0.6 },
-      uRings: { value: 0.38 },
-      uGlitter: { value: 0.20 },
+      uMouse: { value: new THREE.Vector2(0.5, 0.5) }, // 0..1
+      uParallax: { value: 0.65 }, // 0..1
+      uRings: { value: 0.35 },    // 0..1
+      uGlitter: { value: 0.35 },  // 0..1
 
+      // overall tint (optional)
       uTint: { value: new THREE.Vector3(1.0, 1.0, 1.0) },
+
+      // 0 = pure deep space, 1 = full pastel world
       uEmergence: { value: 0.0 },
 
-      uLeadE: { value: 0.0 },
-      uPitch01: { value: 0.5 },
-      uVel01: { value: 0.0 },
-      uTheta01: { value: 0.0 },
+      // ---- Audio-driven ----
+      uLeadE:   { value: 0.0 },   // 0..1
+      uPitch01: { value: 0.5 },   // 0..1 (low->high)
+      uVel01:   { value: 0.0 },   // 0..1 (scratch speed)
+      uTheta01: { value: 0.0 },   // 0..1 (angle)
 
-      // note injection
-      uPulse: { value: 0.0 },
-      uNoteHue: { value: 0.0 },
-      uNoteSeed: { value: 0.1 },
-      uNotePos: { value: new THREE.Vector2(0.5, 0.5) },
+      // "paint injection" on note change
+      uPulse:    { value: 0.0 },  // 0..1
+      uNoteHue:  { value: 0.8 },  // 0..1
+      uNoteSeed: { value: 0.1 },  // float
+      uNotePos:  { value: new THREE.Vector2(0.5, 0.5) }, // 0..1
     },
   });
-
-  // Prevent milky wash from tonemapping
   mat.toneMapped = false;
 
   const mesh = new THREE.Mesh(geo, mat);
@@ -73,17 +82,16 @@ export function createDreamyBackground(scene) {
     },
 
     setAudioDrive({ leadE, pitch01, vel01, theta01 } = {}) {
-      if (leadE !== undefined) mat.uniforms.uLeadE.value = leadE;
+      if (leadE   !== undefined) mat.uniforms.uLeadE.value = leadE;
       if (pitch01 !== undefined) mat.uniforms.uPitch01.value = pitch01;
-      if (vel01 !== undefined) mat.uniforms.uVel01.value = vel01;
+      if (vel01   !== undefined) mat.uniforms.uVel01.value = vel01;
       if (theta01 !== undefined) mat.uniforms.uTheta01.value = theta01;
     },
 
-    // ✅ note injection driver
     setNotePulse({ pulse, hue, seed, x, y } = {}) {
       if (pulse !== undefined) mat.uniforms.uPulse.value = pulse;
-      if (hue !== undefined) mat.uniforms.uNoteHue.value = hue;
-      if (seed !== undefined) mat.uniforms.uNoteSeed.value = seed;
+      if (hue   !== undefined) mat.uniforms.uNoteHue.value = hue;
+      if (seed  !== undefined) mat.uniforms.uNoteSeed.value = seed;
       if (x !== undefined && y !== undefined) mat.uniforms.uNotePos.value.set(x, y);
     },
 

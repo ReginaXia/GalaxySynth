@@ -9,8 +9,18 @@ function lerp(a, b, t) {
 }
 function nz(v) {
   if (typeof v !== "number" || Number.isNaN(v)) return 0;
+
+  // Tone.Meter 在一些版本里会返回 dB（负数），会导致 clamp01 直接变 0
+  // 这里做一个“兼容”：若 v <= 0，当作 dB → 线性幅度
+  if (v <= 0) {
+    const lin = Math.pow(10, v / 20);     // dB -> linear (0..1)
+    return clamp01(lin * 2.5);            // 给一点 gain，让视觉更明显（可再调）
+  }
+
+  // 如果已经是 normalRange 0..1，直接 clamp
   return clamp01(v);
 }
+
 
 function wrapStep(i, steps) {
   const s = Math.max(1, steps | 0);
