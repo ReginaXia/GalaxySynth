@@ -4,6 +4,10 @@ uniform float uTime;
 uniform float uIntensity;   // 默认 1 也可
 uniform vec3  uTint;        // 默认 (1,1,1) 也可
 
+uniform float uBaseHue;    // 0..1
+uniform float uWarmCool;   // -1..1 (负数更冷，正数更暖)
+
+
 varying vec2 vUv;
 varying vec3 vWorldDir;
 
@@ -31,7 +35,7 @@ float noise2(vec2 p){
 float fbm2(vec2 p){
   float v = 0.0;
   float a = 0.55;
-  for(int i=0;i<6;i++){
+  for(int i=0;i<4;i++){
     v += a * noise2(p);
     p *= 2.03;
     a *= 0.5;
@@ -93,7 +97,7 @@ void main(){
 
   // Multi-step advection (gives melt feeling, no seams)
   vec3 adv = vec3(0.0);
-  for(int i=0;i<3;i++){
+  for(int i=0;i<2;i++){
     vec3 d = flow3(p * (1.3 + float(i)*0.7), t + float(i)*1.6);
     float s1 = 0.020 + 0.010*float(i);
     float s2 = 0.030 + 0.018*float(i);
@@ -124,7 +128,8 @@ void main(){
   float band = smoothstep(0.18, 0.88, field) * centerMask;
 
   // Cool dreamy palette (more in-family with nebula)
-  float hBase = 0.70 + 0.05*sin(uTime*0.04);
+  float hBase = fract(uBaseHue + 0.03*sin(uTime*0.04) + 0.06*uWarmCool);
+
   vec3 c0 = hsv2rgb(vec3(fract(hBase + 0.00), 0.50, 0.95)); // violet
   vec3 c1 = hsv2rgb(vec3(fract(hBase + 0.12), 0.52, 0.95)); // pink-violet
   vec3 c2 = hsv2rgb(vec3(fract(hBase + 0.36), 0.48, 0.92)); // cyan

@@ -11,7 +11,8 @@ import bgFrag from "./shaders/bg.frag.glsl?raw";
  * - Lead drives emergence + liquid paint injection
  */
 export function createDreamyBackground(scene) {
-  const geo = new THREE.SphereGeometry(80, 64, 32);
+  const geo = new THREE.SphereGeometry(80, 32, 16)
+
 
   const mat = new THREE.ShaderMaterial({
     vertexShader: bgVert,
@@ -43,6 +44,10 @@ export function createDreamyBackground(scene) {
       uNoteHue: { value: 0.86 },                  // 0..1 hue
       uNoteSeed:{ value: 0.0 },                   // float seed
       uNotePos: { value: new THREE.Vector2(0.5, 0.5) }, // 0..1
+
+      uBaseHue: { value: 0.68 },   // 你可以改成 0.62/0.75 试试
+      uWarmCool:{ value: -0.6 },   // 更冷更宇宙
+
     },
 
   });
