@@ -108,6 +108,8 @@ const raycaster = new THREE.Raycaster();
 const nebulaRaycaster = new THREE.Raycaster();
 let nebulaHit = null; // 存当前命中的物体（可用于后续“active nebula”）
 
+let frameCount = 0;
+
 let activeNebulaKey = "C_pluck";
 
 // -------------------------------------
@@ -722,6 +724,8 @@ if (Tone.Transport.state !== "started") Tone.Transport.start();
 
 
 function tick() {
+
+
   // dt 用于输入平滑/音频平滑
   const dt = Math.min(0.05, clock.getDelta());
   const t = clock.getElapsedTime();
@@ -765,7 +769,8 @@ function tick() {
 
 
   // --- background
-  bg.update(t);
+  bg.update(t, camera);
+
   const mx01 = pointer.x * 0.5 + 0.5;
   const my01 = pointer.y * 0.5 + 0.5;
   bg.setMouse01(mx01, my01);
@@ -932,6 +937,8 @@ function tick() {
     psForAudio.rotation = 0;
   }
 
+  
+
   audio.setPerformance(psForAudio);
   audio.update(dt);
 
@@ -955,116 +962,20 @@ function tick() {
     }
   }
 
-
   
-    // -----------------------------
-  // Background (Lead-driven, single pipeline) ✅ CLEAN
-  // -----------------------------
-  const a = audio.getState();
+  
+  
+  //   // -----------------------------
+  // // Background (Lead-driven, single pipeline) ✅ CLEAN
+  // // -----------------------------
+  // const a = audio.getState();
 
-  // mouse01 (0..1) for background parallax / note injection
-  const mouse01 = {
-    x: (pointer.x * 0.5 + 0.5),
-    y: (pointer.y * 0.5 + 0.5),
-  };
-  bg.setMouse01(mouse01.x, mouse01.y);
-
-
-
-
-
-
-
-  // -----------------------------
-  // Background (Lead-driven) ✅ SINGLE SOURCE OF TRUTH
-  // Replace the whole old bg blocks with this.
-  // -----------------------------
-
-  // 0) midi
-  const midi = a.lastMidi ?? 60;
-
-  // 1) lead energy -> visual (抬一下，否则永远很暗)
-  const leadLvl = Math.max(0, a?.level?.lead ?? 0); // 0..1
-  const leadVis = THREE.MathUtils.clamp(Math.pow(leadLvl, 0.35) * 2.2, 0, 1);
-
-  // 2) theta01 from performance rotation (你 hover/drag 才会给 rotation)
-  const theta01_bg = THREE.MathUtils.euclideanModulo(psForAudio.rotation ?? 0, 1);
-
-  // 3) vel01 from theta delta (smooth) —— 唯美流动，不 DJ 抖
-  if (!window.__bgDrive2) window.__bgDrive2 = { lastTheta: theta01_bg, vel: 0 };
-  {
-    const d0 = Math.abs(theta01_bg - window.__bgDrive2.lastTheta);
-    const dWrap = Math.min(d0, 1 - d0);
-    const instVel = THREE.MathUtils.clamp(dWrap / Math.max(1e-4, dt) * 0.18, 0, 1);
-    window.__bgDrive2.vel += (instVel - window.__bgDrive2.vel) * (1 - Math.exp(-dt * 10.0));
-    window.__bgDrive2.lastTheta = theta01_bg;
-  }
-  const vel01_bg = window.__bgDrive2.vel;
-
-  // 4) pitch01 from midi (C3..C6)
-  const pitch01_bg = THREE.MathUtils.clamp((midi - 48) / 36, 0, 1);
-
-  // 5) note injection state (每个新音注入颜料)
-  if (!window.__bgNote2) {
-    window.__bgNote2 = {
-      lastMidi: null,
-      hue: 0.86,
-      seed: 0.13,
-      pulse: 0.0,
-      pos: { x: 0.5, y: 0.5 },
-    };
-  }
-  const bn = window.__bgNote2;
-
-  if (bn.lastMidi === null) bn.lastMidi = midi;
-
-  if (midi !== bn.lastMidi) {
-    bn.lastMidi = midi;
-
-    // hue 跟音高走（稳定，不夜店闪）
-    bn.hue = ((midi % 12) / 12 + 0.08) % 1.0;
-    bn.seed = Math.random();
-
-    // 注入位置：沿搓盘方向在环上打进去
-    const ang = theta01_bg * Math.PI * 2;
-    bn.pos.x = 0.5 + Math.cos(ang) * 0.28;
-    bn.pos.y = 0.5 + Math.sin(ang) * 0.28;
-
-    // pulse：新音越明显，越“融化”
-    bn.pulse = THREE.MathUtils.clamp(0.35 + leadVis * 0.9 + vel01_bg * 0.35, 0.2, 1.0);
-  }
-
-  // 衰减（慢一点更唯美）
-  bn.pulse *= Math.exp(-dt * 1.6);
-
-  // 6) feed background shader (only ONE pipeline)
-  bg.setAudioDrive({
-    leadE: leadVis,
-    pitch01: pitch01_bg,
-    vel01: vel01_bg,
-    theta01: theta01_bg,
-  });
-
-  bg.setNotePulse({
-    pulse: bn.pulse,
-    hue: bn.hue,
-    seed: bn.seed,
-    x: bn.pos.x,
-    y: bn.pos.y,
-  });
-
-  // 7) style
-  // 没弹奏就回深邃；弹奏就亮起来（但不会糊白）
-  const emergence = leadVis;
-  const intensity = 0.90 + 0.22 * emergence + 0.10 * pitch01_bg;
-
-  bg.setStyle({
-    emergence,
-    intensity,
-    parallax: 0.65,
-    rings: 0.35,
-    glitter: 0.35,
-  });
+  // // mouse01 (0..1) for background parallax / note injection
+  // const mouse01 = {
+  //   x: (pointer.x * 0.5 + 0.5),
+  //   y: (pointer.y * 0.5 + 0.5),
+  // };
+  // bg.setMouse01(mouse01.x, mouse01.y);
 
 
 
@@ -1072,40 +983,195 @@ function tick() {
 
 
 
+  // // -----------------------------
+  // // Background (Lead-driven) ✅ SINGLE SOURCE OF TRUTH
+  // // Replace the whole old bg blocks with this.
+  // // -----------------------------
+
+  // // 0) midi
+  // const midi = a.lastMidi ?? 60;
+
+  // // 1) lead energy -> visual (抬一下，否则永远很暗)
+  // const leadLvl = Math.max(0, a?.level?.lead ?? 0); // 0..1
+
+  // // 是否最近有弹过音（presence）
+  // if (!window.__bgPresence) window.__bgPresence = 0;
+
+  // const noteHit = (a.lastMidi !== null);
+  // if (noteHit) {
+  //   window.__bgPresence = 1.0;
+  // }
+  // window.__bgPresence *= Math.exp(-dt * 0.6); // 慢慢退回暗色
+
+  // // 能量（流动）
+  // const leadEnergy = THREE.MathUtils.clamp(
+  //   Math.pow(a?.level?.lead ?? 0, 0.5),
+  //   0,
+  //   1
+  // );
+
+  // // 最终给背景的“存在感”
+  // const bgPresence = Math.max(0.12, window.__bgPresence);
 
 
-  console.log("bg", leadVis.toFixed(3), theta01_bg.toFixed(3), vel01_bg.toFixed(3), pitch01_bg.toFixed(3));
+  // // 2) theta01 from performance rotation (你 hover/drag 才会给 rotation)
+  // const theta01_bg = psForAudio.rotation ?? 0;
 
+  // // 3) vel01 from theta delta (smooth) —— 唯美流动，不 DJ 抖
+  // if (!window.__bgDrive2) window.__bgDrive2 = { lastTheta: theta01_bg, vel: 0 };
+  // {
+  //   const d0 = Math.abs(theta01_bg - window.__bgDrive2.lastTheta);
+  //   const dWrap = Math.min(d0, 1 - d0);
+  //   const instVel = THREE.MathUtils.clamp(dWrap / Math.max(1e-4, dt) * 0.18, 0, 1);
+  //   window.__bgDrive2.vel += (instVel - window.__bgDrive2.vel) * (1 - Math.exp(-dt * 10.0));
+  //   window.__bgDrive2.lastTheta = theta01_bg;
+  // }
+  // // const vel01_bg = window.__bgDrive2.vel;
+  // const vel01_bg   = psForAudio.energy ?? 0;
+
+  // // 4) pitch01 from midi (C3..C6)
+  // const pitch01_bg = THREE.MathUtils.clamp((midi - 48) / 36, 0, 1);
 
   
 
+  // // 5) note injection state (每个新音注入颜料)
+  // if (!window.__bgNote2) {
+  //   window.__bgNote2 = {
+  //     lastMidi: null,
+  //     hue: 0.86,
+  //     seed: 0.13,
+  //     pulse: 0.0,
+  //     pos: { x: 0.5, y: 0.5 },
+  //   };
+  // }
+  // const bn = window.__bgNote2;
+
+  // if (bn.lastMidi === null) bn.lastMidi = midi;
+
+  // if (midi !== bn.lastMidi) {
+  //   bn.lastMidi = midi;
+
+  //   // hue 跟音高走（稳定，不夜店闪）
+  //   bn.hue = ((midi % 12) / 12 + 0.08) % 1.0;
+  //   bn.seed = Math.random();
+
+  //   // 注入位置：沿搓盘方向在环上打进去
+  //   const ang = theta01_bg * Math.PI * 2;
+  //   bn.pos.x = 0.5 + Math.cos(ang) * 0.28;
+  //   bn.pos.y = 0.5 + Math.sin(ang) * 0.28;
+
+  //   // pulse：新音越明显，越“融化”
+  //   bn.pulse = THREE.MathUtils.clamp(0.35 + bgPresence * 0.9 + vel01_bg * 0.35, 0.2, 1.0);
+  // }
+
+  // // 衰减（慢一点更唯美）
+  // bn.pulse *= Math.exp(-dt * 1.6);
+
+  // if ((frameCount++ % 20) === 0) {
+  //   console.log("BGDRV", {
+  //     presence: bgPresence.toFixed(2),
+  //     theta: theta01_bg.toFixed(3),
+  //     vel: vel01_bg.toFixed(3),
+  //     pitch: pitch01_bg.toFixed(3),
+  //     // noteHue: noteHue01.toFixed?.(3),
+  //     pulse: pulse01.toFixed?.(3),
+  //     notePos: notePos ? `${notePos.x.toFixed(2)},${notePos.y.toFixed(2)}` : "null",
+  //   });
+  // }
+
+  
+
+  // // 6) feed background shader (only ONE pipeline)
+  // bg.setAudioDrive({
+  //   leadE: bgPresence,
+  //   pitch01: pitch01_bg,
+  //   vel01: vel01_bg,
+  //   theta01: theta01_bg,
+  // });
+
+  // bg.setNotePulse({
+  //   pulse: bn.pulse,
+  //   hue: bn.hue,
+  //   seed: bn.seed,
+  //   x: bn.pos.x,
+  //   y: bn.pos.y,
+  // });
+
+  // // 7) style
+  // // 没弹奏就回深邃；弹奏就亮起来（但不会糊白）
+  // const emergence = bgPresence;
+  // const intensity = 0.90 + 0.22 * emergence + 0.10 * pitch01_bg;
+
+  // bgPulse = bgPulse || 0;
+  // bgPulse = Math.max(0, bgPulse - dt * 2.8);
+
+  // const pitch01 = THREE.MathUtils.clamp((a.lastMidi - 48) / 36, 0, 1);
+
+  // // 高音 = 更亮
+  // const brightness = 0.25 + 0.55 * pitch01;
+
+
+  // bg.setStyle({
+  //   // 你原来已有的
+  //   intensity: 0.95,
+  //   tint: [1,1,1],           // 如果你原来是 Vector3，就保持原来写法
+  //   emergence: bgPresence,
+
+  //   // ✅ 新增：驱动液体流动
+  //   leadE: bgPresence,
+  //   pitch01: pitch01_bg,
+  //   vel01: vel01_bg,
+  //   theta01: theta01_bg,
+
+  //   // ✅ 新增：每个音符注入新“颜料团”
+  //   pulse: bgPulse,
+  //   // noteHue: bgMood.hue,     // 你已经在算 bgMood.hue
+  //   noteSeed: (a.lastMidi ?? 60) * 0.13 + t * 0.001,
+
+  //   notePos: [0.5 + 0.18 * Math.cos(theta01_bg * Math.PI * 2),
+  //             0.5 + 0.18 * Math.sin(theta01_bg * Math.PI * 2)],
+  // });
 
 
 
 
-  const bgBright = leadVis;                 // ✅ 用我们刚刚算的 leadVis
-  const boost = 1.0 + bgBright * 0.22;      // 更克制一点，不会发白
 
-  const opBoost = 1.0 + bgBright * 0.18;            // 轻微增强不透明度
 
-  nebulaSystem.clusters?.forEach((c) => {
-    if (!c?.preset) return;
 
-    // outer/core/stars 的基础 opacity 来自 preset
-    const o0 = c.preset.layers.outer.opacity;
-    const c0 = c.preset.layers.core.opacity;
-    const s0 = c.preset.layers.stars.opacity;
 
-    // 颜色更“立住”
-    if (c.outer?.material?.uniforms?.uColorStrength) c.outer.material.uniforms.uColorStrength.value = (c.preset.palette.strength ?? 1.1) * boost;
-    if (c.core?.material?.uniforms?.uColorStrength)  c.core.material.uniforms.uColorStrength.value  = (c.preset.palette.strength ?? 1.1) * boost;
-    if (c.armStars?.material?.uniforms?.uColorStrength) c.armStars.material.uniforms.uColorStrength.value = (c.preset.palette.strength ?? 1.1) * boost;
 
-    // 不透明度轻微上调（别太大，否则发白）
-    if (c.outer?.material?.uniforms?.uOpacity) c.outer.material.uniforms.uOpacity.value = o0 * opBoost;
-    if (c.core?.material?.uniforms?.uOpacity)  c.core.material.uniforms.uOpacity.value  = c0 * opBoost;
-    if (c.armStars?.material?.uniforms?.uOpacity) c.armStars.material.uniforms.uOpacity.value = s0 * opBoost;
-  });
+  // console.log("bg", bgPresence.toFixed(3), theta01_bg.toFixed(3), vel01_bg.toFixed(3), pitch01_bg.toFixed(3));
+
+
+  
+
+
+
+
+
+  // const bgBright = bgPresence;                 // ✅ 用我们刚刚算的 bgPresence
+  // const boost = 1.0 + bgBright * 0.22;      // 更克制一点，不会发白
+
+  // const opBoost = 1.0 + bgBright * 0.18;            // 轻微增强不透明度
+
+  // nebulaSystem.clusters?.forEach((c) => {
+  //   if (!c?.preset) return;
+
+  //   // outer/core/stars 的基础 opacity 来自 preset
+  //   const o0 = c.preset.layers.outer.opacity;
+  //   const c0 = c.preset.layers.core.opacity;
+  //   const s0 = c.preset.layers.stars.opacity;
+
+  //   // 颜色更“立住”
+  //   if (c.outer?.material?.uniforms?.uColorStrength) c.outer.material.uniforms.uColorStrength.value = (c.preset.palette.strength ?? 1.1) * boost;
+  //   if (c.core?.material?.uniforms?.uColorStrength)  c.core.material.uniforms.uColorStrength.value  = (c.preset.palette.strength ?? 1.1) * boost;
+  //   if (c.armStars?.material?.uniforms?.uColorStrength) c.armStars.material.uniforms.uColorStrength.value = (c.preset.palette.strength ?? 1.1) * boost;
+
+  //   // 不透明度轻微上调（别太大，否则发白）
+  //   if (c.outer?.material?.uniforms?.uOpacity) c.outer.material.uniforms.uOpacity.value = o0 * opBoost;
+  //   if (c.core?.material?.uniforms?.uOpacity)  c.core.material.uniforms.uOpacity.value  = c0 * opBoost;
+  //   if (c.armStars?.material?.uniforms?.uOpacity) c.armStars.material.uniforms.uOpacity.value = s0 * opBoost;
+  // });
 
 
   // 7) Bloom：只跟随 lead 能量（慢），并且整体更低
@@ -1121,7 +1187,7 @@ function tick() {
   composer.render();
 
   // --- 左侧音频监控 UI
-  audioUI.update(a, perf.state);
+  // audioUI.update(a, perf.state);
 
 
   requestAnimationFrame(tick);

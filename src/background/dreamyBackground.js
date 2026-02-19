@@ -11,7 +11,7 @@ import bgFrag from "./shaders/bg.frag.glsl?raw";
  * - Lead drives emergence + liquid paint injection
  */
 export function createDreamyBackground(scene) {
-  const geo = new THREE.PlaneGeometry(2, 2);
+  const geo = new THREE.SphereGeometry(80, 64, 32);
 
   const mat = new THREE.ShaderMaterial({
     vertexShader: bgVert,
@@ -19,33 +19,32 @@ export function createDreamyBackground(scene) {
     depthWrite: false,
     depthTest: false,
     transparent: false,
+    side: THREE.BackSide,
     uniforms: {
       uTime: { value: 0 },
-      uIntensity: { value: 0.9 },
+      uIntensity: { value: 0.7 },
 
       uMouse: { value: new THREE.Vector2(0.5, 0.5) }, // 0..1
-      uParallax: { value: 0.65 }, // 0..1
-      uRings: { value: 0.35 },    // 0..1
-      uGlitter: { value: 0.35 },  // 0..1
+      uParallax: { value: 0.6 }, // 0..1
+      uRings: { value: 0.7 },    // 0..1
+      uGlitter: { value: 0.6 },  // 0..1
 
-      // overall tint (optional)
+      // base color + emergence
       uTint: { value: new THREE.Vector3(1.0, 1.0, 1.0) },
-
-      // 0 = pure deep space, 1 = full pastel world
       uEmergence: { value: 0.0 },
 
-      // ---- Audio-driven ----
-      uLeadE:   { value: 0.0 },   // 0..1
-      uPitch01: { value: 0.5 },   // 0..1 (low->high)
-      uVel01:   { value: 0.0 },   // 0..1 (scratch speed)
-      uTheta01: { value: 0.0 },   // 0..1 (angle)
+      // ✅ NEW: audio-driven uniforms (for liquid motion & color)
+      uLeadE:   { value: 0.0 },                   // 0..1
+      uPitch01: { value: 0.0 },                   // 0..1
+      uVel01:   { value: 0.0 },                   // 0..1
+      uTheta01: { value: 0.0 },                   // 0..1
 
-      // "paint injection" on note change
-      uPulse:    { value: 0.0 },  // 0..1
-      uNoteHue:  { value: 0.8 },  // 0..1
-      uNoteSeed: { value: 0.1 },  // float
-      uNotePos:  { value: new THREE.Vector2(0.5, 0.5) }, // 0..1
+      uPulse:   { value: 0.0 },                   // 0..1 note trigger
+      uNoteHue: { value: 0.86 },                  // 0..1 hue
+      uNoteSeed:{ value: 0.0 },                   // float seed
+      uNotePos: { value: new THREE.Vector2(0.5, 0.5) }, // 0..1
     },
+
   });
   mat.toneMapped = false;
 
@@ -58,15 +57,31 @@ export function createDreamyBackground(scene) {
     mesh,
     material: mat,
 
-    update(t) {
+    update(t, camera) {
       mat.uniforms.uTime.value = t;
+      if (camera) mesh.position.copy(camera.position); // ✅ 关键：跟随相机平移，像无限远背景
     },
+
 
     setMouse01(x, y) {
       mat.uniforms.uMouse.value.set(x, y);
     },
 
-    setStyle({ parallax, rings, glitter, intensity, tint, emergence } = {}) {
+    setStyle({ parallax, rings, glitter, intensity, tint, emergence,
+        leadE, pitch01, vel01, theta01,
+        pulse, noteHue, noteSeed, notePos 
+      } = {}) {
+      // audio-driven (optional)
+      if (leadE !== undefined)   mat.uniforms.uLeadE.value = leadE;
+      if (pitch01 !== undefined) mat.uniforms.uPitch01.value = pitch01;
+      if (vel01 !== undefined)   mat.uniforms.uVel01.value = vel01;
+      if (theta01 !== undefined) mat.uniforms.uTheta01.value = theta01;
+
+      if (pulse !== undefined)   mat.uniforms.uPulse.value = pulse;
+      if (noteHue !== undefined) mat.uniforms.uNoteHue.value = noteHue;
+      if (noteSeed !== undefined) mat.uniforms.uNoteSeed.value = noteSeed;
+      if (notePos !== undefined) mat.uniforms.uNotePos.value.set(notePos[0], notePos[1]);
+
       if (parallax !== undefined) mat.uniforms.uParallax.value = parallax;
       if (rings !== undefined) mat.uniforms.uRings.value = rings;
       if (glitter !== undefined) mat.uniforms.uGlitter.value = glitter;
