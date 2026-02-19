@@ -81,6 +81,25 @@ const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerH
 camera.position.set(0, 6.5, 8.5);
 camera.lookAt(0, 0, 0);
 
+
+// ------------------ Orbit Camera (Alt+Drag) ------------------
+const orbitTarget = new THREE.Vector3(0, 0, 0);
+let orbitRadius = camera.position.distanceTo(orbitTarget);
+let orbitYaw = Math.atan2(camera.position.x - orbitTarget.x, camera.position.z - orbitTarget.z);
+let orbitPitch = Math.asin((camera.position.y - orbitTarget.y) / orbitRadius);
+
+function applyOrbitCamera() {
+  orbitPitch = THREE.MathUtils.clamp(orbitPitch, -1.25, 1.25);
+  const cp = Math.cos(orbitPitch);
+  camera.position.set(
+    orbitTarget.x + orbitRadius * Math.sin(orbitYaw) * cp,
+    orbitTarget.y + orbitRadius * Math.sin(orbitPitch),
+    orbitTarget.z + orbitRadius * Math.cos(orbitYaw) * cp
+  );
+  camera.lookAt(orbitTarget);
+}
+
+
 // -------------------------------------
 // Texture
 // -------------------------------------
@@ -569,9 +588,15 @@ canvas.addEventListener("pointermove", (e) => {
   lastX = e.clientX;
   lastY = e.clientY;
 
-  nebulaSystem.root.rotation.y += dx * 0.005;
-  nebulaSystem.root.rotation.x += dy * 0.005;
-  nebulaSystem.root.rotation.x = THREE.MathUtils.clamp(nebulaSystem.root.rotation.x, -1.25, 1.25);
+  // nebulaSystem.root.rotation.y += dx * 0.005;
+  // nebulaSystem.root.rotation.x += dy * 0.005;
+  // nebulaSystem.root.rotation.x = THREE.MathUtils.clamp(nebulaSystem.root.rotation.x, -1.25, 1.25);
+
+  orbitYaw   += dx * 0.005;
+  orbitPitch += dy * 0.005;
+  applyOrbitCamera();
+
+
 });
 
 
