@@ -29,6 +29,7 @@ import { createBackgroundController } from "./background/backgroundController.js
 
 import { createPointerState } from "./input/pointerState.js";
 import { createScratchDisk } from "./input/scratchDisk.js";
+import { createNebulaPicker } from "./input/nebulaPicker.js";
 
 import starsVert from "./shaders/stars.vert.glsl?raw";
 import starsFrag from "./shaders/stars.frag.glsl?raw";
@@ -397,6 +398,9 @@ const nebulaSystem = createNebulaSystem({
   starTexture,
 });
 
+// Nebula picker
+const nebulaPicker = createNebulaPicker({ camera, nebulaSystem });
+
 // Scratch disk (input -> theta/r/step)
 const scratchDisk = createScratchDisk({ camera, nebulaSystem, steps: STEPS });
 
@@ -676,6 +680,7 @@ if (Tone.Transport.state !== "started") Tone.Transport.start();
 
 
 function tick() {
+  requestAnimationFrame(tick);
 
   // dt 用于输入平滑/音频平滑
   const dt = Math.min(0.05, clock.getDelta());
@@ -696,43 +701,19 @@ function tick() {
   // 统一更新：移动强度（0..1，当作“搓盘力度/速度”）
   const move01 = pointerInput.state.move01;
 
-  // --- raycast to plane
+  // --- raycast to plane (y = plane)
   raycaster.setFromCamera(pointer, camera);
   raycaster.ray.intersectPlane(plane, hitPoint);
 
-  // --- raycast to nebula (lead only when hovering nebula)
-  nebulaRaycaster.setFromCamera(pointer, camera);
+  // --- nebula hover (picker)
+  const pickState = nebulaPicker.update({ pointerNDC: pointer });
+  const hoveredNebulaKey = pickState.hoveredNebulaKey;
 
-  // 射线打到 nebulaSystem.root 的所有子物体（true 表示递归）
-  const hits = nebulaRaycaster.intersectObject(nebulaSystem.root, true);
+  // We keep nebulaHit only for legacy code paths; picker doesn't return hit points.
+  nebulaHit = null;
+  const hasNebulaHit = !!hoveredNebulaKey;
 
-  // 1) 只接受带 galaxyId 的命中（避免命中巨大“背景/点云容器”导致全屏都 hit）
-  const pick = hits.find(h => h?.object?.userData?.galaxyId);
-
-  // 2) 再加一个“屏幕距离阈值”，离开星云就立刻判定为 no
-  let nebulaHitLocal = null;
-  let hoveredNebulaKey = null;
-
-  if (pick) {
-    // 把命中点投影到 NDC，和鼠标 pointer(NDC) 比距离
-    const p = pick.point.clone().project(camera);   // p.x/p.y 是 NDC
-    const dx = p.x - pointer.x;
-    const dy = p.y - pointer.y;
-
-    // 阈值：越小越严格（0.08~0.18 之间都合理）
-    const NDC_THRESH = 0.12;
-    const ok = (dx*dx + dy*dy) < (NDC_THRESH * NDC_THRESH);
-
-    if (ok) {
-      nebulaHitLocal = pick;
-      hoveredNebulaKey = pick.object.userData.galaxyId;
-    }
-  }
-
-  nebulaHit = nebulaHitLocal;
   const scratch = scratchDisk.update({ pointerNDC: pointer, pointerDown, move01, activeNebulaKey });
-
-  const hasNebulaHit = !!nebulaHit;
 
   // --- background
   // Background is updated via bgController.update(...) at the end of tick.
@@ -751,6 +732,8 @@ function tick() {
     disturb = hitPoint;
   }
 
+  // -------------------- Other systems update (keep your existing order) --------------------
+  
   nebulaSystem.update(disturb, t);
 
   meteorSystem.update(t);
@@ -900,9 +883,6 @@ function tick() {
 
   // --- 左侧音频监控 UI
   // audioUI.update(a, perf.state);
-
-
-  requestAnimationFrame(tick);
 }
 
 tick();
