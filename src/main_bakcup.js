@@ -806,8 +806,17 @@ function tick() {
   nebulaHit = nebulaHitLocal;
   const hasNebulaHit = !!nebulaHit;
 
+
+
   // --- background
-  // Background is updated via bgController.update(...) at the end of tick.
+  bg.update(t, camera);
+
+  const mx01 = pointer.x * 0.5 + 0.5;
+  const my01 = pointer.y * 0.5 + 0.5;
+  bg.setMouse01(mx01, my01);
+
+
+  
 
   // --- stars
   stars.material.uniforms.uTime.value = t;
@@ -953,14 +962,21 @@ function tick() {
       bgVel01 = (typeof move01 === "number") ? move01 : 0.0; // 你上面已有 move01
       bgStep = Math.floor(theta01 * STEPS) % STEPS;
 
-      // --- feed background (safe: only uses values we computed in this scope)
-      bgDrive.leadE = Math.max(bgDrive.leadE, bgVel01);
-      bgDrive.pitch01 = bgPitch01;
-      bgDrive.vel01 = bgVel01;
-      bgDrive.theta01 = theta01;
-      bgDrive.pulse = 1.0;
+      // --- feed background from lead gesture (safe, no undefined)
+      bgDrive.leadE = Math.max(bgDrive.leadE, vel);      // vel 你这里已经算出来了
+      bgDrive.pitch01 = pitch01;                         // pitch01 你这里已经算出来了
+      bgDrive.vel01 = vel01;                             // vel01 你这里已经算出来了
+      bgDrive.theta01 = theta01;                         // theta01 你这里已经算出来了
+      bgDrive.pulse = 1.0;                               // 触发一次注入脉冲
       bgDrive.noteSeed = (Math.random() * 0.999) + 0.001;
-      bgDrive.notePos.set(mouse01.x, mouse01.y);
+
+      // 如果你这里有 hitUv / 或者用 screen mouse 的 0..1，都行：
+      // 优先用“命中点在屏幕上的位置”，否则就用 mouse01
+      if (typeof hitUv !== "undefined" && hitUv) {
+        bgDrive.notePos.set(hitUv.x, hitUv.y);
+      } else if (typeof mouse01 !== "undefined") {
+        bgDrive.notePos.set(mouse01.x, mouse01.y);
+      }
 
       const instrument = voices?.getNebulaInstrument?.(activeNebulaKey);
       audio.playNebulaScratch({
@@ -1022,12 +1038,12 @@ function tick() {
     camera,
     mouse01,
     lead: {
-      isPlaying: bgIsPlaying,
-      vel01: bgVel01,
-      pitch01: bgPitch01,
-      theta01: bgTheta01,
-      step: bgStep,
-    },
+    isPlaying: !!(diskState.isHit && diskState.isDown && galaxyId && typeof vel01 === "number"),
+    vel01: typeof vel01 === "number" ? vel01 : 0.0,
+    pitch01: typeof pitch01 === "number" ? pitch01 : 0.5,
+    theta01: typeof theta01 === "number" ? theta01 : 0.0,
+    step: typeof step === "number" ? step : undefined,
+  }
   });
   // -------------------- /Dreamy background --------------------
 

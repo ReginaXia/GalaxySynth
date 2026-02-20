@@ -45,12 +45,18 @@ export function createDreamyBackground(scene) {
       uNoteSeed:{ value: 0.0 },                   // float seed
       uNotePos: { value: new THREE.Vector2(0.5, 0.5) }, // 0..1
 
-      uBaseHue: { value: 0.68 },   // 你可以改成 0.62/0.75 试试
-      uWarmCool:{ value: -0.6 },   // 更冷更宇宙
+      uMainColor: { value: new THREE.Color("#ff7ccf") }, // 你要的“纯粉”起点
+
+
+      uBaseHue: { value: 0.78 },   // 你可以改成 0.62/0.75 试试
+      uWarmCool:{ value: 0 },   // 更冷更宇宙
 
     },
 
   });
+
+  mat.name = "DreamyBackground";
+  
   mat.toneMapped = false;
 
   const mesh = new THREE.Mesh(geo, mat);
