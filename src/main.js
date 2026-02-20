@@ -27,6 +27,8 @@ import { createAudioMonitorUI } from "./ui/audioMonitor.js";
 
 import { createBackgroundController } from "./background/backgroundController.js";
 
+import { createPointerState } from "./input/pointerState.js";
+
 import starsVert from "./shaders/stars.vert.glsl?raw";
 import starsFrag from "./shaders/stars.frag.glsl?raw";
 import meteorVert from "./shaders/meteor.vert.glsl?raw";
@@ -146,38 +148,8 @@ let interactionMode = "orbit";
 const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.0);
 const hitPoint = new THREE.Vector3();
 
-// 鼠标 NDC（用于星空）
+
 const pointer = new THREE.Vector2(0, 0);
-window.addEventListener("pointermove", (e) => {
-  pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
-  pointer.y = -((e.clientY / window.innerHeight) * 2 - 1);
-});
-
-
-// -------------------------------------
-// 全局pointDown
-// -------------------------------------
-
-let pointerDown = false;
-window.addEventListener("pointerdown", () => (pointerDown = true));
-window.addEventListener("pointerup",   () => (pointerDown = false));
-
-
-
-// -------------------------------------
-// Audio: must start on gesture
-// -------------------------------------
-// window.addEventListener(
-//   "pointerdown",
-//   async () => {
-//     await initAudioOnFirstGesture();
-//   },
-//   { once: true }
-// );
-
-// -------------------------------------
-// Sound/Audio
-// -------------------------------------
 
 const perf = createPerformanceState();
 const controller = createMouseKeyboardController(window);
@@ -417,10 +389,6 @@ let lastPitch01 = 0.5;
 
 const mouse01 = { x: 0.5, y: 0.5 };
 
-window.addEventListener("mousemove", (e) => {
-  mouse01.x = e.clientX / window.innerWidth;
-  mouse01.y = 1.0 - e.clientY / window.innerHeight;
-});
 
 // -------------------------------------
 // Nebula system
@@ -537,6 +505,8 @@ function pickNebulaAtEvent(e) {
 // -------------------------------------
 const canvas = renderer.domElement;
 
+const pointerInput = createPointerState(canvas);
+
 let isDragging = false;
 let lastX = 0;
 let lastY = 0;
@@ -579,12 +549,8 @@ canvas.addEventListener("pointerdown", (e) => {
   }
 });
 
-
-
 canvas.addEventListener("pointermove", (e) => {
   const rect = canvas.getBoundingClientRect();
-  pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-  pointer.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
 
   if (!isDragging) return;
 
@@ -592,10 +558,6 @@ canvas.addEventListener("pointermove", (e) => {
   const dy = e.clientY - lastY;
   lastX = e.clientX;
   lastY = e.clientY;
-
-  // nebulaSystem.root.rotation.y += dx * 0.005;
-  // nebulaSystem.root.rotation.x += dy * 0.005;
-  // nebulaSystem.root.rotation.x = THREE.MathUtils.clamp(nebulaSystem.root.rotation.x, -1.25, 1.25);
 
   orbitYaw   += dx * 0.005;
   orbitPitch += dy * 0.005;
@@ -705,19 +667,19 @@ const bgDrive = {
 // -------------------------------------
 // Mouse move intensity (for audio trigger)
 // -------------------------------------
-let lastPX = 0,
-  lastPY = 0;
-let move01 = 0;
+// let lastPX = 0,
+//   lastPY = 0;
+// let move01 = 0;
 
-window.addEventListener("pointermove", (e) => {
-  const dx = e.clientX - lastPX;
-  const dy = e.clientY - lastPY;
-  lastPX = e.clientX;
-  lastPY = e.clientY;
+// window.addEventListener("pointermove", (e) => {
+//   const dx = e.clientX - lastPX;
+//   const dy = e.clientY - lastPY;
+//   lastPX = e.clientX;
+//   lastPY = e.clientY;
 
-  const speed = Math.sqrt(dx * dx + dy * dy);
-  move01 = Math.min(1, speed / 60);
-});
+//   const speed = Math.sqrt(dx * dx + dy * dy);
+//   move01 = Math.min(1, speed / 60);
+// });
 
 const bgNote = {
   lastMidi: null,
@@ -769,6 +731,21 @@ function tick() {
   // dt 用于输入平滑/音频平滑
   const dt = Math.min(0.05, clock.getDelta());
   const t = clock.getElapsedTime();
+
+  pointerInput.update();
+
+  // 统一更新：NDC pointer（给 stars / raycaster 用）
+  pointer.set(pointerInput.state.ndc.x, pointerInput.state.ndc.y);
+
+  // 统一更新：0..1 mouse01（给 bgController 用）
+  mouse01.x = pointerInput.state.mouse01.x;
+  mouse01.y = pointerInput.state.mouse01.y;
+
+  // 统一更新：按下状态（给搓盘/演奏逻辑用）
+  const pointerDown = pointerInput.state.isDown;
+
+  // 统一更新：移动强度（0..1，当作“搓盘力度/速度”）
+  const move01 = pointerInput.state.move01;
 
   // --- raycast to plane
   raycaster.setFromCamera(pointer, camera);
