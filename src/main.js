@@ -76,7 +76,8 @@ const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "hi
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
+// renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMapping = THREE.NoToneMapping;
 renderer.toneMappingExposure = 1;
 document.body.appendChild(renderer.domElement);
 

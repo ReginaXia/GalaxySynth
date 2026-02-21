@@ -1,19 +1,23 @@
 precision highp float;
+
 varying vec2 vUv;
+varying vec3 vWorldPos;
 
 uniform float uTime;
 uniform vec2  uMouse01;
 
-uniform float uLeadE;    // 0..1
-uniform float uVel01;    // 0..1
-uniform float uPitch01;  // 0..1
-uniform float uTheta01;  // 0..1
-uniform float uPulse;    // 0..1
+uniform float uLeadE;
+uniform float uVel01;
+uniform float uPitch01;
+uniform float uTheta01;
+uniform float uPulse;
 
-uniform vec3 uBase;      // #131527
-uniform vec3 uTint;      // 建议设成白色 #ffffff（避免染色）
+uniform vec3 uBase;
+uniform vec3 uTint;
 
-// ----------------- noise / fbm -----------------
+
+
+// ---------- noise / fbm ----------
 float hash21(vec2 p){
   p = fract(p*vec2(123.34, 456.21));
   p += dot(p,p+34.45);
@@ -34,130 +38,118 @@ float fbm(vec2 p){
   float a = 0.55;
   for(int i=0;i<5;i++){
     v += a*noise(p);
-    p *= 2.02;
+    p *= 2.03;
     a *= 0.5;
   }
   return v;
 }
-
-// ----------------- HSV to RGB -----------------
-vec3 hsv2rgb(vec3 c){
-  vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
-  vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-  return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+vec2 rot(vec2 p, float a){
+  float c = cos(a), s = sin(a);
+  return vec2(c*p.x - s*p.y, s*p.x + c*p.y);
 }
 
-// ----------------- sparkles -----------------
-float sparkle(vec2 p, float t){
-  float n = noise(p*30.0 + t*0.45);
-  return smoothstep(0.995, 1.0, n);
+// “亮但不灰”的曝光曲线（比 softClip 更保饱和）
+vec3 filmic(vec3 x){
+  // 1 - exp(-x) 这种会更“糖纸感”
+  return 1.0 - exp(-x);
 }
-float starGlint(vec2 p){
-  float ax = abs(p.x);
-  float ay = abs(p.y);
-  float line = exp(-ax*18.0) + exp(-ay*18.0);
-  float core = exp(-(ax*ax+ay*ay)*70.0);
-  return (0.30*line + 0.70*core);
+
+// ---------- pretty pearl palette (avoid dirty greens) ----------
+vec3 pearlPalette(float t){
+  // 童话贝母色带：粉、桃、金、薄荷、天蓝、薰衣草（没有“苔藓绿”）
+  vec3 c0 = vec3(1.00, 0.55, 0.95); // pink
+  vec3 c1 = vec3(1.00, 0.72, 0.55); // peach
+  vec3 c2 = vec3(1.00, 0.95, 0.60); // butter
+  vec3 c3 = vec3(0.55, 1.00, 0.88); // mint (clean)
+  vec3 c4 = vec3(0.55, 0.82, 1.00); // sky
+  vec3 c5 = vec3(0.80, 0.60, 1.00); // lavender
+
+  t = fract(t) * 6.0;
+  float i = floor(t);
+  float f = fract(t);
+  f = f*f*(3.0-2.0*f);
+
+  vec3 a = c0, b = c1;
+  if(i < 1.0){ a=c0; b=c1; }
+  else if(i < 2.0){ a=c1; b=c2; }
+  else if(i < 3.0){ a=c2; b=c3; }
+  else if(i < 4.0){ a=c3; b=c4; }
+  else if(i < 5.0){ a=c4; b=c5; }
+  else { a=c5; b=c0; }
+  return mix(a,b,f);
 }
 
 void main(){
-  vec2 uv = vUv;
-
-  // -------- base deep night --------
-  vec3 col = uBase;
-  float fog0 = fbm(uv*1.2 + uTime*0.01);
-  col += uBase * (fog0-0.5) * 0.05;
-
-  // -------- drive (make it pop fast) --------
-  float ignite = smoothstep(0.004, 0.06, uLeadE);         // 更快点燃
-  float velBoost = 0.25 + 0.75*pow(uVel01, 1.25);
+  float ignite = smoothstep(0.004, 0.07, uLeadE);
+  float velBoost = 0.25 + 0.75*pow(uVel01, 1.20);
   float drive = ignite * velBoost;
   float glow  = drive * drive;
 
-  // -------- warp (for liquid motion) --------
-  float ang = uTheta01 * 6.28318;
-  vec2 dir = vec2(cos(ang), sin(ang));
-  float spd = 0.12 + 1.8*uVel01;
+  // view ray
+  vec3 ray = normalize(vWorldPos - cameraPosition);
 
-  vec2 p = uv;
+  // base
+  vec3 col = uBase;
 
-  vec2 w1;
-  w1.x = fbm(p*2.7 + dir*uTime*spd);
-  w1.y = fbm(p*4.5 - dir*uTime*(spd*0.72));
-  w1 -= 0.5;
+  // silky marbling in view space (avoid UV heatmap blocks)
+  vec2 q = ray.xz;
+  float t = uTime * (0.03 + 0.12*uVel01);
 
-  vec2 w2;
-  w2.x = fbm(p*7.5 + vec2(-dir.y, dir.x)*uTime*(0.45+uVel01));
-  w2.y = fbm(p*10.5 - vec2(-dir.y, dir.x)*uTime*(0.35+uVel01));
-  w2 -= 0.5;
+  vec2 w1 = vec2(fbm(q*2.0 + t), fbm(q*2.0 - t)) - 0.5;
+  vec2 w2 = vec2(fbm(q*4.8 - t*1.2), fbm(q*4.8 + t*1.1)) - 0.5;
+  vec2 p = q + w1*0.65 + w2*0.25;
 
-  p += w1 * (0.18 + 0.42*uVel01) * ignite;
-  p += w2 * (0.05 + 0.14*uVel01) * ignite;
+  float a = fbm(p*2.8 + 0.7);
+  float b = fbm(rot(p*6.0, 0.6) - 1.1);
+  float cloud = 0.65*a + 0.35*b;
 
-  // -------- key: FORCE BIG hue swing while scratching --------
-  // 重点：就算 uPitch01 变化很小，也会因为 theta / time / vel 产生巨大色相摆动
-  float filmA = fbm(p*6.5 + uTime*0.10);
-  float filmB = fbm(p*15.0 - uTime*0.18);
-  float film  = 0.60*filmA + 0.40*filmB;                 // 0..1-ish
+  // nacre fresnel
+  float ndv = abs(ray.y);
+  float fres = pow(1.0 - ndv, 3.2);      // 更像贝母：边缘更亮
+  fres *= (0.20 + 0.80*drive);
 
-  // 超夸张 hue：pitch + theta(强) + 时间(强) + 噪声(强)
-  float hue = 0.0;
-  hue += uPitch01 * 1.8;                                  // pitch
-  hue += uTheta01 * (1.2 + 0.8*uVel01);                  // move -> shift
-  hue += uTime * (0.06 + 0.12*uVel01);                   // time -> shift
-  hue += (film - 0.5) * 0.65;                            // film -> shift
-  hue = fract(hue);
+  // hue driver: angle + pitch + swirling (but through pretty palette)
+  float thickness = 1.0 + 2.6*cloud + 1.2*uPulse;
+  float phase = thickness * (1.0 - ndv);
 
-  // 饱和度/明度：搓的时候直接拉满（你要的“鲜艳梦幻”）
-  float sat = mix(0.02, 0.98, drive);
-  float val = mix(0.10, 1.00, drive) * (0.78 + 0.22*film);
+  float hueKey = 0.0;
+  hueKey += phase * 0.55;
+  hueKey += uPitch01 * 1.35;
+  hueKey += uTheta01 * 0.60;
+  hueKey += uTime * (0.015 + 0.05*uVel01);
+  hueKey += (cloud - 0.5) * 0.35;
 
-  vec3 filmCol = hsv2rgb(vec3(hue, sat, val));
+  vec3 nacre = pearlPalette(hueKey);
+  nacre *= uTint;
 
-  // -------- pearl highlight (shiny) --------
-  float ridge = pow(smoothstep(0.55, 1.0, filmB), 2.4);
-  vec3 pearl = vec3(1.0) * ridge;
+  // make it POP: when playing, background becomes candy-nacre
+  col = mix(col, nacre, drive * 0.98);
 
-  // -------- global lift (bigger) --------
-  col += filmCol * (drive * 1.25 + glow * 0.95);
-  col += pearl  * (drive * 0.40 + glow * 0.55);
+  // IMPORTANT: 不再加“纯白珠光”，改成“有色珠光” → 不发灰
+  col += nacre * fres * (0.90 + 1.40*glow);
 
-  // -------- injection near mouse (very obvious + note-tied) --------
-  float d = distance(p, uMouse01);
+  // silky bright ribbons (still colored)
+  float ridge = smoothstep(0.55, 0.95, b);
+  float silk = ridge * fres * (0.20 + 0.80*drive);
+  col += nacre * silk * (0.40 + 0.80*glow);
+
+  // mouse magic ink injection (very saturated)
+  float d = distance(vUv, uMouse01);
   float ink = smoothstep(0.55, 0.0, d);
-  ink *= (0.15 + 0.85*uPulse);
+  ink *= (0.18 + 0.82*uPulse);
   ink *= (0.35 + 0.65*uVel01);
 
-  // 注入 hue：更“按音”一点（再叠加一点 filmShimmer）
-  float inkShimmer = fbm(p*20.0 + uTime*0.22);
-  float inkHue = fract(uPitch01*2.2 + inkShimmer*0.35 + uTheta01*0.25);
-  vec3 inkCol = hsv2rgb(vec3(inkHue, mix(0.08, 1.0, drive), mix(0.15, 1.0, drive)));
+  vec3 inkCol = pearlPalette(hueKey + 0.33 + fbm(p*10.0 + uTime*0.1)*0.25);
+  col += inkCol * ink * (0.60 + 1.60*glow);
 
-  col += inkCol * ink * (drive * 1.45 + glow * 1.05);
+  // tiny sparkles (not too much white)
+  float sp = smoothstep(0.995, 1.0, noise(p*28.0 + uTime*0.35));
+  col += nacre * sp * (0.15 + 0.55*drive);
 
-  // -------- NEW: "note shockwave" (guaranteed visible surprise) --------
-  // 利用 uPulse 制造一圈圈彩膜波纹扩散（不会闪屏，但很“哇”）
-  vec2 c = uMouse01;
-  float r = distance(uv, c);
-  float wave = sin(r*35.0 - uTime*(2.0 + 6.0*uVel01));
-  wave = smoothstep(0.55, 1.0, wave);
-  float waveMask = wave * drive * (0.25 + 0.75*uPulse);
-  vec3 waveCol = hsv2rgb(vec3(fract(hue + 0.35), 1.0, 1.0));
-  col += waveCol * waveMask * 0.35;
-
-  // -------- sparkles / glints (more visible) --------
-  float sp = sparkle(p + w1*0.6, uTime);
-  col += vec3(1.0) * sp * (drive * (0.25 + 0.80*uVel01) + glow * 0.35);
-
-  vec2 gp = fract(p*vec2(10.0, 8.0)) - 0.5;
-  float gseed = noise(floor(p*vec2(10.0, 8.0)));
-  float glintMask = step(0.983, gseed);
-  float gl = starGlint(gp) * glintMask;
-  col += vec3(1.0) * gl * (drive * (0.18 + 0.55*uPulse) + glow * 0.25);
-
-  // -------- prevent "muddy gray" by boosting contrast a bit --------
-  // 轻微提对比，让色相差异更肉眼可见
-  col = pow(clamp(col, 0.0, 1.0), vec3(0.92));
+  // exposure: brighter but keeps saturation
+  col *= (0.85 + 1.75*drive);      // 播放时整体变亮
+  col = filmic(col);
+  col = pow(col, vec3(0.92));      // 再提一点亮度/通透
 
   gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
 }
