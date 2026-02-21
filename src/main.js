@@ -15,7 +15,7 @@ import { playMeteorSfx } from "./audio/meteorSfx.js";
 import { createNebulaSystem } from "./nebula/nebulaSystem.js";
 import { createMeteorSystem } from "./meteor/meteorSystem.js";
 
-import { createDreamyBackground } from "./background/dreamyBackground";
+import { createDreamyBackground, setupBackgroundGUI } from "./background/dreamyBackground";
 
 import { createPerformanceState } from "./performance/performanceState";
 import { createMouseKeyboardController } from "./input/mouseKeyboardController";
@@ -76,24 +76,26 @@ const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "hi
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-// renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMapping = THREE.NoToneMapping;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1;
 document.body.appendChild(renderer.domElement);
-
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-// 如果还卡：改成 1.0
 
 // -------------------------------------
 // Scene / Camera
 // -------------------------------------
 const scene = new THREE.Scene();
-const bg = createDreamyBackground(scene);
-scene.background = new THREE.Color(0x000000);
 
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.05, 2000);
 camera.position.set(0, 6.5, 8.5);
 camera.lookAt(0, 0, 0);
+
+const bg = await createDreamyBackground(scene, camera, { palette: 'pearl' });
+window.__bg = bg;
+// If your existing UI exposes a gui instance on window.__gui, this will attach a small Background folder.
+if (window.__gui) setupBackgroundGUI(window.__gui, bg);
+scene.background = new THREE.Color(0x000000);
+
+
 
 
 // ------------------ Orbit Camera (Alt+Drag) ------------------
@@ -407,7 +409,7 @@ const bgMood = {
 // -------------------------------------
 
 // ✅ background audio uniforms handle
-const bgU = bg.getUniforms();
+const bgU = bg.uniforms;
 
 // ✅ background “note paint” state
 // let bgPulse = 0.0;
@@ -812,18 +814,12 @@ function tick() {
   }
 
   nebulaHit = nebulaHitLocal;
-  // --- play target: hover has priority (so you can play without clicking)
-  const playNebulaKey = hoveredNebulaKey || activeNebulaKey;
-  if (pointerDown && playNebulaKey && playNebulaKey !== tick._cachedPlayNebulaKey) {
-    cacheActiveDiskFromNebula(playNebulaKey);
-    tick._cachedPlayNebulaKey = playNebulaKey;
-  }
   const hasNebulaHit = !!nebulaHit;
 
 
 
   // --- background
-  bg.update(t, camera);
+  if (bg) bg.update(dt, camera);
 
   const mx01 = pointer.x * 0.5 + 0.5;
   const my01 = pointer.y * 0.5 + 0.5;
@@ -929,19 +925,15 @@ function tick() {
   // 4) 音频：先喂，再更新（Lead Gate: only when hovering nebula）
   const psForAudio = { ...ps, trigger: trig };
 
-  // ✅ 演奏 gate：按住并 hover 到星云即可（不要求先 click 锁定）
-  const isActiveNebulaHovered = pointerDown && hasNebulaHit && !!hoveredNebulaKey
+  // ✅ 只有 hover 到的 nebula == activeNebula 才允许驱动 lead
+  const isActiveNebulaHovered =
+    pointerDown &&
+    hasNebulaHit &&
+    hoveredNebulaKey &&
+    hoveredNebulaKey === activeNebulaKey
 
 
   // 每帧更新一次盘面 NDC 半径（跟随相机缩放）
-
-  // --- Scratch state for audio + background (single source of truth)
-  let scratchIsPlaying = false;
-  let scratchTheta01 = 0.0;
-  let scratchPitch01 = 0.5; // use r01 as pitch01
-  let scratchVel01 = 0.0;   // use move01 as vel01
-  let scratchStep = undefined;
-
   updateActiveDiskNdcRadii();
 
   if (pointerDown && activeNebulaKey && activeDiskCenterW) {
@@ -967,32 +959,27 @@ function tick() {
         1
       );
 
-      // --- feed scratch state (single source of truth)
-      scratchIsPlaying = true;
-      scratchTheta01 = theta01;
-      scratchPitch01 = r01;
-      scratchVel01 = (typeof move01 === "number") ? move01 : 0.0;
-      scratchStep = Math.floor(theta01 * STEPS) % STEPS;
+      // --- feed background from lead gesture (safe, no undefined)
+// --- feed background from lead gesture (stable mapping)
+// Use pointer speed + scratch radius as a proxy for "energy"
+const localVel01 = THREE.MathUtils.clamp(Math.max(move01, r01 * 0.25), 0, 1);
+const localPitch01 = THREE.MathUtils.clamp(theta01, 0, 1); // stable, varies around the disk
 
-      // --- feed background from lead gesture
-      bgDrive.leadE = Math.max(bgDrive.leadE, scratchVel01);
-      bgDrive.pitch01 = scratchPitch01;
-      bgDrive.vel01 = scratchVel01;
-      bgDrive.theta01 = scratchTheta01;
-      bgDrive.pulse = 1.0;
-      bgDrive.noteSeed = (Math.random() * 0.999) + 0.001;
+bgDrive.leadE = Math.max(bgDrive.leadE, localVel01);
+bgDrive.pitch01 = localPitch01;
+bgDrive.vel01 = localVel01;
+bgDrive.theta01 = theta01;
 
-      // 如果你这里有 hitUv / 或者用 screen mouse 的 0..1，都行：
-      // 优先用“命中点在屏幕上的位置”，否则就用 mouse01
-      if (typeof hitUv !== "undefined" && hitUv) {
-        bgDrive.notePos.set(hitUv.x, hitUv.y);
-      } else if (typeof mouse01 !== "undefined") {
-        bgDrive.notePos.set(mouse01.x, mouse01.y);
-      }
+// trigger a short "ink injection" pulse
+bgDrive.pulse = 1.0;
+bgDrive.noteSeed = (Math.random() * 0.999) + 0.001;
+bgDrive.notePos.set(mouse01.x, mouse01.y);
 
-      const instrument = voices?.getNebulaInstrument?.(playNebulaKey);
+
+
+      const instrument = voices?.getNebulaInstrument?.(activeNebulaKey);
       audio.playNebulaScratch({
-        galaxyId: playNebulaKey,
+        galaxyId: activeNebulaKey,
         theta01,
         r01,
         instrument,
@@ -1042,53 +1029,54 @@ function tick() {
   bloomPass.radius = 0.12;
 
   // -------------------- Dreamy background (CLEAN) --------------------
-  // 我们只用 tick 里已经算出来的：isHit / isDown / vel01 / pitch01 / theta01 / step / mouse01 / dt / t
+  // Clean dt/t timing. No legacy time state object.
   {
-    const isPlaying = !!(scratchIsPlaying && pointerDown && !!playNebulaKey);
+    const sScratch = audio.getState()?.scratch;
 
-    // 1) presence：没弹奏就回到深色（bgLeadE -> 0），弹奏时随力度/速度出现
-    const targetLead = isPlaying ? Math.min(1.0, 0.12 + 0.88 * scratchVel01) : 0.0;
+    // "playing" = holding mouse + hovering the active nebula + scratch has some velocity
+    const scratchVel01 = THREE.MathUtils.clamp((sScratch?.velocity ?? 0) / 1.2, 0, 1);
+    const isPlaying = !!(pointerDown && isActiveNebulaHovered && scratchVel01 > 0.01);
+
+    // Smooth presence (leadE)
+    const targetLead = isPlaying ? Math.min(1.0, 0.10 + 0.90 * scratchVel01) : 0.0;
     bgLeadE = THREE.MathUtils.damp(bgLeadE, targetLead, 5.0, dt);
 
-    // 2) pitch / vel / theta：做平滑，避免闪烁
-    const p01 = (typeof scratchPitch01 === "number") ? scratchPitch01 : 0.5;
-    const v01 = (typeof scratchVel01 === "number") ? scratchVel01 : 0.0;
-    const th01 = (typeof scratchTheta01 === "number") ? scratchTheta01 : 0.0;
+    // Smooth pitch/vel/theta (prefer scratch state; fallback to bgDrive)
+    const targetPitch = (typeof sScratch?.pitch01 === "number") ? sScratch.pitch01 : bgDrive.pitch01;
+    const targetVel   = isPlaying ? scratchVel01 : 0.0;
+    const targetTheta = (typeof sScratch?.theta01 === "number") ? sScratch.theta01 : bgDrive.theta01;
 
-    bgPitch01 = THREE.MathUtils.damp(bgPitch01, p01, 8.0, dt);
-    bgVel01   = THREE.MathUtils.damp(bgVel01,   v01, 10.0, dt);
-    bgTheta01 = THREE.MathUtils.damp(bgTheta01, th01, 10.0, dt);
+    bgPitch01 = THREE.MathUtils.damp(bgPitch01, THREE.MathUtils.clamp(targetPitch, 0, 1), 8.0, dt);
+    bgVel01   = THREE.MathUtils.damp(bgVel01,   THREE.MathUtils.clamp(targetVel,   0, 1), 10.0, dt);
+    bgTheta01 = THREE.MathUtils.damp(bgTheta01, THREE.MathUtils.clamp(targetTheta, 0, 1), 10.0, dt);
 
-    // 3) note pulse：每次 step 变化就打一针“颜料注入”
-    if (isPlaying && typeof scratchStep === "number" && scratchStep !== bgLastStep) {
-      bgLastStep = scratchStep;
-      bgPulse = 1.0;                 // 立即触发
-      bgNoteSeed = t;                // 用 t 当 seed（别用 now）
-      bgNoteHue = (scratchStep / STEPS);    // 0..1（你之后想固定 do-re-mi 对颜色，就改这里）
+    // Pulse: when step changes while playing
+    const stepNow = (typeof sScratch?.step === "number") ? sScratch.step : -1;
+    if (isPlaying && stepNow >= 0 && stepNow !== bgLastStep) {
+      bgLastStep = stepNow;
+      bgPulse = 1.0;
+      bgNoteSeed = t;
+      bgNoteHue = (stepNow % STEPS) / STEPS;
+      bgDrive.noteSeed = bgNoteSeed;
     }
-    bgPulse = Math.max(0.0, bgPulse - dt * 2.6); // 衰减速度：越大越“短促”
+    bgPulse = Math.max(0.0, bgPulse - dt * 2.6);
 
-    // 4) 把参数喂给 dreamyBackground（你这个对象名字叫 bg）
-    if (bg && bg.setAudioDrive) {
-      bg.setAudioDrive({
+    // Feed shader uniforms (new dreamyBackground API)
+    if (bg && bg.setAudio) {
+      bg.setAudio({
         leadE: bgLeadE,
-        scratchPitch01: bgPitch01,
-        scratchVel01: bgVel01,
-        scratchTheta01: bgTheta01,
-      });
-    }
-    if (bg && bg.setNotePulse) {
-      bg.setNotePulse({
+        pitch01: bgPitch01,
+        vel01: bgVel01,
+        theta01: bgTheta01,
         pulse: bgPulse,
-        hue: bgNoteHue,
-        seed: bgNoteSeed,
-        x: mouse01.x,
-        y: mouse01.y,
+        noteSeed: bgDrive.noteSeed,
+        notePos: bgDrive.notePos,
+        noteHue: bgNoteHue,
       });
     }
-    if (bg && bg.update) bg.update(t);
   }
-  // -------------------- /Dreamy background (CLEAN) --------------------
+// -------------------- /Dreamy background (CLEAN) --------------------
+
 
   // --- render
   composer.render();

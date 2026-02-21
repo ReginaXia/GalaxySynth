@@ -1,144 +1,150 @@
-// src/background/dreamyBackground.js
 import * as THREE from "three";
 import bgVert from "./shaders/bg.vert.glsl?raw";
 import bgFrag from "./shaders/bg.frag.glsl?raw";
 
-/**
- * Dreamy Background (audio-driven)
- * - Sky sphere following camera
- * - Non-rainbow vivid palette + pearl film + ink injection
- */
-export function createDreamyBackground(scene) {
-  const geo = new THREE.SphereGeometry(80, 32, 16);
+export const BACKGROUND_PALETTES = {
+  pearl: { name: "Pearl Shell", colors: ["#7AF7FF","#FF4FD8","#C9A6FF","#FFD27A"] },
+  candy: { name: "Cotton Candy", colors: ["#61D9FF","#FF6BD6","#FFB86B","#B6FF8A"] },
+  aurora:{ name: "Aurora Soft",  colors: ["#4CF0FF","#7E7CFF","#FF65C8","#8CFFB8"] },
+  neo:   { name: "Neo Dream",    colors: ["#3DFFB8","#3D7BFF","#FF3DF2","#FFE83D"] },
+};
+
+function hexToVec3(hex){
+  const c = new THREE.Color(hex);
+  return new THREE.Vector3(c.r, c.g, c.b);
+}
+function clamp01(x){ return Math.max(0, Math.min(1, x)); }
+
+export async function createDreamyBackground(scene, camera = null, opts = {}){
+  const radius = opts.radius ?? 2000;
+
+  const base = new THREE.Color(opts.baseColor ?? "#131527");
+  const paletteKey = opts.palette ?? "pearl";
+  const pal = BACKGROUND_PALETTES[paletteKey] ?? BACKGROUND_PALETTES.pearl;
+
+  const uniforms = {
+    uTime: { value: 0 },
+
+    uLeadE:   { value: 0 },
+    uPitch01: { value: 0.5 },
+    uVel01:   { value: 0.0 },
+    uTheta01: { value: 0.0 },
+    uMouse:   { value: new THREE.Vector2(0.5, 0.5) },
+
+    uBase:      { value: new THREE.Vector3(base.r, base.g, base.b) },
+    uIntensity: { value: opts.intensity ?? 1.1 },
+    uFlow:      { value: opts.flow ?? 1.0 },
+    uScale:     { value: opts.scale ?? 1.0 },
+    uWarp:      { value: opts.warp ?? 0.75 },
+    uDetail:    { value: opts.detail ?? 0.55 },
+    uPearl:     { value: opts.pearl ?? 1.0 },
+    uSparkle:   { value: opts.sparkle ?? 0.35 },
+    uSat:       { value: opts.sat ?? 0.65 },
+    uContrast:  { value: opts.contrast ?? 1.15 },
+
+    uPal0: { value: hexToVec3(pal.colors[0]) },
+    uPal1: { value: hexToVec3(pal.colors[1]) },
+    uPal2: { value: hexToVec3(pal.colors[2]) },
+    uPal3: { value: hexToVec3(pal.colors[3]) },
+
+    uPulse:    { value: 0 },
+    uNoteHue:  { value: 0 },
+    uNoteSeed: { value: 0 },
+    uNotePos:  { value: new THREE.Vector2(0.5, 0.5) },
+  };
 
   const mat = new THREE.ShaderMaterial({
     vertexShader: bgVert,
     fragmentShader: bgFrag,
+    uniforms,
+    side: THREE.BackSide,
     depthWrite: false,
     depthTest: false,
-    transparent: false,
-    side: THREE.BackSide,
-    uniforms: {
-      uTime: { value: 0 },
-
-      // audio-driven
-      uLeadE: { value: 0.0 },
-      uPitch01: { value: 0.0 },
-      uVel01: { value: 0.0 },
-      uTheta01: { value: 0.0 },
-      uMouse: { value: new THREE.Vector2(0.5, 0.5) },
-
-      uPulse: { value: 0.0 },
-      uNoteHue: { value: 0.0 }, // ✅ 现在当作 noteIndex01 / 音阶位置用
-      uNoteSeed: { value: 0.0 },
-      uNotePos: { value: new THREE.Vector2(0.5, 0.5) },
-
-      // base deep color
-      uBase: { value: new THREE.Color("#131527").toArray().slice(0, 3) },
-
-      // vivid palette (non-rainbow) — 你可以随便换成你喜欢的“梦幻色组”
-      uPal0: { value: new THREE.Color("#7C5CFF").toArray().slice(0, 3) }, // 紫蓝
-      uPal1: { value: new THREE.Color("#00D9FF").toArray().slice(0, 3) }, // 亮青
-      uPal2: { value: new THREE.Color("#FF4FD8").toArray().slice(0, 3) }, // 亮粉
-      uPal3: { value: new THREE.Color("#FFE36E").toArray().slice(0, 3) }, // 香槟黄
-
-      // look controls
-      uExposure: { value: 1.45 },   // 更亮
-      uSaturation: { value: 1.55 }, // 高饱和（不灰）
-      uFlow: { value: 1.0 },        // 流速
-      uWarp: { value: 0.65 },       // 形状扭曲
-      uCloud: { value: 1.15 },      // 云尺度
-      uPearl: { value: 0.95 },      // 珠光膜强度
-      uInk: { value: 1.25 },        // 注入强度
-    },
   });
 
-  mat.toneMapped = false;
-
+  const geo = new THREE.SphereGeometry(radius, 32, 24);
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
-  mesh.renderOrder = -10000;
+  mesh.renderOrder = -1000;
   scene.add(mesh);
 
-  // 小工具：把 Color / array 写进 vec3 uniform
-  const setVec3 = (u, v) => {
-    if (!v) return;
-    if (Array.isArray(v)) u.value = [v[0], v[1], v[2]];
-    else if (v.isColor) u.value = [v.r, v.g, v.b];
-    else if (typeof v === "string") {
-      const c = new THREE.Color(v);
-      u.value = [c.r, c.g, c.b];
-    }
-  };
-
-  return {
+  const api = {
     mesh,
     material: mat,
+    uniforms,
 
-    update(t, camera) {
-      mat.uniforms.uTime.value = t;
-      if (camera) mesh.position.copy(camera.position);
-    },
-
-    setMouse01(x, y) {
-      mat.uniforms.uMouse.value.set(x, y);
-    },
-
-    /**
-     * 给 GUI 调：色盘、饱和度、曝光、流动、形状强度……
-     */
-    setLook({
-      base,
-      palette, // [c0,c1,c2,c3] each can be "#rrggbb" or THREE.Color or [r,g,b]
-      exposure,
-      saturation,
-      flow,
-      warp,
-      cloud,
-      pearl,
-      ink,
-    } = {}) {
-      if (base !== undefined) setVec3(mat.uniforms.uBase, base);
-
-      if (palette && palette.length >= 4) {
-        setVec3(mat.uniforms.uPal0, palette[0]);
-        setVec3(mat.uniforms.uPal1, palette[1]);
-        setVec3(mat.uniforms.uPal2, palette[2]);
-        setVec3(mat.uniforms.uPal3, palette[3]);
+    setPalette(keyOrColors){
+      let colors = null;
+      if (typeof keyOrColors === "string"){
+        colors = BACKGROUND_PALETTES[keyOrColors]?.colors ?? null;
+      } else if (Array.isArray(keyOrColors) && keyOrColors.length >= 4){
+        colors = keyOrColors;
       }
-
-      if (exposure !== undefined) mat.uniforms.uExposure.value = exposure;
-      if (saturation !== undefined) mat.uniforms.uSaturation.value = saturation;
-      if (flow !== undefined) mat.uniforms.uFlow.value = flow;
-      if (warp !== undefined) mat.uniforms.uWarp.value = warp;
-      if (cloud !== undefined) mat.uniforms.uCloud.value = cloud;
-      if (pearl !== undefined) mat.uniforms.uPearl.value = pearl;
-      if (ink !== undefined) mat.uniforms.uInk.value = ink;
+      if (!colors) return;
+      uniforms.uPal0.value.copy(hexToVec3(colors[0]));
+      uniforms.uPal1.value.copy(hexToVec3(colors[1]));
+      uniforms.uPal2.value.copy(hexToVec3(colors[2]));
+      uniforms.uPal3.value.copy(hexToVec3(colors[3]));
     },
 
-    /**
-     * 每帧：从主逻辑喂音频驱动
-     */
-    setAudioDrive({ leadE, pitch01, vel01, theta01 } = {}) {
-      if (leadE !== undefined) mat.uniforms.uLeadE.value = leadE;
-      if (pitch01 !== undefined) mat.uniforms.uPitch01.value = pitch01;
-      if (vel01 !== undefined) mat.uniforms.uVel01.value = vel01;
-      if (theta01 !== undefined) mat.uniforms.uTheta01.value = theta01;
+    setAudio({
+      leadE = uniforms.uLeadE.value,
+      pitch01 = uniforms.uPitch01.value,
+      vel01 = uniforms.uVel01.value,
+      theta01 = uniforms.uTheta01.value,
+      pulse = 0,
+      noteSeed = 0,
+      notePos = null,
+      noteHue = 0,
+    } = {}){
+      uniforms.uLeadE.value   = clamp01(leadE);
+      uniforms.uPitch01.value = clamp01(pitch01);
+      uniforms.uVel01.value   = clamp01(vel01);
+      uniforms.uTheta01.value = clamp01(theta01);
+      uniforms.uPulse.value   = clamp01(pulse);
+      uniforms.uNoteSeed.value = noteSeed ?? 0;
+      uniforms.uNoteHue.value  = noteHue ?? 0;
+      if (notePos && typeof notePos.x === "number"){
+        uniforms.uNotePos.value.set(clamp01(notePos.x), clamp01(notePos.y));
+      }
     },
 
-    /**
-     * 每次触发一个音符：注入一次颜色
-     * noteIndex01：建议用 (degree / 7) 或 (midi%12 / 12)
-     */
-    setNotePulse({ pulse, noteIndex01, seed, x, y } = {}) {
-      if (pulse !== undefined) mat.uniforms.uPulse.value = pulse;
-      if (noteIndex01 !== undefined) mat.uniforms.uNoteHue.value = noteIndex01;
-      if (seed !== undefined) mat.uniforms.uNoteSeed.value = seed;
-      if (x !== undefined && y !== undefined) mat.uniforms.uNotePos.value.set(x, y);
-    },
+    setMouse01(x,y){ uniforms.uMouse.value.set(clamp01(x), clamp01(y)); },
 
-    getUniforms() {
-      return mat.uniforms;
+    update(dt, cam = camera){
+      uniforms.uTime.value += dt;
+      if (cam) mesh.position.copy(cam.position);
     },
   };
+
+  return api;
+}
+
+export function setupBackgroundGUI(gui, bg){
+  if(!gui || !bg) return;
+  const params = {
+    palette: "pearl",
+    intensity: bg.uniforms.uIntensity.value,
+    flow: bg.uniforms.uFlow.value,
+    scale: bg.uniforms.uScale.value,
+    warp: bg.uniforms.uWarp.value,
+    detail: bg.uniforms.uDetail.value,
+    pearl: bg.uniforms.uPearl.value,
+    sparkle: bg.uniforms.uSparkle.value,
+    sat: bg.uniforms.uSat.value,
+    contrast: bg.uniforms.uContrast.value,
+  };
+
+  const folder = gui.addFolder?.("Background (Pearl)") ?? gui;
+  folder.add(params, "palette", Object.keys(BACKGROUND_PALETTES)).onChange(v => bg.setPalette(v));
+  folder.add(params, "intensity", 0.3, 2.5, 0.01).onChange(v => bg.uniforms.uIntensity.value = v);
+  folder.add(params, "flow", 0.0, 2.0, 0.01).onChange(v => bg.uniforms.uFlow.value = v);
+  folder.add(params, "scale", 0.2, 2.5, 0.01).onChange(v => bg.uniforms.uScale.value = v);
+  folder.add(params, "warp", 0.0, 1.4, 0.01).onChange(v => bg.uniforms.uWarp.value = v);
+  folder.add(params, "detail", 0.0, 1.2, 0.01).onChange(v => bg.uniforms.uDetail.value = v);
+  folder.add(params, "pearl", 0.0, 2.0, 0.01).onChange(v => bg.uniforms.uPearl.value = v);
+  folder.add(params, "sparkle", 0.0, 1.0, 0.01).onChange(v => bg.uniforms.uSparkle.value = v);
+  folder.add(params, "sat", 0.0, 1.5, 0.01).name("saturation").onChange(v => bg.uniforms.uSat.value = v);
+  folder.add(params, "contrast", 0.7, 1.7, 0.01).onChange(v => bg.uniforms.uContrast.value = v);
+  return folder;
 }
