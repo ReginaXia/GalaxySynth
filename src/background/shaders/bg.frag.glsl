@@ -19,6 +19,7 @@ float hash21(vec2 p){
   p += dot(p,p+34.45);
   return fract(p.x*p.y);
 }
+
 float noise(vec2 p){
   vec2 i = floor(p);
   vec2 f = fract(p);
@@ -29,6 +30,7 @@ float noise(vec2 p){
   vec2 u = f*f*(3.0-2.0*f);
   return mix(a,b,u.x) + (c-a)*u.y*(1.0-u.x) + (d-b)*u.x*u.y;
 }
+
 float fbm(vec2 p){
   float v = 0.0;
   float a = 0.55;
@@ -57,7 +59,6 @@ float sparkle(vec2 p, float t){
 
 // small star glint (cross-ish)
 float starGlint(vec2 p){
-  // p around 0
   float ax = abs(p.x);
   float ay = abs(p.y);
   float line = exp(-ax*18.0) + exp(-ay*18.0);
@@ -75,15 +76,16 @@ void main(){
   float fog0 = fbm(uv*1.4 + uTime*0.015);
   col += uBase * (fog0-0.5) * 0.06;
 
-  // ---------- ignite / drive (make it BRIGHT when playing) ----------
-  // make it kick in earlier and stronger
+  // ---------- ignite / drive (BRIGHT when playing) ----------
+  // kick in earlier (instant wow)
   float ignite = smoothstep(0.005, 0.12, uLeadE);
   float velBoost = 0.35 + 0.65*pow(uVel01, 1.35);
   float drive = ignite * velBoost;
+  float glow = drive * drive; // extra "ignite" pop
 
   // global lift so it doesn't stay dark while playing
-  float lift = drive * (0.18 + 0.22*uPitch01); // pitch controls brightness
-  col += uTint * lift * 0.35;
+  float lift = drive * (0.28 + 0.35*uPitch01);
+  col += uTint * lift * 0.55;
 
   // ---------- flow direction ----------
   float ang = uTheta01 * 6.28318;
@@ -102,46 +104,51 @@ void main(){
   vec2 warp2 = vec2(wC, wD) - 0.5;
 
   p += warp1 * (0.20 + 0.35*uVel01) * ignite;
-  p += warp2 * (0.06 + 0.10*uVel01) * ignite; // micro warp for smaller blocks
+  p += warp2 * (0.06 + 0.10*uVel01) * ignite; // micro warp -> smaller blocks
 
   // ---------- iridescent film (smaller patches) ----------
-  // increase frequency -> smaller color blocks
   float film1 = fbm(p*6.8 + uTime*0.10);
   float film2 = fbm(p*13.5 - uTime*0.16); // micro film
-  float film = 0.68*film1 + 0.32*film2;
+  float film  = 0.68*film1 + 0.32*film2;
 
-  // color: palette but pulled toward pink identity
-  vec3 iri = palette(film + uPitch01*0.20);
-  iri = mix(iri, uTint, 0.42);
+  // color: palette more driven by pitch (more visible music color change)
+  vec3 iri = palette(film + uPitch01*0.35);
+  // keep identity (pink) but don't kill the variation
+  iri = mix(iri, uTint, 0.30);
 
-  // add "pearl" highlight: emphasize thin-film bright ridges
+  // "pearl" highlight ridges
   float ridge = pow(smoothstep(0.55, 1.0, film2), 2.0);
   vec3 pearl = vec3(1.0) * ridge;
 
-  // film intensity (make it pop while playing)
   float filmBright = (0.28 + 0.75*uPitch01);
-  col += (iri * filmBright + pearl*0.35) * drive * 0.95;
 
-  // ---------- ink injection near mouse (so player sees immediate response) ----------
+  // brighter film: drive + glow
+  col += (iri * filmBright + pearl*0.45) * (drive * 1.05 + glow * 0.65);
+
+  // ---------- music-driven injection near mouse ----------
+  // Make ink color respond to music strongly (but still pink-anchored)
+  float noteT = fract(uPitch01 * 1.05 + uTheta01 * 0.08);
+  vec3 musicCol = palette(noteT);
+  musicCol = mix(musicCol, uTint, 0.22); // keep overall pink vibe
+
   float d = distance(p, uMouse01);
   float ink = smoothstep(0.42, 0.0, d);
-  // pulse makes it "spark" but not hard flash
-  ink *= (0.25 + 0.75*uPulse);
-  ink *= (0.55 + 0.45*uVel01);
-  col += uTint * ink * drive * 1.10;
+  ink *= (0.25 + 0.75*uPulse);     // step breath
+  ink *= (0.55 + 0.45*uVel01);     // stronger when scratching harder
+
+  vec3 inkCol = mix(uTint, musicCol, 0.70); // 70% music color
+  col += inkCol * ink * (drive * 1.25 + glow * 0.85);
 
   // ---------- sparkles / glints (more璀璨, but gated) ----------
   float sp = sparkle(p + warp1*0.6, uTime);
-  col += vec3(1.0) * sp * drive * (0.30 + 0.55*uVel01);
+  col += vec3(1.0) * sp * (drive * (0.30 + 0.55*uVel01) + glow * 0.25);
 
-  // occasional glints (tiny star crosses)
   vec2 gp = fract(p*vec2(10.0, 8.0)) - 0.5;
   float gseed = noise(floor(p*vec2(10.0, 8.0)));
   float glintMask = step(0.985, gseed); // rare
   float gl = starGlint(gp) * glintMask;
-  col += vec3(1.0) * gl * drive * (0.18 + 0.35*uPulse);
+  col += vec3(1.0) * gl * (drive * (0.18 + 0.35*uPulse) + glow * 0.18);
 
-  // ---------- tone clamp ----------
   col = clamp(col, 0.0, 1.0);
   gl_FragColor = vec4(col, 1.0);
 }
