@@ -25,12 +25,6 @@ import { createGalaxyVoices } from "./audio/galaxyVoices.js";
 
 import { createAudioMonitorUI } from "./ui/audioMonitor.js";
 
-import { createBackgroundController } from "./background/backgroundController.js";
-
-import { createPointerState } from "./input/pointerState.js";
-import { createScratchDisk } from "./input/scratchDisk.js";
-import { createNebulaPicker } from "./input/nebulaPicker.js";
-
 import starsVert from "./shaders/stars.vert.glsl?raw";
 import starsFrag from "./shaders/stars.frag.glsl?raw";
 import meteorVert from "./shaders/meteor.vert.glsl?raw";
@@ -63,6 +57,17 @@ debugHud.textContent = "HUD ready";
 
 
 document.body.appendChild(debugHud);
+
+
+// -------------------- BG state (global) --------------------
+let bgLeadE = 0.0;     // 0..1 presence
+let bgPitch01 = 0.5;   // 0..1
+let bgVel01 = 0.0;     // 0..1
+let bgTheta01 = 0.0;   // 0..1
+let bgPulse = 0.0;     // 0..1 (note trigger)
+let bgLastStep = -1;
+let bgNoteHue = 0.86;
+let bgNoteSeed = 0.0;
 
 // -------------------------------------
 // Renderer
@@ -137,17 +142,51 @@ let frameCount = 0;
 let activeNebulaKey = "C_pluck";
 
 // -------------------------------------
-// Active nebula scratch disk
-// (moved to src/input/scratchDisk.js)
+// Active nebula scratch disk (fixed center + tolerance radius)
 // -------------------------------------
+let activeDiskCenterW = null;   // THREE.Vector3 (world)
+let activeDiskRadiusW = 1.8;    // world radius (rough)
+let activeDiskOuterNDC = 0.18;  // screen-space radius (ndc), computed per-frame
+let activeDiskInnerNDC = 0.02;  // deadzone radius (ndc), computed per-frame
+
 
 let interactionMode = "orbit"; 
 
 const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.0);
 const hitPoint = new THREE.Vector3();
 
-
+// 鼠标 NDC（用于星空）
 const pointer = new THREE.Vector2(0, 0);
+window.addEventListener("pointermove", (e) => {
+  pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
+  pointer.y = -((e.clientY / window.innerHeight) * 2 - 1);
+});
+
+
+// -------------------------------------
+// 全局pointDown
+// -------------------------------------
+
+let pointerDown = false;
+window.addEventListener("pointerdown", () => (pointerDown = true));
+window.addEventListener("pointerup",   () => (pointerDown = false));
+
+
+
+// -------------------------------------
+// Audio: must start on gesture
+// -------------------------------------
+// window.addEventListener(
+//   "pointerdown",
+//   async () => {
+//     await initAudioOnFirstGesture();
+//   },
+//   { once: true }
+// );
+
+// -------------------------------------
+// Sound/Audio
+// -------------------------------------
 
 const perf = createPerformanceState();
 const controller = createMouseKeyboardController(window);
@@ -161,12 +200,6 @@ const audioVoices = createGalaxyVoices();
 // Step Sequencer (16-step ring) - MVP
 // -------------------------------------
 const STEPS = 16;
-
-// Background controller: 背景跟 lead 走，并保证“纯主色/不盖星云”
-const bgController = createBackgroundController(bg, { steps: STEPS });
-// 可选：指定你要的纯主色（也可以改成 GUI 控制）
-bgController.setMainColor("#ff7ccf");
-
 const beatSteps = new Array(STEPS).fill(false); // key "1"
 const percSteps = new Array(STEPS).fill(false); // key "2"
 
@@ -387,6 +420,10 @@ let lastPitch01 = 0.5;
 
 const mouse01 = { x: 0.5, y: 0.5 };
 
+window.addEventListener("mousemove", (e) => {
+  mouse01.x = e.clientX / window.innerWidth;
+  mouse01.y = 1.0 - e.clientY / window.innerHeight;
+});
 
 // -------------------------------------
 // Nebula system
@@ -398,13 +435,47 @@ const nebulaSystem = createNebulaSystem({
   starTexture,
 });
 
-// Nebula picker
-const nebulaPicker = createNebulaPicker({ camera, nebulaSystem });
-
-// Scratch disk (input -> theta/r/step)
-const scratchDisk = createScratchDisk({ camera, nebulaSystem, steps: STEPS });
-
 setupGalaxyGUI({ camera, renderer, nebulaSystem });
+
+function cacheActiveDiskFromNebula(galaxyId) {
+  if (!galaxyId) {
+    activeDiskCenterW = null;
+    return;
+  }
+
+  const c = nebulaSystem.getCluster?.(galaxyId);
+  if (!c) return;
+
+  // 固定中心：用 group 的世界坐标（不会被命中点抖动影响）
+  activeDiskCenterW = c.group.getWorldPosition(new THREE.Vector3());
+
+  // 半径：用 sizeScale 推一个“盘面范围”（你可以之后再调这个系数）
+  const sizeScale = c.preset?.shape?.sizeScale ?? 1.0;
+  const groupScale = c.group.scale?.x ?? 1.0;
+
+  // 这个系数决定“容错盘面”的大致半径，先给一个偏稳的值
+  activeDiskRadiusW = 1.9 * sizeScale * groupScale;
+}
+
+function updateActiveDiskNdcRadii() {
+  if (!activeDiskCenterW) return;
+
+  // 将中心投影到 NDC
+  const centerN = activeDiskCenterW.clone().project(camera);
+
+  // 取相机右方向，在世界里偏移一个 radiusW，投影后得到屏幕半径（NDC）
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion).normalize();
+  const edgeW = activeDiskCenterW.clone().add(right.multiplyScalar(activeDiskRadiusW));
+  const edgeN = edgeW.project(camera);
+
+  const r = Math.hypot(edgeN.x - centerN.x, edgeN.y - centerN.y);
+
+  // 外圈半径：允许演奏的最大范围（加个下限避免太小）
+  activeDiskOuterNDC = Math.max(0.10, Math.min(0.35, r));
+
+  // 内圈死区：中心太近角度不稳定，留个 deadzone
+  activeDiskInnerNDC = activeDiskOuterNDC * 0.18;
+}
 
 
 // -------------------------------------
@@ -469,8 +540,6 @@ function pickNebulaAtEvent(e) {
 // -------------------------------------
 const canvas = renderer.domElement;
 
-const pointerInput = createPointerState(canvas);
-
 let isDragging = false;
 let lastX = 0;
 let lastY = 0;
@@ -494,7 +563,7 @@ canvas.addEventListener("pointerdown", (e) => {
     if (pick?.galaxyId) {
       activeNebulaKey = pick.galaxyId;
 
-      scratchDisk.cacheFromNebula(activeNebulaKey);
+      cacheActiveDiskFromNebula(activeNebulaKey);
 
 
       // 可选：确认音（你之前已经做过）
@@ -506,15 +575,19 @@ canvas.addEventListener("pointerdown", (e) => {
     } else {
       // 点空白：取消选中
       activeNebulaKey = null;
-      scratchDisk.cacheFromNebula(null);
+      activeDiskCenterW = null;
       // 点空白本身不旋转；想旋转请按 Alt（手感更一致）
       return;
     }
   }
 });
 
+
+
 canvas.addEventListener("pointermove", (e) => {
   const rect = canvas.getBoundingClientRect();
+  pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
 
   if (!isDragging) return;
 
@@ -522,6 +595,10 @@ canvas.addEventListener("pointermove", (e) => {
   const dy = e.clientY - lastY;
   lastX = e.clientX;
   lastY = e.clientY;
+
+  // nebulaSystem.root.rotation.y += dx * 0.005;
+  // nebulaSystem.root.rotation.x += dy * 0.005;
+  // nebulaSystem.root.rotation.x = THREE.MathUtils.clamp(nebulaSystem.root.rotation.x, -1.25, 1.25);
 
   orbitYaw   += dx * 0.005;
   orbitPitch += dy * 0.005;
@@ -617,22 +694,33 @@ canvas.addEventListener(
 const stars = makeStars({ count: 65000, radius: 7.0, thickness: 1.6 });
 scene.add(stars);
 
+// --- background drive state (avoid undefined vars / keep things stable)
+const bgDrive = {
+  leadE: 0,
+  pitch01: 0,
+  vel01: 0,
+  theta01: 0,
+  pulse: 0,
+  notePos: new THREE.Vector2(0.5, 0.5),
+  noteSeed: 0.123,
+};
+
 // -------------------------------------
 // Mouse move intensity (for audio trigger)
 // -------------------------------------
-// let lastPX = 0,
-//   lastPY = 0;
-// let move01 = 0;
+let lastPX = 0,
+  lastPY = 0;
+let move01 = 0;
 
-// window.addEventListener("pointermove", (e) => {
-//   const dx = e.clientX - lastPX;
-//   const dy = e.clientY - lastPY;
-//   lastPX = e.clientX;
-//   lastPY = e.clientY;
+window.addEventListener("pointermove", (e) => {
+  const dx = e.clientX - lastPX;
+  const dy = e.clientY - lastPY;
+  lastPX = e.clientX;
+  lastPY = e.clientY;
 
-//   const speed = Math.sqrt(dx * dx + dy * dy);
-//   move01 = Math.min(1, speed / 60);
-// });
+  const speed = Math.sqrt(dx * dx + dy * dy);
+  move01 = Math.min(1, speed / 60);
+});
 
 const bgNote = {
   lastMidi: null,
@@ -680,43 +768,65 @@ if (Tone.Transport.state !== "started") Tone.Transport.start();
 
 
 function tick() {
-  requestAnimationFrame(tick);
+
 
   // dt 用于输入平滑/音频平滑
   const dt = Math.min(0.05, clock.getDelta());
   const t = clock.getElapsedTime();
 
-  pointerInput.update();
-
-  // 统一更新：NDC pointer（给 stars / raycaster 用）
-  pointer.set(pointerInput.state.ndc.x, pointerInput.state.ndc.y);
-
-  // 统一更新：0..1 mouse01（给 bgController 用）
-  mouse01.x = pointerInput.state.mouse01.x;
-  mouse01.y = pointerInput.state.mouse01.y;
-
-  // 统一更新：按下状态（给搓盘/演奏逻辑用）
-  const pointerDown = pointerInput.state.isDown;
-
-  // 统一更新：移动强度（0..1，当作“搓盘力度/速度”）
-  const move01 = pointerInput.state.move01;
-
-  // --- raycast to plane (y = plane)
+  // --- raycast to plane
   raycaster.setFromCamera(pointer, camera);
   raycaster.ray.intersectPlane(plane, hitPoint);
 
-  // --- nebula hover (picker)
-  const pickState = nebulaPicker.update({ pointerNDC: pointer });
-  const hoveredNebulaKey = pickState.hoveredNebulaKey;
+  // --- raycast to nebula (lead only when hovering nebula)
+  nebulaRaycaster.setFromCamera(pointer, camera);
 
-  // We keep nebulaHit only for legacy code paths; picker doesn't return hit points.
-  nebulaHit = null;
-  const hasNebulaHit = !!hoveredNebulaKey;
+  // 射线打到 nebulaSystem.root 的所有子物体（true 表示递归）
+  const hits = nebulaRaycaster.intersectObject(nebulaSystem.root, true);
 
-  const scratch = scratchDisk.update({ pointerNDC: pointer, pointerDown, move01, activeNebulaKey });
+  // 1) 只接受带 galaxyId 的命中（避免命中巨大“背景/点云容器”导致全屏都 hit）
+  const pick = hits.find(h => h?.object?.userData?.galaxyId);
+
+  // 2) 再加一个“屏幕距离阈值”，离开星云就立刻判定为 no
+  let nebulaHitLocal = null;
+  let hoveredNebulaKey = null;
+
+  if (pick) {
+    // 把命中点投影到 NDC，和鼠标 pointer(NDC) 比距离
+    const p = pick.point.clone().project(camera);   // p.x/p.y 是 NDC
+    const dx = p.x - pointer.x;
+    const dy = p.y - pointer.y;
+
+    // 阈值：越小越严格（0.08~0.18 之间都合理）
+    const NDC_THRESH = 0.12;
+    const ok = (dx*dx + dy*dy) < (NDC_THRESH * NDC_THRESH);
+
+    if (ok) {
+      nebulaHitLocal = pick;
+      hoveredNebulaKey = pick.object.userData.galaxyId;
+    }
+  }
+
+  nebulaHit = nebulaHitLocal;
+  // --- play target: hover has priority (so you can play without clicking)
+  const playNebulaKey = hoveredNebulaKey || activeNebulaKey;
+  if (pointerDown && playNebulaKey && playNebulaKey !== tick._cachedPlayNebulaKey) {
+    cacheActiveDiskFromNebula(playNebulaKey);
+    tick._cachedPlayNebulaKey = playNebulaKey;
+  }
+  const hasNebulaHit = !!nebulaHit;
+
+
 
   // --- background
-  // Background is updated via bgController.update(...) at the end of tick.
+  bg.update(t, camera);
+
+  const mx01 = pointer.x * 0.5 + 0.5;
+  const my01 = pointer.y * 0.5 + 0.5;
+  bg.setMouse01(mx01, my01);
+
+
+  
 
   // --- stars
   stars.material.uniforms.uTime.value = t;
@@ -727,13 +837,19 @@ function tick() {
 
   let disturb = hitPoint;
 
-  // Use scratch disk as a tolerant play region
-  if (scratch?.inDisk) {
-    disturb = hitPoint;
+  if (pointerDown && activeNebulaKey && activeDiskCenterW) {
+    const centerN = activeDiskCenterW.clone().project(camera);
+    const dx = pointer.x - centerN.x;
+    const dy = pointer.y - centerN.y;
+    const dist = Math.hypot(dx, dy);
+
+    const inDisk = dist <= activeDiskOuterNDC;
+    if (inDisk) {
+      // 用 raycast 平面的 hitPoint 也行；这里保留 disturb = hitPoint
+      disturb = hitPoint;
+    }
   }
 
-  // -------------------- Other systems update (keep your existing order) --------------------
-  
   nebulaSystem.update(disturb, t);
 
   meteorSystem.update(t);
@@ -809,23 +925,78 @@ function tick() {
   // 4) 音频：先喂，再更新（Lead Gate: only when hovering nebula）
   const psForAudio = { ...ps, trigger: trig };
 
-  // ✅ 只有 hover 到的 nebula == activeNebula 才允许驱动 lead
-  const isActiveNebulaHovered =
-    pointerDown &&
-    hasNebulaHit &&
-    hoveredNebulaKey &&
-    hoveredNebulaKey === activeNebulaKey
+  // ✅ 演奏 gate：按住并 hover 到星云即可（不要求先 click 锁定）
+  const isActiveNebulaHovered = pointerDown && hasNebulaHit && !!hoveredNebulaKey
 
-  // --- scratch -> audio (only when in tolerant disk)
-  if (scratch?.inDisk) {
-    const instrument = voices?.getNebulaInstrument?.(activeNebulaKey);
-    audio.playNebulaScratch({
-      galaxyId: activeNebulaKey,
-      theta01: scratch.theta01,
-      r01: scratch.r01,
-      instrument,
-    });
+
+  // 每帧更新一次盘面 NDC 半径（跟随相机缩放）
+
+  // --- Scratch state for audio + background (single source of truth)
+  let scratchIsPlaying = false;
+  let scratchTheta01 = 0.0;
+  let scratchPitch01 = 0.5; // use r01 as pitch01
+  let scratchVel01 = 0.0;   // use move01 as vel01
+  let scratchStep = undefined;
+
+  updateActiveDiskNdcRadii();
+
+  if (pointerDown && activeNebulaKey && activeDiskCenterW) {
+    const centerN = activeDiskCenterW.clone().project(camera);
+
+    const dx = pointer.x - centerN.x;
+    const dy = pointer.y - centerN.y;
+    const dist = Math.hypot(dx, dy);
+
+    // ✅ 容错演奏盘：在 outer 半径内、且避开中心死区
+    const inDisk = dist <= activeDiskOuterNDC && dist >= activeDiskInnerNDC;
+
+    if (inDisk) {
+      let ang = Math.atan2(dy, dx);
+      if (ang < 0) ang += Math.PI * 2;
+      const theta01 = ang / (Math.PI * 2);
+
+      // ✅ r01: 0(靠近中心) -> 1(靠近外圈)
+      const r01 = THREE.MathUtils.clamp(
+        (dist - activeDiskInnerNDC) /
+          Math.max(1e-6, (activeDiskOuterNDC - activeDiskInnerNDC)),
+        0,
+        1
+      );
+
+      // --- feed scratch state (single source of truth)
+      scratchIsPlaying = true;
+      scratchTheta01 = theta01;
+      scratchPitch01 = r01;
+      scratchVel01 = (typeof move01 === "number") ? move01 : 0.0;
+      scratchStep = Math.floor(theta01 * STEPS) % STEPS;
+
+      // --- feed background from lead gesture
+      bgDrive.leadE = Math.max(bgDrive.leadE, scratchVel01);
+      bgDrive.pitch01 = scratchPitch01;
+      bgDrive.vel01 = scratchVel01;
+      bgDrive.theta01 = scratchTheta01;
+      bgDrive.pulse = 1.0;
+      bgDrive.noteSeed = (Math.random() * 0.999) + 0.001;
+
+      // 如果你这里有 hitUv / 或者用 screen mouse 的 0..1，都行：
+      // 优先用“命中点在屏幕上的位置”，否则就用 mouse01
+      if (typeof hitUv !== "undefined" && hitUv) {
+        bgDrive.notePos.set(hitUv.x, hitUv.y);
+      } else if (typeof mouse01 !== "undefined") {
+        bgDrive.notePos.set(mouse01.x, mouse01.y);
+      }
+
+      const instrument = voices?.getNebulaInstrument?.(playNebulaKey);
+      audio.playNebulaScratch({
+        galaxyId: playNebulaKey,
+        theta01,
+        r01,
+        instrument,
+      });
+    }
+
   }
+
 
   if (!isActiveNebulaHovered) {
     psForAudio.energy = 0;
@@ -866,23 +1037,63 @@ function tick() {
   bloomPass.threshold = 0.985;
   bloomPass.radius = 0.12;
 
- 
+  // -------------------- Dreamy background (CLEAN) --------------------
+  // 我们只用 tick 里已经算出来的：isHit / isDown / vel01 / pitch01 / theta01 / step / mouse01 / dt / t
+  {
+    const isPlaying = !!(scratchIsPlaying && pointerDown && !!playNebulaKey);
 
-  // -------------------- Dreamy background (via controller) --------------------
-  bgController.update({
-    t,
-    dt,
-    camera,
-    mouse01,
-    lead: (scratch && scratch.bg) ? scratch.bg : { isPlaying:false, vel01:0, pitch01:0.5, theta01:0, step: undefined },
-  });
-  // -------------------- /Dreamy background --------------------
+    // 1) presence：没弹奏就回到深色（bgLeadE -> 0），弹奏时随力度/速度出现
+    const targetLead = isPlaying ? Math.min(1.0, 0.12 + 0.88 * scratchVel01) : 0.0;
+    bgLeadE = THREE.MathUtils.damp(bgLeadE, targetLead, 5.0, dt);
+
+    // 2) pitch / vel / theta：做平滑，避免闪烁
+    const p01 = (typeof scratchPitch01 === "number") ? scratchPitch01 : 0.5;
+    const v01 = (typeof scratchVel01 === "number") ? scratchVel01 : 0.0;
+    const th01 = (typeof scratchTheta01 === "number") ? scratchTheta01 : 0.0;
+
+    bgPitch01 = THREE.MathUtils.damp(bgPitch01, p01, 8.0, dt);
+    bgVel01   = THREE.MathUtils.damp(bgVel01,   v01, 10.0, dt);
+    bgTheta01 = THREE.MathUtils.damp(bgTheta01, th01, 10.0, dt);
+
+    // 3) note pulse：每次 step 变化就打一针“颜料注入”
+    if (isPlaying && typeof scratchStep === "number" && scratchStep !== bgLastStep) {
+      bgLastStep = scratchStep;
+      bgPulse = 1.0;                 // 立即触发
+      bgNoteSeed = t;                // 用 t 当 seed（别用 now）
+      bgNoteHue = (scratchStep / STEPS);    // 0..1（你之后想固定 do-re-mi 对颜色，就改这里）
+    }
+    bgPulse = Math.max(0.0, bgPulse - dt * 2.6); // 衰减速度：越大越“短促”
+
+    // 4) 把参数喂给 dreamyBackground（你这个对象名字叫 bg）
+    if (bg && bg.setAudioDrive) {
+      bg.setAudioDrive({
+        leadE: bgLeadE,
+        scratchPitch01: bgPitch01,
+        scratchVel01: bgVel01,
+        scratchTheta01: bgTheta01,
+      });
+    }
+    if (bg && bg.setNotePulse) {
+      bg.setNotePulse({
+        pulse: bgPulse,
+        hue: bgNoteHue,
+        seed: bgNoteSeed,
+        x: mouse01.x,
+        y: mouse01.y,
+      });
+    }
+    if (bg && bg.update) bg.update(t);
+  }
+  // -------------------- /Dreamy background (CLEAN) --------------------
 
   // --- render
   composer.render();
 
   // --- 左侧音频监控 UI
   // audioUI.update(a, perf.state);
+
+
+  requestAnimationFrame(tick);
 }
 
 tick();

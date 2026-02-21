@@ -78,7 +78,13 @@ export function createBackgroundController(bg, { steps = 12 } = {}) {
       noteSeed = (typeof t === "number") ? t : performance.now() * 0.001;
       noteHue = steps > 0 ? (step / steps) : 0.0;
     }
-    pulse = Math.max(0.0, pulse - (dt || 0.016) * 2.6);
+    // pulse = Math.max(0.0, pulse - (dt || 0.016) * 2.6);
+    // attack 快一点、release 慢一点 → 亮度更像呼吸而不是闪
+    if (pulse > 0.0) {
+      pulse = Math.max(0.0, pulse - (dt || 0.016) * 1.2); // release 慢一点
+    }
+
+    pulse = Math.min(1.0, pulse + 0.55);
 
     // 4) 喂给 dreamyBackground
     if (bg.setAudioDrive) {

@@ -2,49 +2,29 @@
 import * as THREE from "three";
 
 /**
- * NebulaPicker
- * 负责：
- * - raycast 找到 hovered cluster
- * - 处理 click 选中 activeNebulaKey
+ * Optimized NebulaPicker
+ * - Builds a flat list of pickable Mesh/Points (no deep recursive raycast each frame)
+ * - Intersects with recursive=false for speed
+ * - Resolves key from object.userData.* up the parent chain
  *
- * 依赖：
- * - camera
- * - nebulaSystem（必须提供 getAllClusters() 与 getCluster(key)）
- *
- * 输出：
- * - hoveredNebulaKey
- * - activeNebulaKey
+ * Expected cluster shapes (best-effort):
+ * - cluster.pickMesh / cluster.pickProxy / cluster.coreMesh (if you have)
+ * - cluster.group (we'll find first Mesh/Points under it once)
  */
 export function createNebulaPicker({ camera, nebulaSystem }) {
   const raycaster = new THREE.Raycaster();
+  // If your nebula uses Points, a small threshold helps picking and performance:
+  raycaster.params.Points.threshold = 0.02;
 
   let hoveredNebulaKey = null;
   let activeNebulaKey = null;
 
-  // 缓存可被拾取的对象列表（每帧可重建也行，这里做轻缓存）
   let _pickables = [];
-  let _pickablesDirty = true;
+  let _dirty = true;
 
-  function markDirty() {
-    _pickablesDirty = true;
-  }
+  function markDirty() { _dirty = true; }
 
-  function rebuildPickables() {
-    _pickables = [];
-    const clusters = nebulaSystem.getAllClusters?.() || [];
-    for (const c of clusters) {
-      // 你的 cluster 通常是 c.group / c.root / c.mesh 之一
-      // 我们优先拿 group，Raycaster 会递归 children
-      if (c?.group) _pickables.push(c.group);
-      else if (c?.root) _pickables.push(c.root);
-      else if (c?.mesh) _pickables.push(c.mesh);
-    }
-    _pickablesDirty = false;
-  }
-
-  // 从 raycast 的 object 反查 cluster key
   function resolveKeyFromObject(obj) {
-    // 常见做法：你可能把 key 放在 obj.userData.galaxyId / clusterKey 等
     let p = obj;
     while (p) {
       const ud = p.userData;
@@ -52,51 +32,68 @@ export function createNebulaPicker({ camera, nebulaSystem }) {
         if (ud.galaxyId) return ud.galaxyId;
         if (ud.clusterKey) return ud.clusterKey;
         if (ud.nebulaKey) return ud.nebulaKey;
+        if (ud.id) return ud.id; // last-resort
       }
       p = p.parent;
     }
     return null;
   }
 
+  function findFirstPickable(root) {
+    if (!root) return null;
+    const stack = [root];
+    while (stack.length) {
+      const n = stack.pop();
+      if (!n) continue;
+      // Prefer Mesh / Points (raycaster-friendly)
+      if (n.isMesh || n.isPoints) return n;
+      // Traverse children
+      const ch = n.children;
+      if (ch && ch.length) {
+        for (let i = ch.length - 1; i >= 0; i--) stack.push(ch[i]);
+      }
+    }
+    return null;
+  }
+
+  function rebuildPickables() {
+    _pickables = [];
+    const clusters = nebulaSystem.getAllClusters?.() || [];
+    for (const c of clusters) {
+      const pick =
+        c?.pickMesh ||
+        c?.pickProxy ||
+        c?.coreMesh ||
+        c?.core ||
+        findFirstPickable(c?.group || c?.root || c?.mesh);
+
+      if (pick) _pickables.push(pick);
+    }
+    _dirty = false;
+  }
+
   function update({ pointerNDC }) {
-    if (_pickablesDirty) rebuildPickables();
+    if (_dirty) rebuildPickables();
 
     hoveredNebulaKey = null;
 
     raycaster.setFromCamera(pointerNDC, camera);
-    const hits = raycaster.intersectObjects(_pickables, true);
+    const hits = raycaster.intersectObjects(_pickables, false); // <-- important: no recursion
 
-    if (hits && hits.length > 0) {
-      const key = resolveKeyFromObject(hits[0].object);
-      hoveredNebulaKey = key;
+    if (hits && hits.length) {
+      hoveredNebulaKey = resolveKeyFromObject(hits[0].object);
     }
-
     return { hoveredNebulaKey, activeNebulaKey };
   }
 
   function trySelectHovered({ pointerDown }) {
-    // 只在按下那一刻调用（你 main.js 里通常会有 “justPressed”）
     if (!pointerDown) return { activeNebulaKey, hoveredNebulaKey };
-
-    if (hoveredNebulaKey) {
-      activeNebulaKey = hoveredNebulaKey;
-    }
+    if (hoveredNebulaKey) activeNebulaKey = hoveredNebulaKey;
     return { activeNebulaKey, hoveredNebulaKey };
   }
 
-  function setActive(key) {
-    activeNebulaKey = key || null;
-  }
+  function setActive(key) { activeNebulaKey = key || null; }
+  function getState() { return { hoveredNebulaKey, activeNebulaKey }; }
 
-  function getState() {
-    return { hoveredNebulaKey, activeNebulaKey };
-  }
-
-  return {
-    update,
-    trySelectHovered,
-    setActive,
-    getState,
-    markDirty,
-  };
+  return { update, trySelectHovered, setActive, getState, markDirty };
 }
