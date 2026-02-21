@@ -3,175 +3,184 @@ precision highp float;
 varying vec2 vUv;
 varying vec3 vWorldPos;
 
+// three.js 内置：cameraPosition（不要自己 redeclare）
+
 uniform float uTime;
-uniform vec2  uMouse01;
 
-uniform float uLeadE;
-uniform float uVel01;
-uniform float uPitch01;
-uniform float uTheta01;
-uniform float uPulse;
+uniform vec3  uBase;        // 深色底：#131527
+uniform float uLeadE;       // 0..1（演奏能量）
+uniform float uPitch01;     // 0..1（音高）
+uniform float uVel01;       // 0..1（力度）
+uniform float uTheta01;     // 0..1（轨迹角度/可选）
+uniform vec2  uMouse;       // 0..1
+uniform float uPulse;       // 0..1（一次 note 注入脉冲）
+uniform float uNoteHue;     // 我们把它当 “noteIndex01 / 音阶位置” 用（0..1）
+uniform float uNoteSeed;    // 随机种子
+uniform vec2  uNotePos;     // 0..1（注入点）
 
-uniform vec3 uBase;
-uniform vec3 uTint;
+// ===== 你可以在 JS/GUI 里控制的“梦幻调色盘”（不彩虹）=====
+uniform vec3 uPal0;
+uniform vec3 uPal1;
+uniform vec3 uPal2;
+uniform vec3 uPal3;
 
-// Three.js built-in uniform: cameraPosition (DO NOT redeclare)
+// ===== 强度控制 =====
+uniform float uExposure;    // 0.8~2.2
+uniform float uSaturation;  // 1.0~2.0（高饱和）
+uniform float uFlow;        // 流动速度 0.0~2.0
+uniform float uWarp;        // 扭曲强度 0.0~1.2
+uniform float uCloud;       // 云形尺度 0.5~2.0
+uniform float uPearl;       // 珠光膜强度 0.0~1.5
+uniform float uInk;         // 注入强度 0.0~2.0
 
-// ---------- noise / fbm ----------
+// ---------------- noise ----------------
 float hash21(vec2 p){
-  p = fract(p*vec2(123.34, 456.21));
-  p += dot(p,p+34.45);
-  return fract(p.x*p.y);
+  p = fract(p * vec2(123.34, 456.21));
+  p += dot(p, p + 34.345);
+  return fract(p.x * p.y);
 }
+
 float noise(vec2 p){
   vec2 i = floor(p);
   vec2 f = fract(p);
   float a = hash21(i);
-  float b = hash21(i+vec2(1.0,0.0));
-  float c = hash21(i+vec2(0.0,1.0));
-  float d = hash21(i+vec2(1.0,1.0));
-  vec2 u = f*f*(3.0-2.0*f);
-  return mix(a,b,u.x) + (c-a)*u.y*(1.0-u.x) + (d-b)*u.x*u.y;
+  float b = hash21(i + vec2(1.0, 0.0));
+  float c = hash21(i + vec2(0.0, 1.0));
+  float d = hash21(i + vec2(1.0, 1.0));
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
-float fbm(vec2 p){
+
+// 3 octave fbm：性能更稳，不容易卡
+float fbm3(vec2 p){
   float v = 0.0;
-  float a = 0.55;
-  for(int i=0;i<5;i++){
-    v += a*noise(p);
-    p *= 2.03;
-    a *= 0.5;
-  }
+  float a = 0.5;
+  v += a * noise(p);        p = p * 2.02 + 17.3; a *= 0.5;
+  v += a * noise(p);        p = p * 2.03 + 11.1; a *= 0.5;
+  v += a * noise(p);
   return v;
 }
-vec2 rot(vec2 p, float a){
-  float c = cos(a), s = sin(a);
-  return vec2(c*p.x - s*p.y, s*p.x + c*p.y);
+
+vec3 satAdjust(vec3 c, float s){
+  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  return mix(vec3(l), c, s);
 }
 
-// “亮但不灰”的曝光曲线
-vec3 filmic(vec3 x){
-  return 1.0 - exp(-x);
+// 4 色调色盘采样（不彩虹，全靠你选色）
+vec3 palette4(float t){
+  t = fract(t);
+  float seg = t * 3.0;
+  float i = floor(seg);
+  float f = fract(seg);
+  f = f * f * (3.0 - 2.0 * f);
+
+  vec3 a = uPal0;
+  vec3 b = uPal1;
+  vec3 c = uPal2;
+  vec3 d = uPal3;
+
+  if(i < 1.0) return mix(a, b, f);
+  if(i < 2.0) return mix(b, c, f);
+  return mix(c, d, f);
 }
 
-// ---------- pretty pearl palette ----------
-vec3 pearlPalette(float t){
-  vec3 c0 = vec3(1.00, 0.55, 0.95); // pink
-  vec3 c1 = vec3(1.00, 0.72, 0.55); // peach
-  vec3 c2 = vec3(1.00, 0.95, 0.60); // butter
-  vec3 c3 = vec3(0.55, 1.00, 0.88); // mint (clean)
-  vec3 c4 = vec3(0.55, 0.82, 1.00); // sky
-  vec3 c5 = vec3(0.80, 0.60, 1.00); // lavender
-
-  t = fract(t) * 6.0;
-  float i = floor(t);
-  float f = fract(t);
-  f = f*f*(3.0-2.0*f);
-
-  vec3 a = c0, b = c1;
-  if(i < 1.0){ a=c0; b=c1; }
-  else if(i < 2.0){ a=c1; b=c2; }
-  else if(i < 3.0){ a=c2; b=c3; }
-  else if(i < 4.0){ a=c3; b=c4; }
-  else if(i < 5.0){ a=c4; b=c5; }
-  else { a=c5; b=c0; }
-  return mix(a,b,f);
-}
-
-// ---------- flow field (gives visible motion) ----------
-vec2 flowField(vec2 p, float t){
-  // curl-ish flow from fbm gradients (cheap)
-  float n1 = fbm(p*1.7 + vec2(0.0, t));
-  float n2 = fbm(p*1.7 + vec2(5.2, -t));
-  float ang = 6.28318 * (n1 - n2);
-  return vec2(cos(ang), sin(ang));
-}
-
-// Advect p along flow field (2 steps)
-vec2 advect(vec2 p, float t, float speed){
-  vec2 v1 = flowField(p, t);
-  p += v1 * speed;
-  vec2 v2 = flowField(p, t + 0.37);
-  p += v2 * speed * 0.8;
-  return p;
+// 注入 blob：更“颜料/云雾”而不是硬切
+float blob(vec2 uv, vec2 p, float r){
+  float d = length(uv - p);
+  float x = smoothstep(r, 0.0, d);
+  // 让边缘更柔
+  return x * x * (3.0 - 2.0 * x);
 }
 
 void main(){
-  float ignite = smoothstep(0.004, 0.07, uLeadE);
-  float velBoost = 0.25 + 0.75*pow(uVel01, 1.20);
-  float drive = ignite * velBoost;
-  float glow  = drive * drive;
+  // viewDir：用于“珠光膜”的视角依赖
+  vec3 dir = normalize(vWorldPos - cameraPosition);
 
-  // view ray
-  vec3 ray = normalize(vWorldPos - cameraPosition);
+  float t = uTime;
 
-  // base quiet
+  // ===== 基础流动坐标 =====
+  // 用 dir.xy + 少量 mouse 作为大体云幕方向
+  vec2 uv = vUv;
+  vec2 p = dir.xy * (1.25 * uCloud) + (uMouse - 0.5) * 0.35;
+
+  // domain warp：形状更强，但用 1 次 fbm3 做轻量扭曲
+  float w1 = fbm3(p * 1.2 + t * 0.12 * uFlow);
+  float w2 = fbm3(p * 1.7 - t * 0.10 * uFlow + 3.4);
+  vec2 warp = vec2(w1, w2) - 0.5;
+  p += warp * (0.85 * uWarp);
+
+  // ===== 云形主体 =====
+  float c1 = fbm3(p * 1.8 + t * 0.16 * uFlow);
+  float c2 = fbm3(p * 3.2 - t * 0.10 * uFlow + 12.7);
+  float clouds = mix(c1, c2, 0.45);
+
+  // 云的“体积感”（避免热力图硬块）
+  float soft = smoothstep(0.25, 0.80, clouds);
+  float veil = smoothstep(0.10, 0.95, fbm3(p * 0.9 + 8.2));
+
+  // ===== 珠光膜（贝母感）=====
+  // 视角相关：越斜越亮，带一点“偏振”条带
+  float fres = pow(1.0 - max(0.0, dot(dir, vec3(0.0, 0.0, 1.0))), 2.2);
+  float film = fbm3(p * 4.5 + vec2(0.0, t * 0.22 * uFlow));
+  film = smoothstep(0.25, 0.95, film);
+  float pearl = (0.35 + 0.65 * film) * (0.25 + 0.75 * fres) * uPearl;
+
+  // ===== 调色逻辑（关键）：不彩虹，但颜色“惊喜”=====
+  // 1) 先用 pitch / 音阶位置 决定“当前主色流”
+  float baseT = (uPitch01 * 0.85 + uNoteHue * 0.65 + 0.07 * sin(t * 0.6));
+  vec3 baseCol = palette4(baseT);
+
+  // 2) 再用 “theta / mouse / 小噪声” 让颜色在局部翻转流动
+  float localShift = (clouds - 0.5) * 0.55 + (uTheta01 - 0.5) * 0.25;
+  vec3 flowCol = palette4(baseT + localShift);
+
+  // 背景底色：没声音时回到深色
+  float energy = clamp(uLeadE, 0.0, 1.0);
+  float presence = smoothstep(0.02, 0.20, energy);
+
+  // 云色：由 flowCol 主导，但叠 pearl 提亮
   vec3 col = uBase;
+  vec3 cloudCol = mix(baseCol, flowCol, 0.55);
 
-  // ---- FLOWING nacre marbling ----
-  vec2 q = ray.xz;
+  // 云幕覆盖：soft/veil 控制“像云”而非“热力图”
+  float cover = soft * (0.55 + 0.45 * veil);
 
-  // base flow speed: always a little, but much faster when playing
-  float baseSpeed = 0.010;
-  float playSpeed = mix(baseSpeed, 0.060, drive);     // << 流动强度
-  float t = uTime * (0.12 + 0.55*drive);              // << 时间流速
+  // ===== 注入（每次搓/触发 note）=====
+  float pulse = clamp(uPulse, 0.0, 1.0);
+  float seed = uNoteSeed;
 
-  // two layers: big slow + small fast
-  vec2 p0 = advect(q*1.2, t*0.55, playSpeed*0.7);
-  vec2 p1 = advect(q*3.2 + vec2(2.0, -1.0), t*1.15, playSpeed*1.2);
+  vec2 np = uNotePos;
+  float b0 = blob(uv, np, mix(0.05, 0.16, pulse));
+  float b1 = blob(uv, np + vec2(0.12, -0.06) * (0.25 + seed), 0.12);
+  float b2 = blob(uv, np + vec2(-0.10, 0.10) * (0.20 + seed), 0.11);
+  float paint = (b0 * 1.0 + b1 * 0.65 + b2 * 0.55);
 
-  // domain warp between layers (adds liquid look)
-  vec2 warp = (vec2(fbm(p0*2.0 + t), fbm(p0*2.0 - t)) - 0.5) * (0.75 + 1.25*drive);
-  vec2 p = p1 + warp*0.35;
+  // 注入色：用 noteHue（当作音阶位置）+ seed 做“惊喜”，但仍在调色盘里
+  vec3 inkCol = palette4(uNoteHue + seed * 0.37 + uPitch01 * 0.25);
 
-  float a = fbm(p*2.2 + 0.7);
-  float b = fbm(rot(p*4.6, 0.8) - 1.1);
-  float cloud = 0.62*a + 0.38*b;
+  // 注入强度受力度影响
+  float inkAmt = paint * (0.35 + 0.65 * pulse) * (0.30 + 0.70 * uVel01) * uInk;
 
-  // fresnel / nacre edge
-  float ndv = abs(ray.y);
-  float fres = pow(1.0 - ndv, 3.4);
-  fres *= (0.25 + 0.75*drive);
+  // ===== 合成 =====
+  // 先铺云色（仅当 presence>0 才明显出现）
+  col = mix(col, cloudCol, cover * (0.35 + 0.65 * presence));
 
-  // hue driver (palette-based, but animated by flow)
-  float phase = (1.0 + 2.4*cloud + 1.4*uPulse) * (1.0 - ndv);
+  // 再叠珠光提亮（更“贝母”）
+  col += pearl * (0.15 + 0.85 * presence);
 
-  float hueKey = 0.0;
-  hueKey += phase * 0.55;
-  hueKey += uPitch01 * 1.55;
-  hueKey += uTheta01 * 0.70;
-  hueKey += uTime * (0.04 + 0.18*drive);      // << 更明显的变色速度
-  hueKey += (cloud - 0.5) * 0.55;
+  // 最后“注入颜料”
+  col = mix(col, inkCol, clamp(inkAmt, 0.0, 1.0));
 
-  vec3 nacre = pearlPalette(hueKey) * uTint;
+  // ===== 亮度 / 饱和度 / 压曝 =====
+  float bright = uExposure * (0.65 + 0.35 * (0.35 + energy * 1.2)) * (0.85 + 0.35 * uPitch01);
+  col *= bright;
 
-  // stronger color takeover when playing
-  col = mix(col, nacre, drive * 0.98);
+  col = satAdjust(col, uSaturation);
 
-  // colored pearl highlights (no gray)
-  col += nacre * fres * (1.10 + 1.90*glow);
+  // 软压曝：保留颜色，不变灰
+  float mx = max(col.r, max(col.g, col.b));
+  col = col / (1.0 + mx * 0.35);
 
-  // flowing “ribbons” that move with b
-  float ridge = smoothstep(0.52, 0.92, b);
-  float silk  = ridge * fres * (0.25 + 0.85*drive);
-  col += nacre * silk * (0.60 + 1.10*glow);
-
-  // mouse ink injection (more motion + more saturation)
-  float d = distance(vUv, uMouse01);
-  float ink = smoothstep(0.60, 0.0, d);
-  ink *= (0.15 + 0.85*uPulse);
-  ink *= (0.30 + 0.70*uVel01);
-
-  vec3 inkCol = pearlPalette(hueKey + 0.33 + fbm(p*6.0 + uTime*0.25)*0.35);
-  col += inkCol * ink * (0.75 + 2.00*glow);
-
-  // sparkles (slightly animated)
-  float sp = smoothstep(0.992, 1.0, noise(p*26.0 + uTime*0.65));
-  col += nacre * sp * (0.18 + 0.80*drive);
-
-  // brighten during play
-  col *= (0.90 + 2.10*drive);
-  col = filmic(col);
-  col = pow(col, vec3(0.90));
-
-  gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+  col = clamp(col, 0.0, 1.0);
+  gl_FragColor = vec4(col, 1.0);
 }

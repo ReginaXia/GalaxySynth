@@ -81,6 +81,9 @@ renderer.toneMapping = THREE.NoToneMapping;
 renderer.toneMappingExposure = 1;
 document.body.appendChild(renderer.domElement);
 
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+// 如果还卡：改成 1.0
+
 // -------------------------------------
 // Scene / Camera
 // -------------------------------------
