@@ -1,23 +1,19 @@
 precision highp float;
-
 varying vec2 vUv;
-varying vec3 vWorldPos;
 
 uniform float uTime;
-uniform vec2  uMouse;     // 0..1
+uniform vec2  uMouse01;
 
-uniform vec3  uBaseRGB;   // base night color (#131527)
-uniform vec3  uMainRGB;   // main accent (pure pink)
+uniform float uLeadE;    // 0..1
+uniform float uVel01;    // 0..1
+uniform float uPitch01;  // 0..1
+uniform float uTheta01;  // 0..1
+uniform float uPulse;    // 0..1
 
-uniform float uLeadE;     // 0..1 energy
-uniform float uVel01;     // 0..1 scratch speed/strength
-uniform float uPitch01;   // 0..1 pitch (low->high)
-uniform float uTheta01;   // 0..1 angle
-uniform float uPulse;     // 0..1 note pulse
+uniform vec3 uBase;      // #131527
+uniform vec3 uTint;      // pink main
 
-uniform float uIntensity; // overall strength
-
-// ---------------- noise ----------------
+// ----------------- noise / fbm -----------------
 float hash21(vec2 p){
   p = fract(p*vec2(123.34, 456.21));
   p += dot(p,p+34.45);
@@ -44,82 +40,108 @@ float fbm(vec2 p){
   return v;
 }
 
-vec3 palettePastel(float t){
-  // soft iridescent (pastel), stable (no harsh rainbow)
-  vec3 a = vec3(0.62, 0.58, 0.72);
-  vec3 b = vec3(0.33, 0.30, 0.26);
+// pastel iridescent palette (controlled)
+vec3 palette(float t){
+  vec3 a = vec3(0.62, 0.56, 0.74);
+  vec3 b = vec3(0.38, 0.36, 0.32);
   vec3 c = vec3(1.00, 1.00, 1.00);
-  vec3 d = vec3(0.05, 0.18, 0.38);
+  vec3 d = vec3(0.10, 0.26, 0.44);
   return a + b*cos(6.28318*(c*t + d));
 }
 
-float softStar(vec2 p, float t){
-  // sparse sparkles
-  float n = noise(p*22.0 + t*0.25);
-  float s = smoothstep(0.992, 1.0, n);
-  return s;
+// tiny sparkle
+float sparkle(vec2 p, float t){
+  float n = noise(p*24.0 + t*0.35);
+  return smoothstep(0.992, 1.0, n);
+}
+
+// small star glint (cross-ish)
+float starGlint(vec2 p){
+  // p around 0
+  float ax = abs(p.x);
+  float ay = abs(p.y);
+  float line = exp(-ax*18.0) + exp(-ay*18.0);
+  float core = exp(-(ax*ax+ay*ay)*60.0);
+  return (0.35*line + 0.65*core);
 }
 
 void main(){
   vec2 uv = vUv;
 
-  // --- Deep silent base ---
-  vec3 col = uBaseRGB;
+  // ---------- base deep night ----------
+  vec3 col = uBase;
 
-  // slight cosmic fog (very subtle)
-  float fog = fbm(uv*1.4 + uTime*0.02);
-  col += uBaseRGB * (fog - 0.5) * 0.06;
+  // subtle base fog (keep quiet)
+  float fog0 = fbm(uv*1.4 + uTime*0.015);
+  col += uBase * (fog0-0.5) * 0.06;
 
-  // --- ignition: silent -> stunning ---
-  float ignite = smoothstep(0.02, 0.22, uLeadE);
-  float drive  = ignite * (0.30 + 0.70*pow(uVel01, 1.4));
+  // ---------- ignite / drive (make it BRIGHT when playing) ----------
+  // make it kick in earlier and stronger
+  float ignite = smoothstep(0.005, 0.12, uLeadE);
+  float velBoost = 0.35 + 0.65*pow(uVel01, 1.35);
+  float drive = ignite * velBoost;
 
-  // flow direction from theta
+  // global lift so it doesn't stay dark while playing
+  float lift = drive * (0.18 + 0.22*uPitch01); // pitch controls brightness
+  col += uTint * lift * 0.35;
+
+  // ---------- flow direction ----------
   float ang = uTheta01 * 6.28318;
   vec2 dir = vec2(cos(ang), sin(ang));
+  float spd = 0.12 + 1.35*uVel01;
 
-  // Domain warp (liquid feel)
+  // ---------- domain warp (2 layers: macro + micro) ----------
   vec2 p = uv;
-  p += (uMouse - 0.5) * 0.05; // tiny parallax
 
-  float spd = 0.10 + 1.20*uVel01;
-  float w1 = fbm(p*2.0 + dir*uTime*spd);
-  float w2 = fbm(p*3.2 - dir*uTime*(spd*0.7));
-  vec2 warp = vec2(w1, w2) - 0.5;
-  p += warp * (0.18 + 0.42*uVel01) * ignite;
+  float wA = fbm(p*2.6 + dir*uTime*spd);
+  float wB = fbm(p*4.2 - dir*uTime*(spd*0.75));
+  vec2 warp1 = vec2(wA, wB) - 0.5;
 
-  // Film field
-  float film = fbm(p*3.0 + uTime*0.12);
+  float wC = fbm(p*7.0 + vec2(-dir.y, dir.x)*uTime*(0.35+uVel01));
+  float wD = fbm(p*9.0 - vec2(-dir.y, dir.x)*uTime*(0.28+uVel01));
+  vec2 warp2 = vec2(wC, wD) - 0.5;
 
-  // Pastel iridescence, then bias back toward main pink (keeps your identity)
-  vec3 iri = palettePastel(film + uPitch01*0.18);
-  iri = mix(iri, uMainRGB, 0.35);
+  p += warp1 * (0.20 + 0.35*uVel01) * ignite;
+  p += warp2 * (0.06 + 0.10*uVel01) * ignite; // micro warp for smaller blocks
 
-  // brightness shaped by pitch (high -> brighter)
-  float filmBright = mix(0.20, 0.90, uPitch01);
+  // ---------- iridescent film (smaller patches) ----------
+  // increase frequency -> smaller color blocks
+  float film1 = fbm(p*6.8 + uTime*0.10);
+  float film2 = fbm(p*13.5 - uTime*0.16); // micro film
+  float film = 0.68*film1 + 0.32*film2;
 
-  // --- Ink injection (NOT center radial): use warped p and pulse, localized around mouse ---
-  float d = distance(p, uMouse);
-  float ink = smoothstep(0.32, 0.0, d);
-  ink *= (0.30 + 0.70*uPulse);
-  ink *= drive;
+  // color: palette but pulled toward pink identity
+  vec3 iri = palette(film + uPitch01*0.20);
+  iri = mix(iri, uTint, 0.42);
 
-  // compose
-  col += iri * filmBright * drive * (0.55*film + 0.20);
-  col += uMainRGB * ink * 0.75;
+  // add "pearl" highlight: emphasize thin-film bright ridges
+  float ridge = pow(smoothstep(0.55, 1.0, film2), 2.0);
+  vec3 pearl = vec3(1.0) * ridge;
 
-  // sparkle (only when playing)
-  float sp = softStar(p + warp*0.8, uTime);
-  col += vec3(1.0) * sp * drive * 0.50;
+  // film intensity (make it pop while playing)
+  float filmBright = (0.28 + 0.75*uPitch01);
+  col += (iri * filmBright + pearl*0.35) * drive * 0.95;
 
-  // tone shaping: keep deep base when silent, but allow bloom-like lift when playing
-  float lift = uIntensity * (1.0 + 1.0*drive);
-  col *= lift;
+  // ---------- ink injection near mouse (so player sees immediate response) ----------
+  float d = distance(p, uMouse01);
+  float ink = smoothstep(0.42, 0.0, d);
+  // pulse makes it "spark" but not hard flash
+  ink *= (0.25 + 0.75*uPulse);
+  ink *= (0.55 + 0.45*uVel01);
+  col += uTint * ink * drive * 1.10;
 
-  // soft shoulder to avoid grey wash
-  float mx = max(col.r, max(col.g, col.b));
-  col = col / (1.0 + mx*0.55);
+  // ---------- sparkles / glints (more璀璨, but gated) ----------
+  float sp = sparkle(p + warp1*0.6, uTime);
+  col += vec3(1.0) * sp * drive * (0.30 + 0.55*uVel01);
 
+  // occasional glints (tiny star crosses)
+  vec2 gp = fract(p*vec2(10.0, 8.0)) - 0.5;
+  float gseed = noise(floor(p*vec2(10.0, 8.0)));
+  float glintMask = step(0.985, gseed); // rare
+  float gl = starGlint(gp) * glintMask;
+  col += vec3(1.0) * gl * drive * (0.18 + 0.35*uPulse);
+
+  // ---------- tone clamp ----------
   col = clamp(col, 0.0, 1.0);
   gl_FragColor = vec4(col, 1.0);
 }
