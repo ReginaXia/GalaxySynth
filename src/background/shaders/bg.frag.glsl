@@ -15,7 +15,7 @@ uniform float uPulse;
 uniform vec3 uBase;
 uniform vec3 uTint;
 
-
+// Three.js built-in uniform: cameraPosition (DO NOT redeclare)
 
 // ---------- noise / fbm ----------
 float hash21(vec2 p){
@@ -48,15 +48,13 @@ vec2 rot(vec2 p, float a){
   return vec2(c*p.x - s*p.y, s*p.x + c*p.y);
 }
 
-// “亮但不灰”的曝光曲线（比 softClip 更保饱和）
+// “亮但不灰”的曝光曲线
 vec3 filmic(vec3 x){
-  // 1 - exp(-x) 这种会更“糖纸感”
   return 1.0 - exp(-x);
 }
 
-// ---------- pretty pearl palette (avoid dirty greens) ----------
+// ---------- pretty pearl palette ----------
 vec3 pearlPalette(float t){
-  // 童话贝母色带：粉、桃、金、薄荷、天蓝、薰衣草（没有“苔藓绿”）
   vec3 c0 = vec3(1.00, 0.55, 0.95); // pink
   vec3 c1 = vec3(1.00, 0.72, 0.55); // peach
   vec3 c2 = vec3(1.00, 0.95, 0.60); // butter
@@ -79,6 +77,24 @@ vec3 pearlPalette(float t){
   return mix(a,b,f);
 }
 
+// ---------- flow field (gives visible motion) ----------
+vec2 flowField(vec2 p, float t){
+  // curl-ish flow from fbm gradients (cheap)
+  float n1 = fbm(p*1.7 + vec2(0.0, t));
+  float n2 = fbm(p*1.7 + vec2(5.2, -t));
+  float ang = 6.28318 * (n1 - n2);
+  return vec2(cos(ang), sin(ang));
+}
+
+// Advect p along flow field (2 steps)
+vec2 advect(vec2 p, float t, float speed){
+  vec2 v1 = flowField(p, t);
+  p += v1 * speed;
+  vec2 v2 = flowField(p, t + 0.37);
+  p += v2 * speed * 0.8;
+  return p;
+}
+
 void main(){
   float ignite = smoothstep(0.004, 0.07, uLeadE);
   float velBoost = 0.25 + 0.75*pow(uVel01, 1.20);
@@ -88,68 +104,74 @@ void main(){
   // view ray
   vec3 ray = normalize(vWorldPos - cameraPosition);
 
-  // base
+  // base quiet
   vec3 col = uBase;
 
-  // silky marbling in view space (avoid UV heatmap blocks)
+  // ---- FLOWING nacre marbling ----
   vec2 q = ray.xz;
-  float t = uTime * (0.03 + 0.12*uVel01);
 
-  vec2 w1 = vec2(fbm(q*2.0 + t), fbm(q*2.0 - t)) - 0.5;
-  vec2 w2 = vec2(fbm(q*4.8 - t*1.2), fbm(q*4.8 + t*1.1)) - 0.5;
-  vec2 p = q + w1*0.65 + w2*0.25;
+  // base flow speed: always a little, but much faster when playing
+  float baseSpeed = 0.010;
+  float playSpeed = mix(baseSpeed, 0.060, drive);     // << 流动强度
+  float t = uTime * (0.12 + 0.55*drive);              // << 时间流速
 
-  float a = fbm(p*2.8 + 0.7);
-  float b = fbm(rot(p*6.0, 0.6) - 1.1);
-  float cloud = 0.65*a + 0.35*b;
+  // two layers: big slow + small fast
+  vec2 p0 = advect(q*1.2, t*0.55, playSpeed*0.7);
+  vec2 p1 = advect(q*3.2 + vec2(2.0, -1.0), t*1.15, playSpeed*1.2);
 
-  // nacre fresnel
+  // domain warp between layers (adds liquid look)
+  vec2 warp = (vec2(fbm(p0*2.0 + t), fbm(p0*2.0 - t)) - 0.5) * (0.75 + 1.25*drive);
+  vec2 p = p1 + warp*0.35;
+
+  float a = fbm(p*2.2 + 0.7);
+  float b = fbm(rot(p*4.6, 0.8) - 1.1);
+  float cloud = 0.62*a + 0.38*b;
+
+  // fresnel / nacre edge
   float ndv = abs(ray.y);
-  float fres = pow(1.0 - ndv, 3.2);      // 更像贝母：边缘更亮
-  fres *= (0.20 + 0.80*drive);
+  float fres = pow(1.0 - ndv, 3.4);
+  fres *= (0.25 + 0.75*drive);
 
-  // hue driver: angle + pitch + swirling (but through pretty palette)
-  float thickness = 1.0 + 2.6*cloud + 1.2*uPulse;
-  float phase = thickness * (1.0 - ndv);
+  // hue driver (palette-based, but animated by flow)
+  float phase = (1.0 + 2.4*cloud + 1.4*uPulse) * (1.0 - ndv);
 
   float hueKey = 0.0;
   hueKey += phase * 0.55;
-  hueKey += uPitch01 * 1.35;
-  hueKey += uTheta01 * 0.60;
-  hueKey += uTime * (0.015 + 0.05*uVel01);
-  hueKey += (cloud - 0.5) * 0.35;
+  hueKey += uPitch01 * 1.55;
+  hueKey += uTheta01 * 0.70;
+  hueKey += uTime * (0.04 + 0.18*drive);      // << 更明显的变色速度
+  hueKey += (cloud - 0.5) * 0.55;
 
-  vec3 nacre = pearlPalette(hueKey);
-  nacre *= uTint;
+  vec3 nacre = pearlPalette(hueKey) * uTint;
 
-  // make it POP: when playing, background becomes candy-nacre
+  // stronger color takeover when playing
   col = mix(col, nacre, drive * 0.98);
 
-  // IMPORTANT: 不再加“纯白珠光”，改成“有色珠光” → 不发灰
-  col += nacre * fres * (0.90 + 1.40*glow);
+  // colored pearl highlights (no gray)
+  col += nacre * fres * (1.10 + 1.90*glow);
 
-  // silky bright ribbons (still colored)
-  float ridge = smoothstep(0.55, 0.95, b);
-  float silk = ridge * fres * (0.20 + 0.80*drive);
-  col += nacre * silk * (0.40 + 0.80*glow);
+  // flowing “ribbons” that move with b
+  float ridge = smoothstep(0.52, 0.92, b);
+  float silk  = ridge * fres * (0.25 + 0.85*drive);
+  col += nacre * silk * (0.60 + 1.10*glow);
 
-  // mouse magic ink injection (very saturated)
+  // mouse ink injection (more motion + more saturation)
   float d = distance(vUv, uMouse01);
-  float ink = smoothstep(0.55, 0.0, d);
-  ink *= (0.18 + 0.82*uPulse);
-  ink *= (0.35 + 0.65*uVel01);
+  float ink = smoothstep(0.60, 0.0, d);
+  ink *= (0.15 + 0.85*uPulse);
+  ink *= (0.30 + 0.70*uVel01);
 
-  vec3 inkCol = pearlPalette(hueKey + 0.33 + fbm(p*10.0 + uTime*0.1)*0.25);
-  col += inkCol * ink * (0.60 + 1.60*glow);
+  vec3 inkCol = pearlPalette(hueKey + 0.33 + fbm(p*6.0 + uTime*0.25)*0.35);
+  col += inkCol * ink * (0.75 + 2.00*glow);
 
-  // tiny sparkles (not too much white)
-  float sp = smoothstep(0.995, 1.0, noise(p*28.0 + uTime*0.35));
-  col += nacre * sp * (0.15 + 0.55*drive);
+  // sparkles (slightly animated)
+  float sp = smoothstep(0.992, 1.0, noise(p*26.0 + uTime*0.65));
+  col += nacre * sp * (0.18 + 0.80*drive);
 
-  // exposure: brighter but keeps saturation
-  col *= (0.85 + 1.75*drive);      // 播放时整体变亮
+  // brighten during play
+  col *= (0.90 + 2.10*drive);
   col = filmic(col);
-  col = pow(col, vec3(0.92));      // 再提一点亮度/通透
+  col = pow(col, vec3(0.90));
 
   gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
 }
