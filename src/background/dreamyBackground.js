@@ -9,10 +9,10 @@ import bgFrag from "./shaders/bg.frag.glsl?raw";
  * Dreamy Background (audio-driven sky-sphere)
  * - Inside-facing sphere (BackSide)
  * - Always follows camera position (infinite sky)
- * - Audio drives iridescent liquid film + ink injection + sparkles
+ * - Audio drives vivid dreamy hue + injection + sparkles
  */
 export function createDreamyBackground(scene) {
-  // ✅ Higher segments to avoid faceted "triangle" look
+  // Higher segments to avoid faceted look
   const geo = new THREE.SphereGeometry(80, 64, 32);
 
   const mat = new THREE.ShaderMaterial({
@@ -24,16 +24,15 @@ export function createDreamyBackground(scene) {
     side: THREE.BackSide,
     uniforms: {
       uTime: { value: 0 },
-      uIntensity: { value: 0.9 },
 
-      // 0..1
-      uMouse: { value: new THREE.Vector2(0.5, 0.5) },
+      // 0..1 mouse in screen UV
+      uMouse01: { value: new THREE.Vector2(0.5, 0.5) },
 
-      // 🎨 base / main
-      uBaseRGB: { value: new THREE.Color("#131527") },
-      uMainRGB: { value: new THREE.Color("#ff7ccf") },
+      // base/night + tint (NOTE: for vivid mode, tint should be white to avoid "pink/purple dye")
+      uBase: { value: new THREE.Color("#131527") },
+      uTint: { value: new THREE.Color("#ffffff") },
 
-      // 🎵 audio drive
+      // audio drive
       uLeadE: { value: 0.0 },
       uPitch01: { value: 0.0 },
       uVel01: { value: 0.0 },
@@ -60,15 +59,16 @@ export function createDreamyBackground(scene) {
     },
 
     setMouse01(x, y) {
-      mat.uniforms.uMouse.value.set(x, y);
+      mat.uniforms.uMouse01.value.set(x, y);
     },
 
     setBaseColor(hex) {
-      mat.uniforms.uBaseRGB.value.set(hex);
+      mat.uniforms.uBase.value.set(hex);
     },
 
-    setMainColor(hex) {
-      mat.uniforms.uMainRGB.value.set(hex);
+    // NOTE: "tint" is no longer the main color anchor, keep it white unless you intentionally want a dye
+    setTintColor(hex) {
+      mat.uniforms.uTint.value.set(hex);
     },
 
     setAudioDrive({ leadE, pitch01, vel01, theta01, pulse } = {}) {
@@ -77,10 +77,6 @@ export function createDreamyBackground(scene) {
       if (vel01 !== undefined) mat.uniforms.uVel01.value = vel01;
       if (theta01 !== undefined) mat.uniforms.uTheta01.value = theta01;
       if (pulse !== undefined) mat.uniforms.uPulse.value = pulse;
-    },
-
-    setIntensity(v) {
-      mat.uniforms.uIntensity.value = v;
     },
 
     getUniforms() {
