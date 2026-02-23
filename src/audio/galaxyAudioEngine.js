@@ -86,6 +86,7 @@ export function createGalaxyAudioEngine() {
   const nebulaState = new Map();
   const lastScratchTimeById = new Map();
 
+const lastScratchTimeByInst = new WeakMap();
   let rhythmEnabled = false;   // kick/hat/bass
   let padEnabled = false;      // pad drone
 
@@ -434,11 +435,14 @@ export function createGalaxyAudioEngine() {
 
     // Tone.js requires start times to be strictly increasing per *voice*.
 // If multiple triggers happen within the same frame, Tone.now() can repeat.
-// We enforce a tiny epsilon per galaxyId to guarantee monotonic start times.
+// Also: different galaxyIds can share the same instrument instance -> key by instrument first.
 let safeNow = Tone.now();
 const EPS = 0.0012; // ~1.2ms
-const prev = lastScratchTimeById.get(galaxyId) ?? -Infinity;
+const prevByInst = lastScratchTimeByInst.get(instrument) ?? -Infinity;
+const prevById = lastScratchTimeById.get(galaxyId) ?? -Infinity;
+const prev = Math.max(prevByInst, prevById);
 if (safeNow <= prev) safeNow = prev + EPS;
+lastScratchTimeByInst.set(instrument, safeNow);
 lastScratchTimeById.set(galaxyId, safeNow);
 now = safeNow;
 

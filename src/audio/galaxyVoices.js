@@ -1,11 +1,38 @@
 // src/audio/galaxyVoices.js
 import * as Tone from "tone";
 
+
+// ------------------ Tone context guard (robust) ------------------
+let __toneReady = false;
+async function ensureToneRunning() {
+  if (__toneReady && Tone.context.state === "running") return true;
+  try {
+    await Tone.start();
+    await Tone.context.resume?.();
+    __toneReady = (Tone.context.state === "running");
+    return __toneReady;
+  } catch (e) {
+    console.warn("[Audio] ensureToneRunning failed:", e);
+    return false;
+  }
+}
+
 /**
  * 目标：梦幻、柔软、Ariana-ish 的 “空气感合成器”
  * 原则：不尖、不吵、但有 shimmer / chorus / 轻微 delay 的“仙境空间”
  */
-export function createGalaxyVoices() {
+export function createGalaxyVoices() {async function safeTriggerAttackRelease(inst, note, dur, time, vel) {
+  if (!inst) return;
+  const ok = await ensureToneRunning();
+  if (!ok) return;
+  try {
+    safeTriggerAttackRelease(inst, note, dur, time ?? Tone.now(), vel ?? 0.9);
+  } catch (e) {
+    console.warn("[Audio] triggerAttackRelease failed:", e);
+  }
+}
+
+
 
   // -------------------------------------
   // Nebula instruments (scratch voices)
@@ -137,7 +164,7 @@ export function createGalaxyVoices() {
 
     // Pad：慢慢换和弦
     Tone.Transport.scheduleRepeat((time) => {
-      pad.triggerAttackRelease(chords[chordIndex], "2n", time, 0.55);
+      safeTriggerAttackRelease(pad, chords[chordIndex], "2n", time, 0.55);
       chordIndex = (chordIndex + 1) % chords.length;
     }, "2n");
 
@@ -145,7 +172,7 @@ export function createGalaxyVoices() {
     Tone.Transport.scheduleRepeat((time) => {
       if (Math.random() < 0.75) return;
       const note = scale[(Math.random() * scale.length) | 0];
-      bell.triggerAttackRelease(note, "16n", time, 0.45);
+      safeTriggerAttackRelease(bell, note, "16n", time, 0.45);
     }, "4n");
 
     Tone.Transport.start();
@@ -172,7 +199,7 @@ export function createGalaxyVoices() {
 
   function spark(vel = 0.6) {
     const note = scale[(Math.random() * scale.length) | 0];
-    bell.triggerAttackRelease(note, "16n", Tone.now(), vel);
+    safeTriggerAttackRelease(bell, note, "16n", Tone.now(), vel);
     }
 
   function getNebulaInstrumentName(galaxyId) {

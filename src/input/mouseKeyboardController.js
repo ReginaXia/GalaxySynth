@@ -101,10 +101,10 @@ export function createMouseKeyboardController(domElement = window) {
   function onDown() { input.mouseDown = true; input.dragDX = 0; }
   function onUp() { input.mouseDown = false; input.dragDX = 0; }
 
-  function onWheel(e) {
-    const delta = Math.sign(e.deltaY);
-    input.rhythmDensity = Math.max(0, Math.min(1, input.rhythmDensity - delta * 0.05));
-  }
+  // function onWheel(e) {
+  //   const delta = Math.sign(e.deltaY);
+  //   input.rhythmDensity = Math.max(0, Math.min(1, input.rhythmDensity - delta * 0.05));
+  // }
 
   function onKeyDown(e) {
     if (e.key === "Shift") input.shiftDown = true;
@@ -124,7 +124,6 @@ export function createMouseKeyboardController(domElement = window) {
   domElement.addEventListener("mousemove", onMove);
   domElement.addEventListener("mousedown", onDown);
   domElement.addEventListener("mouseup", onUp);
-  domElement.addEventListener("wheel", onWheel, { passive: true });
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);
 
@@ -150,7 +149,7 @@ export function createMouseKeyboardController(domElement = window) {
 
     // trigger events
     isTriggerEvent(e) {
-      return e?.type === "mousedown";
+      return e?.type === "mousedown" || e?.type === "pointerdown";
     },
 
     dispose() {
