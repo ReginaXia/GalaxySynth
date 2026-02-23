@@ -136,6 +136,85 @@ export function setupBackgroundGUI(gui, bg){
   };
 
   const folder = gui.addFolder?.("Background (Pearl)") ?? gui;
+
+
+  // ---------- Custom palette preset (name + 4 colors) ----------
+  const STORAGE_KEY = "gs_bg_palettes_v1";
+
+  // 1) load saved presets from localStorage (optional but recommended)
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+    if (saved && typeof saved === "object") {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v?.colors?.length >= 4) BACKGROUND_PALETTES[k] = v;
+      }
+    }
+  } catch {}
+
+  // 2) palette dropdown (keep a controller reference so we can refresh options)
+  let paletteCtrl = null;
+  const paletteParams = { palette: params.palette };
+
+  // 重新创建 palette 下拉（覆盖你原来的那一行 folder.add(params, "palette"... ) 也行）
+  // 如果你不想改原来那行，就把原来那行删掉/注释掉，再用这段。
+  paletteCtrl = folder
+    .add(paletteParams, "palette", Object.keys(BACKGROUND_PALETTES))
+    .name("palette")
+    .onChange((v) => {
+      params.palette = v;
+      bg.setPalette(v);
+    });
+
+  // 3) custom editor UI
+  const custom = {
+    name: "Regina_Pink",
+    c0: "#FF4FD8",
+    c1: "#FFE6F3",
+    c2: "#C9A6FF",
+    c3: "#7AF7FF",
+    apply: () => {
+      bg.setPalette([custom.c0, custom.c1, custom.c2, custom.c3]);
+    },
+    save: () => {
+      // key: 用名字生成一个稳定 key（避免空格/中文导致奇怪 key）
+      const raw = (custom.name || "Custom").trim();
+      const key = raw
+        .toLowerCase()
+        .replace(/\s+/g, "_")
+        .replace(/[^a-z0-9_\-]/g, "") || "custom";
+
+      // 写入内存预设
+      BACKGROUND_PALETTES[key] = { name: raw, colors: [custom.c0, custom.c1, custom.c2, custom.c3] };
+
+      // 持久化到 localStorage
+      try {
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+        saved[key] = BACKGROUND_PALETTES[key];
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+      } catch {}
+
+      // 刷新下拉选项（lil-gui 支持 controller.options(...)）
+      if (paletteCtrl?.options) {
+        paletteCtrl.options(Object.keys(BACKGROUND_PALETTES));
+      }
+
+      // 立刻切到新预设并应用
+      paletteParams.palette = key;
+      params.palette = key;
+      bg.setPalette(key);
+    },
+  };
+
+  const customFolder = folder.addFolder?.("Custom Palette") ?? folder;
+  customFolder.add(custom, "name").name("name");
+  customFolder.addColor(custom, "c0").name("color 0");
+  customFolder.addColor(custom, "c1").name("color 1");
+  customFolder.addColor(custom, "c2").name("color 2");
+  customFolder.addColor(custom, "c3").name("color 3");
+  customFolder.add(custom, "apply").name("apply (no save)");
+  customFolder.add(custom, "save").name("save preset");
+
+
   folder.add(params, "palette", Object.keys(BACKGROUND_PALETTES)).onChange(v => bg.setPalette(v));
   folder.add(params, "intensity", 0.3, 2.5, 0.01).onChange(v => bg.uniforms.uIntensity.value = v);
   folder.add(params, "flow", 0.0, 2.0, 0.01).onChange(v => bg.uniforms.uFlow.value = v);

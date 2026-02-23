@@ -139,8 +139,27 @@ void main(){
   float f = fbm(q * 1.05 + vec2(0.0, t*0.6));
   float g = fbm(q * 2.10 + vec2(t*0.9, 0.0));
 
-  float band  = smoothstep(0.20, 0.92, f);
-  float band2 = smoothstep(0.25, 0.95, g);
+  //float band  = f;
+  //float band2 = g;
+
+  //band  = pow(band,  1.15);
+  //band2 = pow(band2, 1.10);
+
+  //float micro = noise(q * 8.0 + vec2(t*1.7, -t*1.3));
+  //f = mix(f, micro, 0.08);
+  //g = mix(g, micro, 0.06);
+
+    // --- Anti-blocky bands: soften thresholds + jitter slightly ---
+  float dither01 = fract(
+    sin(dot(gl_FragCoord.xy, vec2(12.9898,78.233))) * 43758.5453
+  );
+
+  // 让阈值轻微抖动（非常小，不会“脏”，但能打散块状边界）
+  float jitter = (dither01 - 0.5) * (1.5 / 255.0);
+
+  // 更宽的 smoothstep 区间 = 更柔和的过渡
+  float band  = smoothstep(0.10 + jitter, 0.98 + jitter, f);
+  float band2 = smoothstep(0.12 + jitter, 0.99 + jitter, g);
 
   float musicalT = (uPitch01 * 0.92 + uTheta01 * 0.35 + t * 0.12);
 
