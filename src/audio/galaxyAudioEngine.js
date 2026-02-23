@@ -84,9 +84,13 @@ function pitch01ToNote(p01, root = "A3") {
 export function createGalaxyAudioEngine() {
   let started = false;
   const nebulaState = new Map();
+
+// ✅ Tone v15: start time must be strictly increasing.
+// We keep a global monotonic clock as a last-resort guard (covers shared instruments across nebulae).
+let __globalMonotonicStartTime = -Infinity;
+
   const lastScratchTimeById = new Map();
 
-const lastScratchTimeByInst = new WeakMap();
   let rhythmEnabled = false;   // kick/hat/bass
   let padEnabled = false;      // pad drone
 
@@ -432,18 +436,14 @@ const lastScratchTimeByInst = new WeakMap();
     now = Tone.now(),
   }) {
     if (!instrument) return;
-
-    // Tone.js requires start times to be strictly increasing per *voice*.
-// If multiple triggers happen within the same frame, Tone.now() can repeat.
-// Also: different galaxyIds can share the same instrument instance -> key by instrument first.
+// Tone v15 requires start times to be strictly increasing.
+// During rapid interactions (same frame), Tone.now() can repeat.
+// Also, multiple nebulae can share the same instrument instance.
+// => We guard with a GLOBAL monotonic clock (strongest & simplest).
+const EPS = 0.003; // 3ms, enough to be strictly increasing even under coarse timers
 let safeNow = Tone.now();
-const EPS = 0.0012; // ~1.2ms
-const prevByInst = lastScratchTimeByInst.get(instrument) ?? -Infinity;
-const prevById = lastScratchTimeById.get(galaxyId) ?? -Infinity;
-const prev = Math.max(prevByInst, prevById);
-if (safeNow <= prev) safeNow = prev + EPS;
-lastScratchTimeByInst.set(instrument, safeNow);
-lastScratchTimeById.set(galaxyId, safeNow);
+if (safeNow <= __globalMonotonicStartTime) safeNow = __globalMonotonicStartTime + EPS;
+__globalMonotonicStartTime = safeNow;
 now = safeNow;
 
 
