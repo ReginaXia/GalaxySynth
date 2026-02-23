@@ -67,7 +67,7 @@ function quantize(v, steps) {
 
 
 function pitch01ToNote(p01, root = "A3") {
-  const octaves = 2;
+  const octaves = 1;
   const stepsPerOct = MAJOR_SCALE.length;
   const totalSteps = stepsPerOct * octaves;
 
@@ -448,10 +448,9 @@ export function createGalaxyAudioEngine() {
     // octaveOffset: 中心 +12 或 +24，外圈 0 或 -12
     // 先给你一个“好听且不极端”的范围：外圈低一八度，中心高一八度
     let octaveOffset = 0;
-    if (r01 < 0.25) octaveOffset = +24;
-    else if (r01 < 0.5) octaveOffset = +12;
-    else if (r01 < 0.75) octaveOffset = 0;
-    else octaveOffset = -12;
+    if (r01 < 0.33) octaveOffset = +12;      // 中心：高八度
+    else if (r01 < 0.66) octaveOffset = 0;   // 中间：本八度
+    else octaveOffset = -12;                 // 外圈：低八度
 
 
     const baseMidi = Tone.Frequency("C4").toMidi();
@@ -508,25 +507,11 @@ export function createGalaxyAudioEngine() {
 
     // ---- expression ----
     // 快速转 = 更亮、更响
-    const velocity = clamp01(0.35 + speed * 1.4);
+    const velocity = clamp01(0.25 + speed * 0.9);
     const dur = Math.max(0.08, 0.22 - speed * 0.06);  
 
-    if (instrument.set) {
-      instrument.set({
-        filter: { frequency: 800 + velocity * 2000 }
-      });
-    }
-
-    if (direction < 0) {
-    instrument.triggerAttackRelease(
-      Tone.Frequency(note).transpose(-2),
-      0.05,
-      now - 0.02,
-      velocity * 0.6
-    );
-  }
-
-    instrument.triggerAttackRelease(note, dur, now, velocity);
+    // Trigger immediately (omit explicit time) to avoid Tone scheduling monotonic-time errors in rapid interactions.
+    instrument.triggerAttackRelease(note, dur, undefined, velocity);
 
         // ---- expose for HUD / visuals ----
     out.lastNote = note;
@@ -556,6 +541,50 @@ export function createGalaxyAudioEngine() {
 
 
 
+  // Preview-only: compute the same quantized note as playNebulaScratch, without triggering sound.
+  function previewNebulaNote({
+    galaxyId,
+    theta01,
+    r01 = 0.5,
+    now = Tone.now(),
+    sticky = true,
+  }) {
+    // octaveOffset mapping must match playNebulaScratch
+    let octaveOffset = 0;
+    if (r01 < 0.33) octaveOffset = +12;
+    else if (r01 < 0.66) octaveOffset = 0;
+    else octaveOffset = -12;
+
+    const baseMidi = Tone.Frequency("C4").toMidi();
+    const rootMidi = baseMidi + octaveOffset;
+
+    const STEPS = MAJOR_SCALE.length;
+
+    const st =
+      nebulaState.get(galaxyId) ??
+      { lastStep: -1, lastTheta: theta01, lastTime: now };
+
+    let step;
+    if (sticky) step = quantizeWithHysteresis(theta01, STEPS, st.lastStep, 0.18);
+    else step = Math.floor(clamp01(theta01) * STEPS) % STEPS;
+
+    const degreeSemi = MAJOR_SCALE[step];
+    const midi = rootMidi + degreeSemi;
+    const note = Tone.Frequency(midi, "midi").toNote();
+
+    return {
+      note,
+      midi,
+      step,
+      steps: STEPS,
+      degree: step, // 0..6
+      degreeSemi,
+      theta01,
+      r01,
+      octaveOffset,
+    };
+  }
+
   return {
     start,
     stop,
@@ -567,6 +596,7 @@ export function createGalaxyAudioEngine() {
     triggerBeat,
     triggerPerc,
     playNebulaScratch,
+    previewNebulaNote,
     isStarted: () => started,
   };
 }

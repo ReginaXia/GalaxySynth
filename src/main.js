@@ -9,6 +9,7 @@ import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPa
 import { setupGalaxyGUI } from "./ui/galaxyGui.js";
 import { setupMeteorGUI } from "./ui/meteorGui.js";
 
+import { createNebulaNoteHintController } from "./ui/nebulaNoteHintController.js";
 // import { initAudioOnFirstGesture, triggerOnMove } from "./audio.js";
 import { playMeteorSfx } from "./audio/meteorSfx.js";
 
@@ -29,8 +30,6 @@ import starsVert from "./shaders/stars.vert.glsl?raw";
 import starsFrag from "./shaders/stars.frag.glsl?raw";
 import meteorVert from "./shaders/meteor.vert.glsl?raw";
 import meteorFrag from "./shaders/meteor.frag.glsl?raw";
-
-import GUI from "lil-gui";
 
 console.log("MAIN JS LOADED");
 // --- Debug HUD (show active/hover)
@@ -78,8 +77,7 @@ const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "hi
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-// renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMapping = false;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1;
 document.body.appendChild(renderer.domElement);
 
@@ -92,38 +90,10 @@ const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerH
 camera.position.set(0, 6.5, 8.5);
 camera.lookAt(0, 0, 0);
 
-const bg = await createDreamyBackground(scene, camera, { palette: "pearl" });
+const bg = await createDreamyBackground(scene, camera, { palette: 'pearl' });
 window.__bg = bg;
-
-// -------------------- GUI (single, global) --------------------
-const gui = new GUI({ title: "Controls" });
-window.__gui = gui;
-
-// 固定在页面最下方（居中）
-// 你也可以改成 right-bottom，我下面也给你
-gui.domElement.style.position = "fixed";
-gui.domElement.style.left = "50%";
-gui.domElement.style.bottom = "8px";
-gui.domElement.style.top = "auto";
-gui.domElement.style.right = "auto";
-gui.domElement.style.transform = "translateX(-50%)";
-gui.domElement.style.zIndex = "9999";
-gui.domElement.style.maxHeight = "36vh";
-gui.domElement.style.overflowY = "auto";
-
-// 让背景 GUI 出现
-setupBackgroundGUI(gui, bg);
-
-let guiVisible = true;
-window.addEventListener("keydown", (e) => {
-  if (e.key.toLowerCase() === "g") {
-    guiVisible = !guiVisible;
-    gui.domElement.style.display = guiVisible ? "" : "none";
-  }
-});
-
-
-
+// If your existing UI exposes a gui instance on window.__gui, this will attach a small Background folder.
+if (window.__gui) setupBackgroundGUI(window.__gui, bg);
 scene.background = new THREE.Color(0x000000);
 
 
@@ -163,9 +133,9 @@ composer.addPass(new RenderPass(scene, camera));
 const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.65, 0.22);
 composer.addPass(bloomPass);
 
-bloomPass.strength = 0.08;
-bloomPass.radius = 0.1;
-bloomPass.threshold = 0.98;
+bloomPass.strength = 1;
+bloomPass.radius = 1;
+bloomPass.threshold = 0.7;
 
 // -------------------------------------
 // Raycast plane (y = 0)
@@ -228,6 +198,9 @@ window.addEventListener("pointerup",   () => (pointerDown = false));
 const perf = createPerformanceState();
 const controller = createMouseKeyboardController(window);
 const audio = createGalaxyAudioEngine();
+// NOTE: some newer modules (e.g. nebula note hint) expect `audioEngine`.
+// Keep a stable alias to avoid scope/name mismatches.
+const audioEngine = audio;
 const voices = createGalaxyVoices();
 const audioUI = createAudioMonitorUI();
 const audioVoices = createGalaxyVoices();
@@ -537,6 +510,22 @@ console.log("vert len", meteorVert.length, "frag len", meteorFrag.length);
 
 setupMeteorGUI(meteorSystem);
 
+// -------------------------------------
+// Nebula note hint (hover label + optional click-to-play)
+// -------------------------------------
+const noteHint = createNebulaNoteHintController({
+  scene,
+  camera,
+  nebulaSystem,
+  audioEngine,
+  voices,
+  getMouseWorldOnPlane,
+  pickNebulaAtEvent,
+  // reuse the existing bottom GUI if available
+  gui: window.__gui ?? null,
+});
+
+
 
 
 function getPointerNDCFromEvent(e) {
@@ -595,7 +584,7 @@ canvas.addEventListener("pointerdown", (e) => {
 
   // ✅ 普通左键：做“即时 pick”（不依赖 hoveredNebulaKey）
   if (e.button === 0) {
-    const pick = pickNebulaAtEvent(e);
+    const pick = noteHint?.handlePointerDown?.(e) ?? pickNebulaAtEvent(e);
 
     if (pick?.galaxyId) {
       activeNebulaKey = pick.galaxyId;
@@ -625,6 +614,10 @@ canvas.addEventListener("pointermove", (e) => {
   const rect = canvas.getBoundingClientRect();
   pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
   pointer.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+
+  // Feed pointer position to note hint even when not dragging,
+  // so hover labels can follow the cursor.
+  noteHint.setPointerClientXY(e.clientX, e.clientY);
 
   if (!isDragging) return;
 
@@ -846,6 +839,7 @@ function tick() {
 
   nebulaHit = nebulaHitLocal;
   const hasNebulaHit = !!nebulaHit;
+  if (noteHint?.update) noteHint.update(hoveredNebulaKey);
 
 
 
