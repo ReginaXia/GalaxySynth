@@ -27,13 +27,13 @@ export function createGalaxyVoices() {
 
   const nebulaInstruments = {
     violin: new Tone.Synth({
-      oscillator: { type: "triangle" },
-      envelope: { attack: 0.03, decay: 0.18, sustain: 0.35, release: 1.0 },
+      oscillator: { type: "sawtooth" },
+      envelope: { attack: 0.02, decay: 0.15, sustain: 0.4, release: 0.9 },
     }),
 
     cello: new Tone.Synth({
       oscillator: { type: "triangle" },
-      envelope: { attack: 0.04, decay: 0.2, sustain: 0.5, release: 1.2 },
+      envelope: { attack: 0.05, decay: 0.25, sustain: 0.6, release: 1.3 },
     }),
     organ: new Tone.Synth({
       oscillator: { type: "sine" },
@@ -100,8 +100,18 @@ export function createGalaxyVoices() {
 
   // ---- Nebula scratch instruments routing ----
   // 让 violin/cello/organ/harp/piano 也走同一套空间效果，声音才“融入银河”
+  // 建一个专门 scratchBus
+  const scratchBus = new Tone.Gain(1.0);
+  scratchBus.chain(compressor, limiter, Tone.Destination);
+
+  // 轻一点空间（不是主空间）
+  const scratchReverb = new Tone.Reverb({ decay: 3.2, wet: 0.18 });
+  scratchBus.connect(scratchReverb);
+  scratchReverb.toDestination();
+
+  // 每个 nebula 乐器走 scratchBus
   Object.values(nebulaInstruments).forEach((inst) => {
-    inst.chain(delay, pitch, reverb, compressor, limiter, Tone.Destination);
+    inst.connect(scratchBus);
   });
 
 
