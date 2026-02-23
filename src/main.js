@@ -76,7 +76,8 @@ const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "hi
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
+// renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMapping = false;
 renderer.toneMappingExposure = 1;
 document.body.appendChild(renderer.domElement);
 
@@ -132,9 +133,9 @@ composer.addPass(new RenderPass(scene, camera));
 const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.65, 0.22);
 composer.addPass(bloomPass);
 
-bloomPass.strength = 1;
-bloomPass.radius = 1;
-bloomPass.threshold = 0.7;
+bloomPass.strength = 0.08;
+bloomPass.radius = 0.1;
+bloomPass.threshold = 0.98;
 
 // -------------------------------------
 // Raycast plane (y = 0)

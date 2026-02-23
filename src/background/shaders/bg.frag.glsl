@@ -181,5 +181,12 @@ void main(){
 
   col = pow(saturate(col), vec3(0.92));
 
+  float dither = fract(
+      sin(dot(gl_FragCoord.xy, vec2(12.9898,78.233)))
+      * 43758.5453
+  );
+
+  col += (dither - 0.5) / 255.0;
+
   gl_FragColor = vec4(saturate(col), 1.0);
 }
