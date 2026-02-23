@@ -36,7 +36,6 @@ function makeGlowTextSprite(text = "C", opts = {}) {
 
   function setText(newText) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-
     ctx.font = `${font} ${fontSize}px ui-sans-serif, system-ui, -apple-system`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -59,20 +58,22 @@ function makeGlowTextSprite(text = "C", opts = {}) {
   return { sprite, setText };
 }
 
-/**
- * createNebulaNoteHintController
- *
- * 目标效果：
- * 1) 主提示：跟着鼠标点到/滑到的位置，在“粒子上方”浮出当前音名（DoReMi 或 CDEFGAB）
- * 2) 环提示：在星云外圈摆 7 个音名刻度，微漂动；当前音高亮，其余半透明
- *
- * 依赖：
- * - nebulaSystem.getCluster(id) -> { center: Vector3, group?, preset? }
- * - audioEngine.previewNebulaNote? (可选)，没有就 fallback
- * - voices.getNebulaInstrument(id) (可选，用于 click-to-play)
- * - getMouseWorldOnPlane(clientX, clientY) -> Vector3|null
- * - pickNebulaAtEvent(e) -> { galaxyId, hit:{point:Vector3} }|null
- */
+function smoothWrap01(prev, cur, alpha) {
+  if (prev == null || !Number.isFinite(prev)) return cur;
+  let c = cur;
+  // pick the nearest wrap around prev
+  const candidates = [cur, cur + 1, cur - 1];
+  let best = candidates[0];
+  let bestD = Math.abs(candidates[0] - prev);
+  for (let i = 1; i < candidates.length; i++) {
+    const d = Math.abs(candidates[i] - prev);
+    if (d < bestD) { bestD = d; best = candidates[i]; }
+  }
+  c = best;
+  const out = prev * (1 - alpha) + c * alpha;
+  return (out % 1 + 1) % 1;
+}
+
 export function createNebulaNoteHintController({
   scene,
   camera,
@@ -83,33 +84,35 @@ export function createNebulaNoteHintController({
   pickNebulaAtEvent,
   gui = null,
 }) {
-  const params = {
-    enabled: true,
-
-    // 主提示：跟手
-    showCursorLabel: true,
-
-    // 环提示：一圈音阶刻度（最好看，也最“乐器”）
-    showRingLabels: true,
-
-    labelMode: "solfege", // "solfege" | "letter"
-    clickToPlay: true,
-    sticky: true,
-    cursorScale: 1.0,
-    ringScale: 1.0,
-
-    // 环的位置与动效
-    ringRadiusMul: 0.95,      // 外圈半径比例（相对星云半径）
-    ringHeight: 0.22,         // 离平面高度
-    ringDrift: 0.08,          // 环刻度漂动幅度
-    cursorHeight: 0.28,       // 主提示在粒子上方高度
-    cursorDrift: 0.06,        // 主提示轻微漂动
-  };
-
   const solfegeArr = ["Do", "Re", "Mi", "Fa", "Sol", "La", "Xi"];
   const letterArr  = ["C", "D", "E", "F", "G", "A", "B"];
 
-  // 主提示（跟手）
+  const params = {
+    enabled: true,
+    labelMode: "solfege", // "solfege" | "letter"
+    clickToPlay: true,
+
+    // cursor label
+    showCursorLabel: true,
+    cursorScale: 1.0,
+    cursorHeight: 0.28,
+    cursorDrift: 0.05,
+
+    // multi-band hints
+    showBands: true,
+    maxBands: 4,
+    bandScale: 1.0,
+    bandHeight: 0.22,
+    bandDrift: 0.08,
+
+    // stability
+    sticky: true,
+    hysteresisMargin: 0.18,
+    smoothTheta: 0.22,
+    hoverHoldMs: 120,
+  };
+
+  // cursor label
   const { sprite: cursorLabel, setText: setCursorText } = makeGlowTextSprite("Do", {
     fontSize: 86,
     glow: 22,
@@ -118,28 +121,49 @@ export function createNebulaNoteHintController({
   cursorLabel.scale.set(1.75, 0.9, 1);
   scene.add(cursorLabel);
 
-  // 环提示（7 个）
-  const ringLabels = [];
-  const ringSetText = [];
-  for (let i = 0; i < 7; i++) {
-    const { sprite, setText } = makeGlowTextSprite("Do", {
-      fontSize: 56,
-      glow: 16,
-    });
-    sprite.visible = false;
-    sprite.scale.set(1.1, 0.55, 1);
-    scene.add(sprite);
-    ringLabels.push(sprite);
-    ringSetText.push(setText);
+  // band sprites: maxBands * 7
+  const MAX_BANDS = Math.max(1, Math.min(8, params.maxBands));
+  const STEPS = 7;
+
+  const bandLabels = [];
+  const bandSetText = [];
+  for (let b = 0; b < MAX_BANDS; b++) {
+    for (let i = 0; i < STEPS; i++) {
+      const { sprite, setText } = makeGlowTextSprite("Do", {
+        fontSize: 54,
+        glow: 16,
+      });
+      sprite.visible = false;
+      sprite.scale.set(1.05, 0.55, 1);
+      scene.add(sprite);
+      bandLabels.push(sprite);
+      bandSetText.push(setText);
+    }
   }
 
   // pointer state
   let lastClientX = 0;
   let lastClientY = 0;
 
+  // allow main.js to provide the exact theta/r used for audio (best alignment)
+  let interactionSample = null; // { id, theta01, r01, timeMs }
+
+  // per-galaxy hover state (for sticky + smoothing + hold)
+  const hoverState = new Map(); // id -> { lastStep, smoothTheta01, lastSeenMs, lastInfo }
+
   function setPointerClientXY(x, y) {
     lastClientX = x;
     lastClientY = y;
+  }
+
+  // Call this from main.js when you already computed theta01/r01 for audio.
+  function setInteractionSample(galaxyId, theta01, r01) {
+    interactionSample = {
+      id: galaxyId,
+      theta01: (theta01 % 1 + 1) % 1,
+      r01: clamp01(r01),
+      timeMs: performance.now(),
+    };
   }
 
   function estimateNebulaBaseRadius(cluster) {
@@ -158,31 +182,29 @@ export function createNebulaNoteHintController({
     return { theta01, r01 };
   }
 
-  // fallback：如果 audioEngine 没有 previewNebulaNote，就用简单 major scale 映射
   function fallbackPreview({ theta01, r01 }) {
-    const steps = 7;
-    const degree = Math.floor(theta01 * steps) % steps;
-    // octave mapping（和你 scratch 的直觉一致：越靠中心越高）
+    const degree = Math.floor(clamp01(theta01) * STEPS) % STEPS;
     let octave = 4;
-    if (r01 < 0.25) octave = 6;
-    else if (r01 < 0.5) octave = 5;
-    else if (r01 < 0.75) octave = 4;
+    if (r01 < 0.33) octave = 5;
+    else if (r01 < 0.66) octave = 4;
     else octave = 3;
-
-    const name = letterArr[degree] + octave;
-    return { note: name, degree };
+    return { note: `${letterArr[degree]}${octave}`, degree, step: degree };
   }
 
-  function previewNote({ galaxyId, theta01, r01 }) {
+  function previewNote({ galaxyId, theta01, r01, state }) {
     const fn = audioEngine?.previewNebulaNote;
     if (typeof fn === "function") {
-      return fn({
+      const info = fn({
         galaxyId,
         theta01,
         r01,
         sticky: params.sticky,
+        lastStep: state?.lastStep ?? null,
+        updateState: false,
+        margin: params.hysteresisMargin,
         now: Tone.now(),
       });
+      return info;
     }
     return fallbackPreview({ theta01, r01 });
   }
@@ -190,35 +212,30 @@ export function createNebulaNoteHintController({
   function noteLabelText(info) {
     const degree = info.degree ?? 0;
     if (params.labelMode === "solfege") return solfegeArr[degree] ?? "Do";
-    // letter: remove octave
     return (info.note ?? "C4").replace(/\d+/g, "");
   }
 
   function hideAll() {
     cursorLabel.visible = false;
-    for (const s of ringLabels) s.visible = false;
+    for (const s of bandLabels) s.visible = false;
   }
 
-  // 主提示：贴着鼠标点到的粒子位置
   function updateCursorLabel(worldPoint, info) {
     if (!params.showCursorLabel) {
       cursorLabel.visible = false;
       return;
     }
-
     const t = performance.now() * 0.001;
     const bob = params.cursorDrift * Math.sin(t * 2.0 + (info.degree ?? 0));
-    const driftX = params.cursorDrift * 0.6 * Math.sin(t * 1.3 + 1.7);
-    const driftZ = params.cursorDrift * 0.6 * Math.cos(t * 1.1 + 2.2);
+    const driftX = params.cursorDrift * 0.7 * Math.sin(t * 1.2 + 1.7);
+    const driftZ = params.cursorDrift * 0.7 * Math.cos(t * 1.1 + 2.2);
 
     setCursorText(noteLabelText(info));
-
     cursorLabel.position.set(
       worldPoint.x + driftX,
       worldPoint.y + params.cursorHeight + bob,
       worldPoint.z + driftZ
     );
-
     cursorLabel.quaternion.copy(camera.quaternion);
 
     const s = params.cursorScale;
@@ -227,54 +244,98 @@ export function createNebulaNoteHintController({
     cursorLabel.visible = true;
   }
 
-  // 环提示：一圈 7 个音名（最好看 + 最清晰）
-  function updateRingLabels(cluster, info) {
-    if (!params.showRingLabels) {
-      for (const s of ringLabels) s.visible = false;
+  function computeBandCount(cluster) {
+    const shape = cluster?.preset?.shape ?? {};
+    const length = shape.length ?? 1.0;
+    const sizeScale = shape.sizeScale ?? 1.0;
+
+    // big = more bands; small = fewer
+    const score = clamp01((length * sizeScale - 0.6) / 1.2); // 0..1
+    const bands = 1 + Math.round(score * (Math.min(params.maxBands, 4) - 1));
+    return Math.max(1, Math.min(params.maxBands, bands));
+  }
+
+  function getBandR01List(bands) {
+    if (bands <= 1) return [0.62];
+    if (bands === 2) return [0.38, 0.86];
+    if (bands === 3) return [0.24, 0.56, 0.90];
+    return [0.18, 0.42, 0.68, 0.92];
+  }
+
+  function updateBandHints(cluster, info, cursorR01) {
+    if (!params.showBands) {
+      for (const s of bandLabels) s.visible = false;
       return;
     }
 
-    const t = performance.now() * 0.001;
     const baseR = Math.max(1e-4, estimateNebulaBaseRadius(cluster));
-    const ringR = baseR * params.ringRadiusMul;
+    const bands = computeBandCount(cluster);
+    const r01List = getBandR01List(bands);
 
-    const activeDegree = info.degree ?? 0;
-    for (let i = 0; i < 7; i++) {
-      const theta = (i / 7) * Math.PI * 2;
+    // choose active band by cursorR01
+    let activeBand = 0;
+    {
+      let bestD = Infinity;
+      for (let b = 0; b < bands; b++) {
+        const d = Math.abs(cursorR01 - r01List[b]);
+        if (d < bestD) { bestD = d; activeBand = b; }
+      }
+    }
 
-      // 轻微漂动（让它“跟粒子一起呼吸”）
-      const drift = params.ringDrift * Math.sin(t * 1.5 + i * 0.9);
-      const px = cluster.center.x + Math.cos(theta) * (ringR + drift);
-      const pz = cluster.center.z + Math.sin(theta) * (ringR + drift);
-      const py = cluster.center.y + params.ringHeight + 0.06 * Math.sin(t * 1.7 + i);
+    // spiral-ish offset based on length (visual match to arms)
+    const shape = cluster?.preset?.shape ?? {};
+    const length = shape.length ?? 1.0;
+    const twist = 8.5 + (15.5 - 8.5) * clamp01((length - 0.5) / 1.2);
 
-      ringLabels[i].position.set(px, py, pz);
-      ringLabels[i].quaternion.copy(camera.quaternion);
+    const t = performance.now() * 0.001;
 
-      ringSetText[i](params.labelMode === "solfege" ? solfegeArr[i] : letterArr[i]);
+    // hide all first
+    for (const s of bandLabels) s.visible = false;
 
-      // 高亮当前音
-      const isActive = i === activeDegree;
-      ringLabels[i].material.opacity = isActive ? 1.0 : 0.35;
+    for (let b = 0; b < bands; b++) {
+      const r01 = r01List[b];
+      const ringR = baseR * r01;
+      const spiralOffset = r01 * twist * 0.15;
 
-      const s = params.ringScale;
-      ringLabels[i].scale.set((isActive ? 1.18 : 1.1) * s, (isActive ? 0.6 : 0.55) * s, 1);
+      for (let i = 0; i < STEPS; i++) {
+        const idx = b * STEPS + i;
 
-      ringLabels[i].visible = true;
+        const theta = (i / STEPS) * Math.PI * 2 + spiralOffset;
+
+        const drift = params.bandDrift * Math.sin(t * 1.5 + i * 0.9 + b);
+        const px = cluster.center.x + Math.cos(theta) * (ringR + drift);
+        const pz = cluster.center.z + Math.sin(theta) * (ringR + drift);
+        const py = cluster.center.y + params.bandHeight + 0.05 * Math.sin(t * 1.7 + i + b * 0.7);
+
+        bandLabels[idx].position.set(px, py, pz);
+        bandLabels[idx].quaternion.copy(camera.quaternion);
+
+        bandSetText[idx](params.labelMode === "solfege" ? solfegeArr[i] : letterArr[i]);
+
+        const isDegree = (i === (info.degree ?? 0));
+        const isMain = (b === activeBand);
+
+        // opacity hierarchy
+        let op = 0.22;
+        if (isDegree && isMain) op = 1.0;
+        else if (isDegree && !isMain) op = 0.50;
+        else if (!isDegree && isMain) op = 0.30;
+
+        bandLabels[idx].material.opacity = op;
+
+        const s = params.bandScale;
+        const bump = (isDegree && isMain) ? 1.15 : 1.0;
+        bandLabels[idx].scale.set(1.05 * s * bump, 0.55 * s * bump, 1);
+
+        bandLabels[idx].visible = true;
+      }
     }
   }
 
-  /**
-   * 每帧：根据 hoveredNebulaId 更新提示
-   */
   function update(hoveredNebulaId) {
-    if (!params.enabled || !hoveredNebulaId) {
-      hideAll();
-      return;
-    }
+    const nowMs = performance.now();
 
-    const world = getMouseWorldOnPlane(lastClientX, lastClientY);
-    if (!world) {
+    if (!params.enabled || !hoveredNebulaId) {
       hideAll();
       return;
     }
@@ -285,16 +346,52 @@ export function createNebulaNoteHintController({
       return;
     }
 
-    const { theta01, r01 } = computeTheta01AndR01(cluster, world);
-    const info = previewNote({ galaxyId: hoveredNebulaId, theta01, r01 });
+    // try to use interactionSample (exact theta/r used for audio)
+    let theta01 = null;
+    let r01 = null;
 
-    updateCursorLabel(world, info);
-    updateRingLabels(cluster, info);
+    if (
+      interactionSample &&
+      interactionSample.id === hoveredNebulaId &&
+      (nowMs - interactionSample.timeMs) < 220
+    ) {
+      theta01 = interactionSample.theta01;
+      r01 = interactionSample.r01;
+    } else {
+      const world = getMouseWorldOnPlane(lastClientX, lastClientY);
+      if (!world) {
+        // hold last for a short time to avoid flicker
+        const st = hoverState.get(hoveredNebulaId);
+        if (st && (nowMs - st.lastSeenMs) < params.hoverHoldMs) return;
+        hideAll();
+        return;
+      }
+      const tr = computeTheta01AndR01(cluster, world);
+      theta01 = tr.theta01;
+      r01 = tr.r01;
+    }
+
+    let st = hoverState.get(hoveredNebulaId);
+    if (!st) {
+      st = { lastStep: -1, smoothTheta01: theta01, lastSeenMs: nowMs, lastInfo: null };
+      hoverState.set(hoveredNebulaId, st);
+    }
+
+    st.smoothTheta01 = smoothWrap01(st.smoothTheta01, theta01, params.smoothTheta);
+    st.lastSeenMs = nowMs;
+
+    const info = previewNote({ galaxyId: hoveredNebulaId, theta01: st.smoothTheta01, r01, state: st });
+
+    // update local sticky step from preview result
+    if (typeof info.step === "number") st.lastStep = info.step;
+    st.lastInfo = info;
+
+    // Cursor label position: use mouse world when available; otherwise keep center-ish
+    const worldForLabel = getMouseWorldOnPlane(lastClientX, lastClientY) ?? cluster.center;
+    updateCursorLabel(worldForLabel, info);
+    updateBandHints(cluster, info, r01);
   }
 
-  /**
-   * pointerdown：点击弹奏（在当前点击位置触发对应音）
-   */
   function handlePointerDown(e) {
     if (!params.clickToPlay) return null;
 
@@ -304,11 +401,23 @@ export function createNebulaNoteHintController({
     const cluster = nebulaSystem.getCluster(pick.galaxyId);
     if (!cluster) return pick;
 
-    const { theta01, r01 } = computeTheta01AndR01(cluster, pick.hit.point);
-    const info = previewNote({ galaxyId: pick.galaxyId, theta01, r01 });
+    const tr = computeTheta01AndR01(cluster, pick.hit.point);
+
+    // sync interaction sample so UI & click align instantly
+    setInteractionSample(pick.galaxyId, tr.theta01, tr.r01);
+
+    let st = hoverState.get(pick.galaxyId);
+    if (!st) {
+      st = { lastStep: -1, smoothTheta01: tr.theta01, lastSeenMs: performance.now(), lastInfo: null };
+      hoverState.set(pick.galaxyId, st);
+    }
+
+    const info = previewNote({ galaxyId: pick.galaxyId, theta01: tr.theta01, r01: tr.r01, state: st });
+    if (typeof info.step === "number") st.lastStep = info.step;
 
     const inst = voices?.getNebulaInstrument?.(pick.galaxyId);
-    inst?.triggerAttackRelease(info.note, "16n", Tone.now(), 0.95);
+    // DO NOT pass explicit time to avoid Tone "start time" assertions in rapid clicks
+    inst?.triggerAttackRelease(info.note, "16n", undefined, 0.95);
 
     return pick;
   }
@@ -319,20 +428,22 @@ export function createNebulaNoteHintController({
     f.add(params, "enabled").name("enabled");
     f.add(params, "labelMode", { "DoReMi": "solfege", "CDEFGAB": "letter" }).name("label mode");
     f.add(params, "clickToPlay").name("click to play");
-    f.add(params, "sticky").name("sticky");
 
-    const f1 = f.addFolder("Cursor Label");
+    const f1 = f.addFolder("Cursor");
     f1.add(params, "showCursorLabel").name("show");
     f1.add(params, "cursorScale", 0.6, 1.8, 0.01).name("scale");
     f1.add(params, "cursorHeight", 0.05, 0.7, 0.01).name("height");
-    f1.add(params, "cursorDrift", 0.0, 0.18, 0.001).name("drift");
 
-    const f2 = f.addFolder("Ring Labels");
-    f2.add(params, "showRingLabels").name("show");
-    f2.add(params, "ringScale", 0.6, 1.8, 0.01).name("scale");
-    f2.add(params, "ringRadiusMul", 0.55, 1.15, 0.01).name("radius");
-    f2.add(params, "ringHeight", 0.05, 0.8, 0.01).name("height");
-    f2.add(params, "ringDrift", 0.0, 0.22, 0.001).name("drift");
+    const f2 = f.addFolder("Bands");
+    f2.add(params, "showBands").name("show");
+    f2.add(params, "bandScale", 0.6, 1.8, 0.01).name("scale");
+    f2.add(params, "bandHeight", 0.05, 0.8, 0.01).name("height");
+    f2.add(params, "bandDrift", 0.0, 0.22, 0.001).name("drift");
+
+    const f3 = f.addFolder("Stability");
+    f3.add(params, "smoothTheta", 0.0, 0.5, 0.01).name("theta smooth");
+    f3.add(params, "hoverHoldMs", 0, 250, 1).name("hold ms");
+    f3.add(params, "hysteresisMargin", 0.05, 0.30, 0.01).name("margin");
   }
 
   if (gui) attachGUI(gui);
@@ -342,7 +453,7 @@ export function createNebulaNoteHintController({
     cursorLabel.material?.map?.dispose?.();
     cursorLabel.material?.dispose?.();
 
-    for (const s of ringLabels) {
+    for (const s of bandLabels) {
       scene.remove(s);
       s.material?.map?.dispose?.();
       s.material?.dispose?.();
@@ -352,6 +463,7 @@ export function createNebulaNoteHintController({
   return {
     params,
     setPointerClientXY,
+    setInteractionSample,
     update,
     handlePointerDown,
     attachGUI,

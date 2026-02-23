@@ -84,7 +84,7 @@ function pitch01ToNote(p01, root = "A3") {
 export function createGalaxyAudioEngine() {
   let started = false;
   const nebulaState = new Map();
-  let lastScratchTime = 0;
+  const lastScratchTimeById = new Map();
 
   let rhythmEnabled = false;   // kick/hat/bass
   let padEnabled = false;      // pad drone
@@ -432,14 +432,15 @@ export function createGalaxyAudioEngine() {
   }) {
     if (!instrument) return;
 
-    // Tone.js requires start times to be strictly increasing per instrument.
-    // When multiple notes trigger within the same frame, Tone.now() can be equal.
-    // So we enforce a tiny epsilon step.
-    let safeNow = Tone.now();
-    const EPS = 0.0008; // ~0.8ms
-    if (safeNow <= lastScratchTime) safeNow = lastScratchTime + EPS;
-    lastScratchTime = safeNow;
-    now = safeNow;
+    // Tone.js requires start times to be strictly increasing per *voice*.
+// If multiple triggers happen within the same frame, Tone.now() can repeat.
+// We enforce a tiny epsilon per galaxyId to guarantee monotonic start times.
+let safeNow = Tone.now();
+const EPS = 0.0012; // ~1.2ms
+const prev = lastScratchTimeById.get(galaxyId) ?? -Infinity;
+if (safeNow <= prev) safeNow = prev + EPS;
+lastScratchTimeById.set(galaxyId, safeNow);
+now = safeNow;
 
 
     // 0(中心)更高、1(外圈)更低：invert
@@ -474,8 +475,7 @@ export function createGalaxyAudioEngine() {
     // ---- step quantization ----
     // DJ-like sticky stepping (better feel, avoids edge jitter)
     const step = quantizeWithHysteresis(theta01, STEPS, st.lastStep, 0.18);
-
-    // ✅ 如果 step 没变：不重触发音，但要更新状态（否则 dt/dTheta 会乱）
+// ✅ 如果 step 没变：不重触发音，但要更新状态（否则 dt/dTheta 会乱）
     if (step === st.lastStep) {
       st.lastTheta = theta01;
       st.lastTime = now;
@@ -511,7 +511,7 @@ export function createGalaxyAudioEngine() {
     const dur = Math.max(0.08, 0.22 - speed * 0.06);  
 
     // Trigger immediately (omit explicit time) to avoid Tone scheduling monotonic-time errors in rapid interactions.
-    instrument.triggerAttackRelease(note, dur, undefined, velocity);
+    instrument.triggerAttackRelease(note, dur, now, velocity);
 
         // ---- expose for HUD / visuals ----
     out.lastNote = note;
@@ -548,6 +548,9 @@ export function createGalaxyAudioEngine() {
     r01 = 0.5,
     now = Tone.now(),
     sticky = true,
+    lastStep = null,        // optional: UI can pass its own sticky state
+    updateState = false,    // optional: whether to write back into nebulaState
+    margin = 0.18,          // hysteresis margin
   }) {
     // octaveOffset mapping must match playNebulaScratch
     let octaveOffset = 0;
@@ -565,12 +568,20 @@ export function createGalaxyAudioEngine() {
       { lastStep: -1, lastTheta: theta01, lastTime: now };
 
     let step;
-    if (sticky) step = quantizeWithHysteresis(theta01, STEPS, st.lastStep, 0.18);
-    else step = Math.floor(clamp01(theta01) * STEPS) % STEPS;
+    const effectiveLastStep = (lastStep != null && lastStep >= 0) ? lastStep : st.lastStep;
+    if (sticky) step = quantizeWithHysteresis(theta01, STEPS, effectiveLastStep, margin);
+else step = Math.floor(clamp01(theta01) * STEPS) % STEPS;
 
     const degreeSemi = MAJOR_SCALE[step];
     const midi = rootMidi + degreeSemi;
     const note = Tone.Frequency(midi, "midi").toNote();
+    if (updateState) {
+      st.lastStep = step;
+      st.lastTheta = theta01;
+      st.lastTime = now;
+      nebulaState.set(galaxyId, st);
+    }
+
 
     return {
       note,
@@ -599,4 +610,5 @@ export function createGalaxyAudioEngine() {
     previewNebulaNote,
     isStarted: () => started,
   };
+
 }

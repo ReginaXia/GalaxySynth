@@ -8,8 +8,8 @@ import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPa
 
 import { setupGalaxyGUI } from "./ui/galaxyGui.js";
 import { setupMeteorGUI } from "./ui/meteorGui.js";
-
 import { createNebulaNoteHintController } from "./ui/nebulaNoteHintController.js";
+
 // import { initAudioOnFirstGesture, triggerOnMove } from "./audio.js";
 import { playMeteorSfx } from "./audio/meteorSfx.js";
 
@@ -164,7 +164,9 @@ const hitPoint = new THREE.Vector3();
 
 // 鼠标 NDC（用于星空）
 const pointer = new THREE.Vector2(0, 0);
+let noteHint = null;
 window.addEventListener("pointermove", (e) => {
+  noteHint?.setPointerClientXY?.(e.clientX, e.clientY);
   pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
   pointer.y = -((e.clientY / window.innerHeight) * 2 - 1);
 });
@@ -198,8 +200,6 @@ window.addEventListener("pointerup",   () => (pointerDown = false));
 const perf = createPerformanceState();
 const controller = createMouseKeyboardController(window);
 const audio = createGalaxyAudioEngine();
-// NOTE: some newer modules (e.g. nebula note hint) expect `audioEngine`.
-// Keep a stable alias to avoid scope/name mismatches.
 const audioEngine = audio;
 const voices = createGalaxyVoices();
 const audioUI = createAudioMonitorUI();
@@ -510,22 +510,6 @@ console.log("vert len", meteorVert.length, "frag len", meteorFrag.length);
 
 setupMeteorGUI(meteorSystem);
 
-// -------------------------------------
-// Nebula note hint (hover label + optional click-to-play)
-// -------------------------------------
-const noteHint = createNebulaNoteHintController({
-  scene,
-  camera,
-  nebulaSystem,
-  audioEngine,
-  voices,
-  getMouseWorldOnPlane,
-  pickNebulaAtEvent,
-  // reuse the existing bottom GUI if available
-  gui: window.__gui ?? null,
-});
-
-
 
 
 function getPointerNDCFromEvent(e) {
@@ -584,7 +568,7 @@ canvas.addEventListener("pointerdown", (e) => {
 
   // ✅ 普通左键：做“即时 pick”（不依赖 hoveredNebulaKey）
   if (e.button === 0) {
-    const pick = noteHint?.handlePointerDown?.(e) ?? pickNebulaAtEvent(e);
+    const pick = pickNebulaAtEvent(e);
 
     if (pick?.galaxyId) {
       activeNebulaKey = pick.galaxyId;
@@ -614,10 +598,6 @@ canvas.addEventListener("pointermove", (e) => {
   const rect = canvas.getBoundingClientRect();
   pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
   pointer.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
-
-  // Feed pointer position to note hint even when not dragging,
-  // so hover labels can follow the cursor.
-  noteHint.setPointerClientXY(e.clientX, e.clientY);
 
   if (!isDragging) return;
 
@@ -676,6 +656,23 @@ function getMouseWorldOnPlane(clientX, clientY) {
   const ok = zoomRaycaster.ray.intersectPlane(zoomPlane, hit);
   return ok ? hit : null;
 }
+
+try {
+  noteHint = createNebulaNoteHintController({
+    scene,
+    camera,
+    nebulaSystem,
+    audioEngine,
+    voices,
+    getMouseWorldOnPlane,
+    pickNebulaAtEvent,
+    gui: window.__gui ?? null,
+  });
+} catch (err) {
+  console.warn("noteHint init failed:", err);
+  noteHint = null;
+}
+
 
 const MIN_DIST = 1.2;
 const MAX_DIST = 60.0;
@@ -839,7 +836,6 @@ function tick() {
 
   nebulaHit = nebulaHitLocal;
   const hasNebulaHit = !!nebulaHit;
-  if (noteHint?.update) noteHint.update(hoveredNebulaKey);
 
 
 
@@ -907,6 +903,8 @@ function tick() {
   const midiStr = (typeof aHud.lastMidi === "number") ? aHud.lastMidi : "-";
   const stepStr = s ? `${s.step + 1}/${s.steps}` : "-";
   const octStr  = s ? `${s.octaveOffset}` : "-";
+
+  noteHint?.update?.(hoveredNebulaKey);
 
   debugHud.textContent =
     `mode:   ${interactionMode}\n` +
@@ -1003,6 +1001,7 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
 
 
       const instrument = voices?.getNebulaInstrument?.(activeNebulaKey);
+      noteHint?.setInteractionSample?.(activeNebulaKey, theta01, r01);
       audio.playNebulaScratch({
         galaxyId: activeNebulaKey,
         theta01,
