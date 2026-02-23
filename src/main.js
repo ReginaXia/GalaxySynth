@@ -30,6 +30,8 @@ import starsFrag from "./shaders/stars.frag.glsl?raw";
 import meteorVert from "./shaders/meteor.vert.glsl?raw";
 import meteorFrag from "./shaders/meteor.frag.glsl?raw";
 
+import GUI from "lil-gui";
+
 console.log("MAIN JS LOADED");
 // --- Debug HUD (show active/hover)
 const debugHud = document.createElement("div");
@@ -90,10 +92,38 @@ const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerH
 camera.position.set(0, 6.5, 8.5);
 camera.lookAt(0, 0, 0);
 
-const bg = await createDreamyBackground(scene, camera, { palette: 'pearl' });
+const bg = await createDreamyBackground(scene, camera, { palette: "pearl" });
 window.__bg = bg;
-// If your existing UI exposes a gui instance on window.__gui, this will attach a small Background folder.
-if (window.__gui) setupBackgroundGUI(window.__gui, bg);
+
+// -------------------- GUI (single, global) --------------------
+const gui = new GUI({ title: "Controls" });
+window.__gui = gui;
+
+// 固定在页面最下方（居中）
+// 你也可以改成 right-bottom，我下面也给你
+gui.domElement.style.position = "fixed";
+gui.domElement.style.left = "50%";
+gui.domElement.style.bottom = "8px";
+gui.domElement.style.top = "auto";
+gui.domElement.style.right = "auto";
+gui.domElement.style.transform = "translateX(-50%)";
+gui.domElement.style.zIndex = "9999";
+gui.domElement.style.maxHeight = "36vh";
+gui.domElement.style.overflowY = "auto";
+
+// 让背景 GUI 出现
+setupBackgroundGUI(gui, bg);
+
+let guiVisible = true;
+window.addEventListener("keydown", (e) => {
+  if (e.key.toLowerCase() === "g") {
+    guiVisible = !guiVisible;
+    gui.domElement.style.display = guiVisible ? "" : "none";
+  }
+});
+
+
+
 scene.background = new THREE.Color(0x000000);
 
 
