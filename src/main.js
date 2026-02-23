@@ -26,6 +26,8 @@ import { createGalaxyVoices } from "./audio/galaxyVoices.js";
 
 import { createAudioMonitorUI } from "./ui/audioMonitor.js";
 
+import { createCameraControlSystem } from "./input/cameraControlSystem.js";
+
 import starsVert from "./shaders/stars.vert.glsl?raw";
 import starsFrag from "./shaders/stars.frag.glsl?raw";
 import meteorVert from "./shaders/meteor.vert.glsl?raw";
@@ -89,6 +91,11 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.05, 2000);
 camera.position.set(0, 6.5, 8.5);
 camera.lookAt(0, 0, 0);
+
+const cameraControl = createCameraControlSystem({
+  camera,
+  domElement: renderer.domElement,
+});
 
 const bg = await createDreamyBackground(scene, camera, { palette: 'pearl' });
 window.__bg = bg;
@@ -796,9 +803,9 @@ if (Tone.Transport.state !== "started") Tone.Transport.start();
 
 function tick() {
 
-
   // dt 用于输入平滑/音频平滑
   const dt = Math.min(0.05, clock.getDelta());
+  cameraControl?.update?.(dt);
   const t = clock.getElapsedTime();
 
   // --- raycast to plane
@@ -1002,6 +1009,18 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
 
       const instrument = voices?.getNebulaInstrument?.(activeNebulaKey);
       noteHint?.setInteractionSample?.(activeNebulaKey, theta01, r01);
+      // 给镜头一个演奏脉冲
+
+      // const distance = camera.position.distanceTo(cameraControl.getTarget?.() ?? new THREE.Vector3(0,0,0));
+      // const strength = distance * 0.002;     // ✅ 距离越远脉冲越大
+
+      cameraControl?.notePulse?.(1.2, hitPoint);
+
+      if (camera.isPerspectiveCamera) {
+        camera.fov = 45.0;          // 你原本的 fov 假设是 46/47 之类
+        camera.updateProjectionMatrix();
+      }
+
       audio.playNebulaScratch({
         galaxyId: activeNebulaKey,
         theta01,
