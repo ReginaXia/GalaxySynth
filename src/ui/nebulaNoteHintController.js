@@ -353,7 +353,7 @@ export function createNebulaNoteHintController({
     if (
       interactionSample &&
       interactionSample.id === hoveredNebulaId &&
-      (nowMs - interactionSample.timeMs) < 220
+      (nowMs - interactionSample.timeMs) < 1500
     ) {
       theta01 = interactionSample.theta01;
       r01 = interactionSample.r01;
@@ -377,7 +377,14 @@ export function createNebulaNoteHintController({
       hoverState.set(hoveredNebulaId, st);
     }
 
-    st.smoothTheta01 = smoothWrap01(st.smoothTheta01, theta01, params.smoothTheta);
+    const usingSample =
+  interactionSample &&
+  interactionSample.id === hoveredNebulaId &&
+  (nowMs - interactionSample.timeMs) < 1500;
+
+// When following audio truth, DO NOT smooth (avoids “cycle around the ring” chasing)
+st.smoothTheta01 = usingSample ? theta01 : smoothWrap01(st.smoothTheta01, theta01, params.smoothTheta);
+
     st.lastSeenMs = nowMs;
 
     const info = previewNote({ galaxyId: hoveredNebulaId, theta01: st.smoothTheta01, r01, state: st });

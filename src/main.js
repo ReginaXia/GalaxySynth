@@ -19,7 +19,7 @@ import { createMeteorSystem } from "./meteor/meteorSystem.js";
 import { createDreamyBackground, setupBackgroundGUI } from "./background/dreamyBackground";
 
 import { createPerformanceState } from "./performance/performanceState";
-import { createMouseKeyboardController } from "./input/mouseKeyboardController.js";
+import { createMouseKeyboardController } from "./input/mouseKeyboardController";
 import { createGalaxyAudioEngine } from "./audio/galaxyAudioEngine";
 
 import { createGalaxyVoices } from "./audio/galaxyVoices.js";
@@ -83,8 +83,6 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1;
 document.body.appendChild(renderer.domElement);
 
-const canvas = renderer.domElement;
-
 // -------------------------------------
 // Scene / Camera
 // -------------------------------------
@@ -97,16 +95,8 @@ camera.lookAt(0, 0, 0);
 const cameraControl = createCameraControlSystem({
   camera,
   domElement: renderer.domElement,
-
-  // ✅ pivot：用你已有的平面求交（鼠标下的世界点）
-  getPivotWorldPoint: getMouseWorldOnPlane,
-
-  // 手感参数（后面你想再细调我们继续）
-  orbitSpeed: 0.005,
-  panSpeed: 1.0,
-  zoomSpeed: 0.0018,
-  minDistance: 1.2,
-  maxDistance: 60.0,
+  getPivotWorldPoint: getMouseWorldOnPlane, // ✅ 关键：用你已有的平面求交当 pivot
+  zoomSpeed: 0.0018, // 可以从 0.0012~0.0022 调
 });
 
 const bg = await createDreamyBackground(scene, camera, { palette: 'pearl' });
@@ -116,6 +106,24 @@ if (window.__gui) setupBackgroundGUI(window.__gui, bg);
 scene.background = new THREE.Color(0x000000);
 
 
+
+
+// ------------------ Orbit Camera (Alt+Drag) ------------------
+const orbitTarget = new THREE.Vector3(0, 0, 0);
+let orbitRadius = camera.position.distanceTo(orbitTarget);
+let orbitYaw = Math.atan2(camera.position.x - orbitTarget.x, camera.position.z - orbitTarget.z);
+let orbitPitch = Math.asin((camera.position.y - orbitTarget.y) / orbitRadius);
+
+function applyOrbitCamera() {
+  orbitPitch = THREE.MathUtils.clamp(orbitPitch, -1.25, 1.25);
+  const cp = Math.cos(orbitPitch);
+  camera.position.set(
+    orbitTarget.x + orbitRadius * Math.sin(orbitYaw) * cp,
+    orbitTarget.y + orbitRadius * Math.sin(orbitPitch),
+    orbitTarget.z + orbitRadius * Math.cos(orbitYaw) * cp
+  );
+  camera.lookAt(orbitTarget);
+}
 
 
 // -------------------------------------
@@ -164,22 +172,13 @@ const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.0);
 const hitPoint = new THREE.Vector3();
 
 // 鼠标 NDC（用于星空）
-// 鼠标 NDC（用于星空 / 星云 / 音符）
 const pointer = new THREE.Vector2(0, 0);
-
-function setPointerFromClientXY(clientX, clientY) {
-  const rect = canvas.getBoundingClientRect();
-  pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
-  pointer.y = -(((clientY - rect.top) / rect.height) * 2 - 1);
-}
-
-canvas.addEventListener("pointermove", (e) => {
-  noteHint?.setPointerClientXY?.(e.clientX, e.clientY);
-  setPointerFromClientXY(e.clientX, e.clientY);
-});
-
-
 let noteHint = null;
+window.addEventListener("pointermove", (e) => {
+  noteHint?.setPointerClientXY?.(e.clientX, e.clientY);
+  pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
+  pointer.y = -((e.clientY / window.innerHeight) * 2 - 1);
+});
 
 
 // -------------------------------------
@@ -187,9 +186,9 @@ let noteHint = null;
 // -------------------------------------
 
 let pointerDown = false;
-let __prevPointerDown = false;
-canvas.addEventListener("pointerdown", () => (pointerDown = true));
-window.addEventListener("pointerup", () => (pointerDown = false)); // up 用 window 防止松开丢事件
+window.addEventListener("pointerdown", () => (pointerDown = true));
+window.addEventListener("pointerup",   () => (pointerDown = false));
+
 
 
 // -------------------------------------
@@ -208,7 +207,7 @@ window.addEventListener("pointerup", () => (pointerDown = false)); // up 用 win
 // -------------------------------------
 
 const perf = createPerformanceState();
-const controller = createMouseKeyboardController(canvas);
+const controller = createMouseKeyboardController(window);
 const audio = createGalaxyAudioEngine();
 const audioEngine = audio;
 const voices = createGalaxyVoices();
@@ -300,16 +299,13 @@ window.addEventListener("keydown", (e) => {
 
   if (e.key === "Escape") {
     interactionMode = "orbit";
-    activeNebulaKey = null;
-    cacheActiveDiskFromNebula(activeNebulaKey); // ✅ ESC 退出当前星云控制
-    cacheActiveDiskFromNebula(activeNebulaKey);
+    activeNebulaKey = null; // ✅ ESC 退出当前星云控制
   }
 });
 
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     activeNebulaKey = null;
-    cacheActiveDiskFromNebula(activeNebulaKey);
   }
 });
 
@@ -413,42 +409,6 @@ if (tempoRing) {
 // ✅ 解决“听不到”的核心：用户交互解锁
 audio.bindUserStart(window);
 
-// ------------------ Audio unlock (robust) ------------------
-let __audioReady = false;
-async function ensureAudioRunning() {
-  if (__audioReady && Tone.context.state === "running") return true;
-  try {
-    await Tone.start();
-    await Tone.context.resume?.();
-    if (Tone.Transport.state !== "started") Tone.Transport.start();
-    __audioReady = (Tone.context.state === "running");
-    return __audioReady;
-  } catch (e) {
-    console.warn("[Audio] ensureAudioRunning failed:", e);
-    return false;
-  }
-}
-
-// 只要用户第一次点击画布，就解锁音频；并且在解锁完成后再触发任何确认音
-canvas.addEventListener("pointerdown", async () => {
-  const ok = await ensureAudioRunning();
-  console.log("[Audio] Tone started:", Tone.context.state);
-
-  // 放在你确认 Tone 已 running 的地方
-  const inst = voices?.getNebulaInstrument?.(activeNebulaKey || "test_key");
-  console.log("[Test] inst:", inst);
-  try {
-    inst?.triggerAttackRelease("C5", "8n", Tone.now(), 0.9);
-    console.log("[Test] fired C5");
-  } catch (e) {
-    console.warn("[Test] trigger failed", e);
-  }
-
-  
-  if (!ok) return;
-}, { capture: true });
-
-
 const bgMood = {
   hue: 0.85,
   hueTarget: 0.85,
@@ -495,10 +455,6 @@ const nebulaSystem = createNebulaSystem({
 });
 
 setupGalaxyGUI({ camera, renderer, nebulaSystem });
-
-// ✅ 初始化：给默认 activeNebulaKey 计算演奏盘中心（否则永远不会进 playNebulaScratch）
-cacheActiveDiskFromNebula(activeNebulaKey);
-
 
 function cacheActiveDiskFromNebula(galaxyId) {
   if (!galaxyId) {
@@ -585,10 +541,7 @@ function pickNebulaAtEvent(e) {
   const p = pick.point.clone().project(camera);
   const dx = p.x - ndc.x;
   const dy = p.y - ndc.y;
-  // 视距越远 → 阈值稍微放宽一点；越近 → 阈值收紧
-  const camDist = camera.position.distanceTo((cameraControl?.getTarget?.() ?? new THREE.Vector3(0,0,0)));
-  const NDC_THRESH = THREE.MathUtils.clamp(0.06 + camDist * 0.002, 0.06, 0.16);
-  
+  const NDC_THRESH = 0.12;
   const ok = (dx*dx + dy*dy) < (NDC_THRESH * NDC_THRESH);
 
   if (!ok) return null;
@@ -602,6 +555,84 @@ function pickNebulaAtEvent(e) {
 
 
 // -------------------------------------
+// Drag rotate nebula world
+// -------------------------------------
+const canvas = renderer.domElement;
+
+let isDragging = false;
+let lastX = 0;
+let lastY = 0;
+
+canvas.addEventListener("pointerdown", (e) => {
+  if (e.target.closest?.(".lil-gui") || e.target.closest?.(".dg")) return;
+
+  // ✅ Alt + 左键：永远是旋转（不管当前选没选星云）
+  if (e.altKey && e.button === 0) {
+    isDragging = true;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    canvas.setPointerCapture(e.pointerId);
+    return;
+  }
+
+  // ✅ 普通左键：做“即时 pick”（不依赖 hoveredNebulaKey）
+  if (e.button === 0) {
+    const pick = pickNebulaAtEvent(e);
+
+    if (pick?.galaxyId) {
+      activeNebulaKey = pick.galaxyId;
+
+      cacheActiveDiskFromNebula(activeNebulaKey);
+
+
+      // 可选：确认音（你之前已经做过）
+      // const inst = voices.getNebulaInstrument(activeNebulaKey);
+      // inst?.triggerAttackRelease("C5", "16n", Tone.now(), 0.9);
+
+      // 进入演奏：不旋转
+      return;
+    } else {
+      // 点空白：取消选中
+      activeNebulaKey = null;
+      activeDiskCenterW = null;
+      // 点空白本身不旋转；想旋转请按 Alt（手感更一致）
+      return;
+    }
+  }
+});
+
+
+
+canvas.addEventListener("pointermove", (e) => {
+  const rect = canvas.getBoundingClientRect();
+  pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+
+  if (!isDragging) return;
+
+  const dx = e.clientX - lastX;
+  const dy = e.clientY - lastY;
+  lastX = e.clientX;
+  lastY = e.clientY;
+
+  // nebulaSystem.root.rotation.y += dx * 0.005;
+  // nebulaSystem.root.rotation.x += dy * 0.005;
+  // nebulaSystem.root.rotation.x = THREE.MathUtils.clamp(nebulaSystem.root.rotation.x, -1.25, 1.25);
+
+  orbitYaw   += dx * 0.005;
+  orbitPitch += dy * 0.005;
+  applyOrbitCamera();
+
+
+});
+
+
+canvas.addEventListener("pointerup", (e) => {
+  isDragging = false;
+  try { canvas.releasePointerCapture(e.pointerId); } catch {}
+});
+
+
 function hsvToRgb(h, s, v) {
   h = ((h % 1) + 1) % 1;
   const i = Math.floor(h * 6);
@@ -650,6 +681,47 @@ try {
   console.warn("noteHint init failed:", err);
   noteHint = null;
 }
+
+
+const MIN_DIST = 1.2;
+const MAX_DIST = 60.0;
+
+canvas.addEventListener(
+  "wheel",
+  (e) => {
+    e.preventDefault();
+
+    const pivot = getMouseWorldOnPlane(e.clientX, e.clientY);
+    if (!pivot) return;
+
+    // 缩放系数：滚轮向下(zoom out) >1；向上(zoom in) <1
+    const zoomStep = 1.12;
+    const factor = e.deltaY > 0 ? zoomStep : 1 / zoomStep;
+
+    // 1) 沿着 pivot 缩放：相机向 pivot 前进/后退（不会旋转）
+    const before = camera.position.clone();
+    camera.position.copy(pivot).add(before.sub(pivot).multiplyScalar(factor));
+
+    // 2) 限制最近/最远距离（相机到 pivot）
+    const dist = camera.position.distanceTo(pivot);
+    if (dist < MIN_DIST) {
+      camera.position.copy(pivot).add(camera.position.clone().sub(pivot).setLength(MIN_DIST));
+    } else if (dist > MAX_DIST) {
+      camera.position.copy(pivot).add(camera.position.clone().sub(pivot).setLength(MAX_DIST));
+    }
+
+    // 3) 校正：保持“鼠标点下的世界位置”锁定不漂（非常关键）
+    const afterPivot = getMouseWorldOnPlane(e.clientX, e.clientY);
+    if (afterPivot) {
+      const correction = pivot.clone().sub(afterPivot);
+      camera.position.add(correction);
+    }
+
+    // 相机朝向保持稳定（不跟鼠标跑，只看中心）
+    camera.lookAt(0, 0, 0);
+  },
+  { passive: false }
+);
 
 
 // -------------------------------------
@@ -738,9 +810,6 @@ function tick() {
   cameraControl?.update?.(dt);
   const t = clock.getElapsedTime();
 
-  // ✅ pointerDown 上升沿：用于“按下就锁定当前 hover 星云”（Mode C）
-  const downEdge = pointerDown && !__prevPointerDown;
-
   // --- raycast to plane
   raycaster.setFromCamera(pointer, camera);
   raycaster.ray.intersectPlane(plane, hitPoint);
@@ -776,24 +845,6 @@ function tick() {
 
   nebulaHit = nebulaHitLocal;
   const hasNebulaHit = !!nebulaHit;
-
-// ------------------ Mode C: downEdge lock hovered nebula ------------------
-// ✅ 按下那一刻：如果 hover 到星云，立刻把它设为 active，并同步演奏盘中心/半径
-// 这样“盘=连续演奏”不会因为 activeDiskCenterW 没更新而永远进不了 inDisk。
-if (downEdge && hoveredNebulaKey) {
-  const prev = activeNebulaKey;
-  activeNebulaKey = hoveredNebulaKey;
-  interactionMode = "play";
-  cacheActiveDiskFromNebula(activeNebulaKey);
-  updateActiveDiskNdcRadii();
-
-  // 可选确认音：只在真的切换时给一下
-  if (prev !== activeNebulaKey) {
-    const inst = voices?.getNebulaInstrument?.(activeNebulaKey);
-    if (Tone.context.state === "running") inst?.triggerAttackRelease("C5", "16n", Tone.now(), 0.9);
-  }
-}
-
 
 
 
@@ -887,20 +938,18 @@ if (downEdge && hoveredNebulaKey) {
   if (trig && hoveredNebulaKey) {
     const prev = activeNebulaKey;
 
-    if (hoveredNebulaKey) {
-      activeNebulaKey = hoveredNebulaKey;
-      interactionMode = "play";   // ✅ 选中星云 → 锁定演奏模式
-      cacheActiveDiskFromNebula(activeNebulaKey);
-      updateActiveDiskNdcRadii();
-    } else {
-      interactionMode = "orbit";  // ✅ 点空白 → 解锁旋转
-    }
+    // if (hoveredNebulaKey) {
+    //   activeNebulaKey = hoveredNebulaKey;
+    //   interactionMode = "play";   // ✅ 选中星云 → 锁定演奏模式
+    // } else {
+    //   interactionMode = "orbit";  // ✅ 点空白 → 解锁旋转
+    // }
 
     // 立刻给一个“音色确认音”：点击就能听到变化
     if (prev !== activeNebulaKey) {
       const inst = voices.getNebulaInstrument(activeNebulaKey);
       // 选一个固定音高，避免你以为“音高变了=音色变了”
-      if (Tone.context.state === "running") { inst?.triggerAttackRelease("C5", "16n", Tone.now(), 0.9); }
+      inst?.triggerAttackRelease("C5", "16n", Tone.now(), 0.9);
     }
   }
 
@@ -973,17 +1022,6 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
         camera.fov = 45.0;          // 你原本的 fov 假设是 46/47 之类
         camera.updateProjectionMatrix();
       }
-
-      console.log("[NebulaPlay]",
-        "down", pointerDown,
-        "active", activeNebulaKey,
-        "hasCenter", !!activeDiskCenterW,
-        "inDisk?", inDisk,
-        "theta01", theta01?.toFixed?.(3),
-        "r01", r01?.toFixed?.(3),
-        "inst?", !!instrument,
-        "Tone", Tone.context.state
-      );
 
       audio.playNebulaScratch({
         galaxyId: activeNebulaKey,
@@ -1090,10 +1128,6 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
 
   // --- 左侧音频监控 UI
   // audioUI.update(a, perf.state);
-
-
-  __prevPointerDown = pointerDown;
-
 
 
   requestAnimationFrame(tick);
