@@ -36,10 +36,9 @@ export function createBackgroundController(bg, { steps = 12 } = {}) {
 
   // 控制遮罩层的透明度
   function updateOverlay() {
-    const targetOpacity = isInteracting ? 0.0 : 100;  // 没有交互时，遮挡层不透明
+    const targetOpacity = isInteracting ? 0.0 : 0.8;  // 没有交互时，遮挡层不透明
     overlay.material.opacity = THREE.MathUtils.damp(overlay.material.opacity, targetOpacity, 5.0, 0.016);
   }
-
   setMainColor(mainColor);
 
   function update({ t, dt, lead, mouse01, camera } = {}) {

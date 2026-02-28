@@ -76,12 +76,18 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
   function setMainColor(colorLike) {
     if (!colorLike) return;
     try {
-      mainColor.set(colorLike);  // 设置背景颜色
+      mainColor.set(colorLike);
       const u = bg?.getUniforms ? bg.getUniforms() : bg?.material?.uniforms;
       if (u?.uTint) u.uTint.value.set(mainColor.r, mainColor.g, mainColor.b);
       if (u?.uMainColor) u.uMainColor.value.set(mainColor);
+
+      // 让渐变颜色更加平滑，避免过于明显的分界线
+      if (u?.uPal0) u.uPal0.value.set(mainColor.r * 0.8, mainColor.g * 0.8, mainColor.b * 0.8);
+      if (u?.uPal1) u.uPal1.value.set(mainColor.r * 0.6, mainColor.g * 0.6, mainColor.b * 0.6);
+      if (u?.uPal2) u.uPal2.value.set(mainColor.r * 1.2, mainColor.g * 1.2, mainColor.b * 1.2);
+      if (u?.uPal3) u.uPal3.value.set(mainColor.r * 1.4, mainColor.g * 1.4, mainColor.b * 1.4);
     } catch (e) {
-      // 如果传入的颜色无效则忽略
+      console.warn("setMainColor failed:", e);
     }
   }
 

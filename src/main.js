@@ -241,26 +241,24 @@ let lastInteractionTime = 0;
     }
   });
 
-  // 背景渐渐亮起
   function fadeInBackground() {
-    const startTime = Date.now();
-    const duration = 500;  // 渐变时间 0.5秒
+  const startTime = Date.now();
+  const duration = 500;  // 渐变时间 0.5秒
 
-    function update() {
-      const elapsedTime = Date.now() - startTime;
-      const progress = Math.min(elapsedTime / duration, 1);  // 计算渐变的进度
-      bg.uniforms.uFlow.value = Math.min(bg.uniforms.uFlow.value + progress * 0.5, 1.0);
-      bg.uniforms.uSparkle.value = Math.min(bg.uniforms.uSparkle.value + progress * 0.15, 0.15);
-      bg.uniforms.uIntensity.value = Math.min(bg.uniforms.uIntensity.value + progress * 1.0, 1.0);
+  function update() {
+    const elapsedTime = Date.now() - startTime;
+    const progress = Math.min(elapsedTime / duration, 1);  // 计算渐变的进度
+    bg.uniforms.uFlow.value = THREE.MathUtils.damp(bg.uniforms.uFlow.value, 1.0, 5.0, elapsedTime / duration);
+    bg.uniforms.uSparkle.value = THREE.MathUtils.damp(bg.uniforms.uSparkle.value, 0.15, 5.0, elapsedTime / duration);
+    bg.uniforms.uIntensity.value = THREE.MathUtils.damp(bg.uniforms.uIntensity.value, 1.0, 5.0, elapsedTime / duration);
 
-      if (elapsedTime < duration) {
-        requestAnimationFrame(update);
-      }
+    if (elapsedTime < duration) {
+      requestAnimationFrame(update);
     }
-    update();
   }
+  update();
+}
 
-  // 背景渐渐变暗
   function fadeOutBackground() {
     const startTime = Date.now();
     const duration = 500;  // 渐变时间 0.5秒
@@ -268,9 +266,9 @@ let lastInteractionTime = 0;
     function update() {
       const elapsedTime = Date.now() - startTime;
       const progress = Math.min(elapsedTime / duration, 1);  // 计算渐变的进度
-      bg.uniforms.uFlow.value = Math.max(bg.uniforms.uFlow.value - progress * 0.5, 0.0);
-      bg.uniforms.uSparkle.value = Math.max(bg.uniforms.uSparkle.value - progress * 0.15, 0.0);
-      bg.uniforms.uIntensity.value = Math.max(bg.uniforms.uIntensity.value - progress * 1.0, 0.0);
+      bg.uniforms.uFlow.value = THREE.MathUtils.damp(bg.uniforms.uFlow.value, 0.0, 5.0, elapsedTime / duration);
+      bg.uniforms.uSparkle.value = THREE.MathUtils.damp(bg.uniforms.uSparkle.value, 0.0, 5.0, elapsedTime / duration);
+      bg.uniforms.uIntensity.value = THREE.MathUtils.damp(bg.uniforms.uIntensity.value, 0.0, 5.0, elapsedTime / duration);
 
       if (elapsedTime < duration) {
         requestAnimationFrame(update);
