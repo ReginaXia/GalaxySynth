@@ -1,5 +1,6 @@
 import * as Tone from "tone";
 
+// 基础 PolySynth：主要用于背景音
 const pad = new Tone.PolySynth(Tone.Synth, {
   oscillator: {
     type: "sine" // 非常重要：先别用 saw
@@ -12,6 +13,7 @@ const pad = new Tone.PolySynth(Tone.Synth, {
   }
 });
 
+// 添加多种效果器
 const filter = new Tone.Filter({
   type: "lowpass",
   frequency: 1200,
@@ -29,9 +31,26 @@ const delay = new Tone.FeedbackDelay({
   wet: 0.25
 });
 
+const chorus = new Tone.Chorus({
+  frequency: 0.6,
+  delayTime: 3.5,
+  depth: 0.5,
+  wet: 0.25,
+}).start();
+
+// 链接效果器
 pad.chain(filter, chorus, delay, reverb, Tone.Destination);
 
+// 增加一个 LFO 动态变化音高
+const lfo = new Tone.LFO({
+  frequency: 0.03,   // 非常慢
+  min: 400,
+  max: 1600
+}).connect(filter.frequency);
 
+lfo.start();
+
+// 基本和弦
 const chords = [
   ["C4", "E4", "G4", "B4", "D5"],      // Cmaj9
   ["A3", "C4", "E4", "G4", "B4"],      // Am9
@@ -39,6 +58,7 @@ const chords = [
   ["G3", "B3", "D4", "F4", "A4"],      // G9
 ];
 
+// 设置 PolySynth 音色
 pad.set({
   envelope: { attack: 5.0, decay: 2.0, sustain: 0.75, release: 8.0 }
 });
@@ -47,16 +67,14 @@ pad.set({
   oscillator: { type: "triangle" } // 比 sine 更有质感但不刺
 });
 
+// 背景音符触发
+let chordIndex = 0;
+Tone.Transport.scheduleRepeat((time) => {
+  pad.triggerAttackRelease(chords[chordIndex], "6n", time);
+  chordIndex = (chordIndex + 1) % chords.length;
+}, "2n");
 
-const chorus = new Tone.Chorus({
-  frequency: 0.6,
-  delayTime: 3.5,
-  depth: 0.5,
-  wet: 0.25,
-}).start();
-
-
-
+// 为 bell 合成器设置参数和效果器
 const bell = new Tone.FMSynth({
   harmonicity: 2,
   modulationIndex: 8,
@@ -72,6 +90,7 @@ const bellDelay = new Tone.FeedbackDelay({ delayTime: "8n.", feedback: 0.45, wet
 bell.chain(bellDelay, bellVerb, Tone.Destination);
 bell.volume.value = -18; // 很轻，像远处星光
 
+// C 大调的音阶
 const scale = ["C5","D5","E5","G5","A5","B5"]; // C 大调偏仙
 
 Tone.Transport.scheduleRepeat((time) => {
@@ -80,7 +99,7 @@ Tone.Transport.scheduleRepeat((time) => {
   bell.triggerAttackRelease(note, "16n", time, 0.6);
 }, "8n");
 
-
+// 增加 limiter 和饱和效果
 const limiter = new Tone.Limiter(-1).toDestination();
 const saturator = new Tone.Distortion(0.08); // 很轻
 saturator.wet.value = 0.12;
@@ -89,6 +108,7 @@ reverb.disconnect();
 reverb.connect(saturator);
 saturator.connect(limiter);
 
+// 频率动态变化
 Tone.Transport.scheduleRepeat((time) => {
   const base = 800;
   const lift = 700 * (0.5 + Math.random() * 0.5);
@@ -96,22 +116,5 @@ Tone.Transport.scheduleRepeat((time) => {
   filter.frequency.exponentialRampToValueAtTime(base, time + Tone.Time("2n").toSeconds());
 }, "2n");
 
-
-
-
-let chordIndex = 0;
-
-Tone.Transport.scheduleRepeat((time) => {
-  pad.triggerAttackRelease(chords[chordIndex], "6n", time);
-  chordIndex = (chordIndex + 1) % chords.length;
-}, "2n");
-
+// 开始音频
 Tone.Transport.start();
-
-const lfo = new Tone.LFO({
-  frequency: 0.03,   // 非常慢
-  min: 400,
-  max: 1600
-}).connect(filter.frequency);
-
-lfo.start();
