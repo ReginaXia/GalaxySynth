@@ -54,6 +54,9 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
     uNotePos:  { value: new THREE.Vector2(0.5, 0.5) },
   };
 
+  uniforms.uFlow.value = 0.0;
+  uniforms.uSparkle.value = 0.0;
+
   const mat = new THREE.ShaderMaterial({
     vertexShader: bgVert,
     fragmentShader: bgFrag,

@@ -116,6 +116,15 @@ const cameraControl = createCameraControlSystem({
 
 const bg = await createDreamyBackground(scene, camera, { palette: 'pearl' });
 
+// 初始时禁用流动效果和亮度
+  bg.uniforms.uFlow.value = 0;
+  bg.uniforms.uSparkle.value = 0;
+  bg.uniforms.uIntensity.value = 0; 
+
+  let isInteracting = false;
+
+  
+
 // ✅ 防止背景盖住所有物体：背景不参与深度，并强制最底层渲染
 try {
   const root = bg?.root || bg?.group || bg?.mesh || bg;
@@ -192,6 +201,84 @@ let nebulaHit = null; // 存当前命中的物体（可用于后续“active neb
 let frameCount = 0;
 
 let activeNebulaKey = "C_pluck";
+
+let lastInteractionTime = 0; 
+
+
+// 鼠标点击事件
+  window.addEventListener("click", (e) => {
+    // 将鼠标位置转为NDC坐标
+    pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
+    pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+    // 通过射线检测当前鼠标是否在星云上
+    raycaster.setFromCamera(pointer, camera);
+    const intersects = raycaster.intersectObject(nebulaSystem.root, true); // 检测星云
+
+    if (intersects.length > 0) {
+      // 鼠标点击到星云
+      if (!isInteracting) {
+        isInteracting = true;
+        lastInteractionTime = Date.now();
+        // 激活背景流动效果和亮度，渐渐亮起
+        fadeInBackground();
+      }
+    } else {
+      // 鼠标点击没有点击到星云
+      if (isInteracting) {
+        isInteracting = false;
+        // 恢复黑色背景并禁用流动效果，渐渐变暗
+        fadeOutBackground();
+      }
+    }
+  });
+
+  // 鼠标移动事件
+  window.addEventListener("mousemove", () => {
+    if (isInteracting && Date.now() - lastInteractionTime > 500) {
+      // 如果鼠标没有再交互且超过 0.5 秒，背景渐渐变暗
+      fadeOutBackground();
+    }
+  });
+
+  // 背景渐渐亮起
+  function fadeInBackground() {
+    const startTime = Date.now();
+    const duration = 500;  // 渐变时间 0.5秒
+
+    function update() {
+      const elapsedTime = Date.now() - startTime;
+      const progress = Math.min(elapsedTime / duration, 1);  // 计算渐变的进度
+      bg.uniforms.uFlow.value = Math.min(bg.uniforms.uFlow.value + progress * 0.5, 1.0);
+      bg.uniforms.uSparkle.value = Math.min(bg.uniforms.uSparkle.value + progress * 0.15, 0.15);
+      bg.uniforms.uIntensity.value = Math.min(bg.uniforms.uIntensity.value + progress * 1.0, 1.0);
+
+      if (elapsedTime < duration) {
+        requestAnimationFrame(update);
+      }
+    }
+    update();
+  }
+
+  // 背景渐渐变暗
+  function fadeOutBackground() {
+    const startTime = Date.now();
+    const duration = 500;  // 渐变时间 0.5秒
+
+    function update() {
+      const elapsedTime = Date.now() - startTime;
+      const progress = Math.min(elapsedTime / duration, 1);  // 计算渐变的进度
+      bg.uniforms.uFlow.value = Math.max(bg.uniforms.uFlow.value - progress * 0.5, 0.0);
+      bg.uniforms.uSparkle.value = Math.max(bg.uniforms.uSparkle.value - progress * 0.15, 0.0);
+      bg.uniforms.uIntensity.value = Math.max(bg.uniforms.uIntensity.value - progress * 1.0, 0.0);
+
+      if (elapsedTime < duration) {
+        requestAnimationFrame(update);
+      }
+    }
+    update();
+  }
+
 
 // -------------------------------------
 // Active nebula scratch disk (fixed center + tolerance radius)
@@ -944,6 +1031,15 @@ startStepSequencer();
 
 if (Tone.Transport.state !== "started") Tone.Transport.start();
 
+// 更新背景效果函数
+function updateBackgroundEffects(dt) {
+  // 如果用户有交互，逐渐增加流动和亮度效果
+  if (isInteracting) {
+    bg.uniforms.uFlow.value = THREE.MathUtils.damp(bg.uniforms.uFlow.value, 1.0, 5.0, dt);
+    bg.uniforms.uSparkle.value = THREE.MathUtils.damp(bg.uniforms.uSparkle.value, 0.15, 5.0, dt);
+    bg.uniforms.uIntensity.value = THREE.MathUtils.damp(bg.uniforms.uIntensity.value, 1.0, 5.0, dt);
+  }
+}
 
 function tick() {
 
@@ -951,6 +1047,10 @@ function tick() {
   const dt = Math.min(0.05, clock.getDelta());
   cameraControl?.update?.(dt);
   const t = clock.getElapsedTime();
+
+  // 更新背景效果
+  updateBackgroundEffects(dt);
+
 // --- dynamic resolution scaling (keeps FPS stable)
 __fpsEMA = __fpsEMA * 0.9 + (1 / Math.max(1e-4, dt)) * 0.1;
 if ((performance.now() - __lastPixelRatioApplyMs) > 400) {
