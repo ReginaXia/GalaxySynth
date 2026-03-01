@@ -206,7 +206,7 @@ bloomPass.threshold = 0.7;
 const DitherShader = {
   uniforms: {
     tDiffuse: { value: null },
-    amount: { value: 0.009 }, // 0.004~0.012 (higher = less banding, more grain)
+    amount: { value: 0.007 }, // 0.004~0.012 (higher = less banding, more grain)
   },
   vertexShader: /* glsl */`
     varying vec2 vUv;
@@ -329,6 +329,12 @@ window.addEventListener("pointermove", (e) => {
 
 let pointerDown = false;
 
+// --- Background 3-stage envelope (Attack/Sustain/Release) ---
+let bgSustain = 0; // 0..1
+let bgAttack  = 0; // 0..1
+let bgRelease = 0; // 0..1
+let __inDiskThisFrame = false;
+
 // ✅ 浏览器需要用户手势才能启动音频：首次 pointerdown 自动 resume Tone AudioContext
 window.addEventListener("pointerdown", async () => {
   try { await Tone.start(); } catch {}
@@ -358,8 +364,17 @@ function __markPointerMoved(clientX, clientY) {
   }
 }
 
-window.addEventListener("pointerdown", () => (pointerDown = true));
-window.addEventListener("pointerup",   () => (pointerDown = false));
+window.addEventListener("pointerdown", () => {
+  pointerDown = true;
+  // instant visual hit
+  bgAttack = Math.min(1.0, bgAttack + 1.0);
+  bgRelease = 1.0;
+});
+window.addEventListener("pointerup",   () => {
+  pointerDown = false;
+  // let it ring out
+  bgRelease = Math.max(bgRelease, 0.8);
+});
 
 
 
@@ -581,9 +596,6 @@ if (tempoRing) {
 
 // ✅ 解决“听不到”的核心：用户交互解锁
 audio.bindUserStart(window);
-
-// ✅ One-step: raise master output a bit (feel free to tweak -12..0)
-Tone.Destination.volume.value = -6;
 
 const bgMood = {
   hue: 0.85,
@@ -1052,13 +1064,47 @@ startStepSequencer();
 
 if (Tone.Transport.state !== "started") Tone.Transport.start();
 
+// Slight louder master (can tweak: -6, -3, 0)
+try { Tone.Destination.volume.value = -6; } catch {}
+
 // 更新背景效果函数（只在 tick 里做平滑，避免事件回调里开 RAF）
 // 注意：这组“交互态”是给你做整体气氛（暗->亮）用的；
 // 具体 note / scratch 的颜色注入仍然由后面的 bg.setAudio 驱动。
-// ✅ One-step: unify background brightness/flow/sparkle into ONE "activity" signal.
-// - avoids "audio is on but background becomes darker" (two systems fighting)
-// - makes background react immediately on pointerDown/inDisk, not waiting for audio scratch state
-let bgActivity = 0.0; // 0..1
+function updateBackgroundEffects(dt) {
+  // playingNow: in scratch disk + pointer held
+  const playingNow = (__inDiskThisFrame && pointerDown);
+
+  // Sustain follows hand
+  const sustainTarget = playingNow ? 1.0 : 0.0;
+  bgSustain = THREE.MathUtils.damp(bgSustain, sustainTarget, 12.0, dt);
+
+  // Attack: fast decay (click / initial press)
+  bgAttack = THREE.MathUtils.damp(bgAttack, 0.0, 20.0, dt);
+
+  // Release: slow decay tail
+  bgRelease = THREE.MathUtils.damp(bgRelease, 0.0, 3.0, dt);
+
+  // Combine into an activity signal
+  const activity = THREE.MathUtils.clamp(
+    0.15 + 0.85 * bgSustain + 0.75 * bgAttack + 0.35 * bgRelease,
+    0.0, 1.0
+  );
+
+  // Keep a non-zero idle base, then boost quickly on activity
+  const intensityTarget = 0.10 + 1.10 * activity;
+  const flowTarget      = 0.00 + 1.15 * activity;
+  const sparkleTarget   = 0.02 + 0.22 * activity;
+
+  bg.uniforms.uIntensity.value = THREE.MathUtils.damp(bg.uniforms.uIntensity.value, intensityTarget, 10.0, dt);
+  bg.uniforms.uFlow.value      = THREE.MathUtils.damp(bg.uniforms.uFlow.value,      flowTarget,      10.0, dt);
+  bg.uniforms.uSparkle.value   = THREE.MathUtils.damp(bg.uniforms.uSparkle.value,   sparkleTarget,   10.0, dt);
+
+  // Optional: if bg shader has uPulse, punch it with attack for instant feedback
+  if (bg.uniforms.uPulse) {
+    bg.uniforms.uPulse.value = Math.max(bg.uniforms.uPulse.value * 0.90, bgAttack);
+  }
+}
+
 
 function tick() {
 
@@ -1067,11 +1113,7 @@ function tick() {
   cameraControl?.update?.(dt);
   const t = clock.getElapsedTime();
 
-  // One-step: avoid TDZ (this is read by the background drive earlier than the scratch block).
-  // Values will be updated later once we compute the active disk hit.
-  let isActiveNebulaHovered = false;
-  let inDisk = false;
-
+  // 更新背景效果（移到计算 inDisk 之后，保证即时跟手）
 
 // --- dynamic resolution scaling (keeps FPS stable)
 __fpsEMA = __fpsEMA * 0.9 + (1 / Math.max(1e-4, dt)) * 0.1;
@@ -1156,24 +1198,6 @@ const hasNebulaHit = !!nebulaHit;
   const my01 = pointer.y * 0.5 + 0.5;
   bg.setMouse01(mx01, my01);
 
-  // ✅ One-step: drive overall background mood from bgLeadE + input activity (immediate)
-  // activity rises fast when playing, decays slowly when idle
-  const inputActivity = (pointerDown && isActiveNebulaHovered) ? 1.0 : 0.0;
-  const targetActivity = Math.max(inputActivity, bgLeadE);
-  bgActivity = THREE.MathUtils.damp(bgActivity, targetActivity, 10.0, dt);
-
-  // Keep a visible "deep teal black" base even when idle
-  bg.uniforms.uIntensity.value = THREE.MathUtils.damp(bg.uniforms.uIntensity.value, 0.12 + bgActivity * 0.95, 10.0, dt);
-  bg.uniforms.uFlow.value      = THREE.MathUtils.damp(bg.uniforms.uFlow.value,      bgActivity * 1.00,       10.0, dt);
-  bg.uniforms.uSparkle.value   = THREE.MathUtils.damp(bg.uniforms.uSparkle.value,   bgActivity * 0.18,       10.0, dt);
-
-  // Adaptive post dither (helps when new colors inject + bloom amplifies banding)
-  if (window.__ditherPass?.uniforms?.amount) {
-    const base = 0.007;
-    const extra = 0.006 * bgPulse; // pulse -> more dither for the injection moment
-    window.__ditherPass.uniforms.amount.value = Math.min(0.012, base + extra);
-  }
-
 
   
 
@@ -1186,18 +1210,24 @@ const hasNebulaHit = !!nebulaHit;
 
   let disturb = hitPoint;
 
+  let inDisk = false;
+
   if (pointerDown && activeNebulaKey && activeDiskCenterW) {
     const centerN = activeDiskCenterW.clone().project(camera);
     const dx = pointer.x - centerN.x;
     const dy = pointer.y - centerN.y;
     const dist = Math.hypot(dx, dy);
 
-    const inDisk = dist <= activeDiskOuterNDC;
+    inDisk = dist <= activeDiskOuterNDC;
     if (inDisk) {
       // 用 raycast 平面的 hitPoint 也行；这里保留 disturb = hitPoint
       disturb = hitPoint;
     }
   }
+
+  __inDiskThisFrame = inDisk;
+  updateBackgroundEffects(dt);
+
 
   nebulaSystem.update(disturb, t);
 
@@ -1298,9 +1328,7 @@ if ((nowMs - __lastUIUpdateMs) > uiIntervalMs) {
   const psForAudio = { ...ps, trigger: trig };
 
   // ✅ Lead Gate：不要依赖 raycast hit（外圈很容易 miss）；只要在 active 星云的演奏盘 inDisk 内就允许发声
-  // (declared at tick start)
-  inDisk = false;
-  isActiveNebulaHovered = false;
+  let isActiveNebulaHovered = false;
 
   // 每帧更新一次盘面 NDC 半径（跟随相机缩放）
   updateActiveDiskNdcRadii();
@@ -1421,13 +1449,12 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
 
     // "playing" = holding mouse + hovering the active nebula + scratch has some velocity
     const rawVel = (sScratch?.velocity ?? 0);
-    const scratchVel01 = THREE.MathUtils.clamp(rawVel / 0.35, 0, 1); // more sensitive
-    const inputVel01 = Math.max(bgDrive.vel01 ?? 0.0, scratchVel01);
-    const isPlaying = !!(pointerDown && isActiveNebulaHovered);
+    const scratchVel01 = THREE.MathUtils.clamp(rawVel / 0.35, 0, 1); // 1.2 -> 0.35
+    const isPlaying = !!(pointerDown && isActiveNebulaHovered && scratchVel01 > 0.01);
 
-    // ✅ One-step: make leadE react immediately on interaction (do not wait for audio scratch to "ramp up")
-    const targetLead = isPlaying ? Math.min(1.0, 0.35 + 0.85 * inputVel01) : 0.0;
-    bgLeadE = THREE.MathUtils.damp(bgLeadE, targetLead, 10.0, dt);
+    // Smooth presence (leadE)
+    const targetLead = isPlaying ? Math.min(1.0, 0.22 + 0.95 * scratchVel01) : 0.0;
+    bgLeadE = THREE.MathUtils.damp(bgLeadE, targetLead, 5.0, dt);
 
     // Smooth pitch/vel/theta (prefer scratch state; fallback to bgDrive)
     const targetPitch = (typeof sScratch?.pitch01 === "number") ? sScratch.pitch01 : bgDrive.pitch01;
@@ -1448,13 +1475,6 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
       bgDrive.noteSeed = bgNoteSeed;
     }
     bgPulse = Math.max(0.0, bgPulse - dt * 2.6);
-
-    // ✅ One-step: also inject a small pulse immediately when you start/continue playing (fast visual feedback)
-    if (isPlaying) {
-      bgPulse = Math.max(bgPulse, 0.35);
-      bgNoteHue = bgPitch01; // hue follows current pitch around the disk
-      bgDrive.noteSeed = bgDrive.noteSeed || t;
-    }
 
     // Feed shader uniforms (new dreamyBackground API)
     if (bg && bg.setAudio) {
