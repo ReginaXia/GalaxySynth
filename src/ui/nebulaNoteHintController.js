@@ -167,14 +167,17 @@ export function createNebulaNoteHintController({
   }
 
   function estimateNebulaBaseRadius(cluster) {
+    // Local-space radius: keep angle/r mapping stable even when the nebula group rotates.
     const uiR = nebulaSystem?.attractionUI?.radius ?? 1.55;
     const sizeScale = cluster?.preset?.shape?.sizeScale ?? 1.0;
-    const groupScale = cluster?.group?.scale?.x ?? 1.0;
-    return uiR * sizeScale * groupScale;
+    return uiR * sizeScale;
   }
 
   function computeTheta01AndR01(cluster, worldPoint) {
-    const v = worldPoint.clone().sub(cluster.center);
+    // IMPORTANT: compute in nebula LOCAL space so the mapping rotates with the star field.
+    const gp = cluster?.group;
+    if (!gp) return { theta01: 0, r01: 0 };
+    const v = gp.worldToLocal(worldPoint.clone());
     const theta = Math.atan2(v.z, v.x);
     const theta01 = (theta / (Math.PI * 2) + 1) % 1;
     const baseR = Math.max(1e-4, estimateNebulaBaseRadius(cluster));

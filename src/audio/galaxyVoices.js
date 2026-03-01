@@ -26,7 +26,7 @@ export function createGalaxyVoices() {async function safeTriggerAttackRelease(in
   const ok = await ensureToneRunning();
   if (!ok) return;
   try {
-    safeTriggerAttackRelease(inst, note, dur, time ?? Tone.now(), vel ?? 0.9);
+    inst.triggerAttackRelease(note, dur, time ?? Tone.now(), vel ?? 0.9);
   } catch (e) {
     console.warn("[Audio] triggerAttackRelease failed:", e);
   }

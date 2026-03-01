@@ -260,8 +260,6 @@ window.__ditherPass = ditherPass;
 // -------------------------------------
 const raycaster = new THREE.Raycaster();
 const nebulaRaycaster = new THREE.Raycaster();
-nebulaRaycaster.params.Points.threshold = 0.25; // easier to hit point clouds
-
 let nebulaHit = null; // 存当前命中的物体（可用于后续“active nebula”）
 
 let frameCount = 0;
@@ -318,17 +316,13 @@ const hitPoint = new THREE.Vector3();
 const pointer = new THREE.Vector2(0, 0);
 let noteHint = null;
 window.addEventListener("pointermove", (e) => {
-  // NOTE: Use canvas rect for correct NDC mapping (CSS-scaled canvas etc.)
   __markPointerMoved(e.clientX, e.clientY);
   noteHint?.setPointerClientXY?.(e.clientX, e.clientY);
-
-  const rect = canvas.getBoundingClientRect();
-  // If pointer is outside canvas, keep last pointer to avoid flicker/jumps.
-  if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) return;
-
-  pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-  pointer.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+  pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
+  pointer.y = -((e.clientY / window.innerHeight) * 2 - 1);
 });
+
+
 // -------------------------------------
 // 全局pointDown
 // -------------------------------------
@@ -735,7 +729,7 @@ function pickNebulaAtEvent(e) {
   const p = pick.point.clone().project(camera);
   const dx = p.x - ndc.x;
   const dy = p.y - ndc.y;
-  const NDC_THRESH = 0.18;
+  const NDC_THRESH = 0.12;
   const ok = (dx*dx + dy*dy) < (NDC_THRESH * NDC_THRESH);
 
   if (!ok) return null;
@@ -853,11 +847,6 @@ function getMouseWorldOnPlane(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
   zoomMouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
   zoomMouse.y = -(((clientY - rect.top) / rect.height) * 2 - 1);
-
-  // Use active nebula disk plane when available (aligns hint with audio scratch).
-  const yPlane = (activeDiskCenterW ? activeDiskCenterW.y : nebulaSystem.planeY);
-  zoomPlane.normal.set(0, 1, 0);
-  zoomPlane.constant = -yPlane;
 
   zoomRaycaster.setFromCamera(zoomMouse, camera);
   const hit = new THREE.Vector3();
@@ -1178,26 +1167,18 @@ if (shouldPickNebula) {
   nebulaHitLocal = null;
 
   if (pick) {
-
     // 把命中点投影到 NDC，和鼠标 pointer(NDC) 比距离
     const p = pick.point.clone().project(camera);
     const dx = p.x - pointer.x;
     const dy = p.y - pointer.y;
 
-    const NDC_THRESH = 0.18;
+    const NDC_THRESH = 0.12;
     const ok = (dx*dx + dy*dy) < (NDC_THRESH * NDC_THRESH);
 
     if (ok) {
       nebulaHitLocal = pick;
       hoveredNebulaKey = pick.object.userData.galaxyId;
-  } else {
-    // Hold last hover briefly to avoid flicker when the ray barely misses points.
-    const holdMs = 120;
-    if (__cachedHoverNebulaKey && (nowMs - __lastNebulaPickMs) < holdMs) {
-      hoveredNebulaKey = __cachedHoverNebulaKey;
-      nebulaHitLocal = __cachedNebulaHit;
     }
-  }
   }
 
   __cachedHoverNebulaKey = hoveredNebulaKey;
@@ -1410,8 +1391,6 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
         camera.fov = 45.0;          // 你原本的 fov 假设是 46/47 之类
         camera.updateProjectionMatrix();
       }
-
-      noteHint?.setInteractionSample?.(activeNebulaKey, theta01, r01);
 
       audio.playNebulaScratch({
         galaxyId: activeNebulaKey,
