@@ -80,7 +80,7 @@ float noise(vec2 p){
 float fbm(vec2 p){
   float f = 0.0;
   float a = 0.5;
-  for(int i=0;i<4;i++){
+  for(int i=0;i<6;i++){
     f += a * noise(p);
     p *= 2.02;
     a *= 0.5;
@@ -88,18 +88,40 @@ float fbm(vec2 p){
   return f;
 }
 
+
+vec3 palAt(int idx){
+  if(idx==0) return uPal0;
+  if(idx==1) return uPal1;
+  if(idx==2) return uPal2;
+  return uPal3;
+}
+
+// Catmull-Rom interpolation for smooth multi-color palette
 vec3 palette4(float t){
   t = fract(t);
-  float s = t * 3.0;
-  float i = floor(s);
-  float f = fract(s);
+  float x = t * 4.0;
+  int i1 = int(floor(x)) % 4;
+  float f = fract(x);
 
-  vec3 a = (i < 1.0) ? uPal0 : (i < 2.0) ? uPal1 : uPal2;
-  vec3 b = (i < 1.0) ? uPal1 : (i < 2.0) ? uPal2 : uPal3;
+  int i0 = (i1 + 3) % 4;
+  int i2 = (i1 + 1) % 4;
+  int i3 = (i1 + 2) % 4;
 
-  f = f*f*(3.0-2.0*f);
-  return mix(a, b, f);
+  vec3 p0 = palAt(i0);
+  vec3 p1 = palAt(i1);
+  vec3 p2 = palAt(i2);
+  vec3 p3 = palAt(i3);
+
+  float f2 = f*f;
+  float f3 = f2*f;
+
+  // Standard Catmull-Rom (0.5 tension)
+  return 0.5 * ((2.0*p1) +
+                (-p0 + p2) * f +
+                (2.0*p0 - 5.0*p1 + 4.0*p2 - p3) * f2 +
+                (-p0 + 3.0*p1 - 3.0*p2 + p3) * f3);
 }
+
 
 vec3 applySaturation(vec3 c, float sat){
   float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
@@ -161,19 +183,23 @@ void main(){
   //f = mix(f, micro, 0.08);
   //g = mix(g, micro, 0.06);
 
-    // --- Anti-blocky bands: soften thresholds + jitter slightly ---
-  float dither01 = fract(
-    sin(dot(gl_FragCoord.xy, vec2(12.9898,78.233))) * 43758.5453
-  );
+    // --- Soften large color "blobs" ---
+// Add a bit of high-frequency detail so the cloud masks don't form big flat regions.
+float micro = noise(q * 7.5 + vec2(t*1.7, -t*1.3));
+f = mix(f, micro, 0.12);
+g = mix(g, micro, 0.10);
 
-  // 让阈值轻微抖动（非常小，不会“脏”，但能打散块状边界）
-  float jitter = (dither01 - 0.5) * (1.5 / 255.0);
+// Smooth remap (avoid near-binary masks)
+float band  = pow(saturate(f),  1.15);
+float band2 = pow(saturate(g),  1.12);
 
-  // 更宽的 smoothstep 区间 = 更柔和的过渡
-  float band  = smoothstep(0.10 + jitter, 0.98 + jitter, f);
-  float band2 = smoothstep(0.12 + jitter, 0.99 + jitter, g);
+// Tiny spatial jitter to break any remaining contour edges
+float dither01 = hash12(gl_FragCoord.xy * 0.5);
+float jitter = (dither01 - 0.5) * (2.0 / 255.0);
+band  = saturate(band  + jitter);
+band2 = saturate(band2 + jitter);
 
-  float musicalT = (uPitch01 * 0.92 + uTheta01 * 0.35 + t * 0.12);
+float musicalT = (uPitch01 * 0.92 + uTheta01 * 0.35 + t * 0.12);
 
   float sheen = (fres * (0.35 + 0.85*e) + (band2-0.5) * 0.25) * uPearl;
 
