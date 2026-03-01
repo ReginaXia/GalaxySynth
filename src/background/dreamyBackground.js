@@ -77,7 +77,7 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
     if (!colorLike) return;
     try {
       mainColor.set(colorLike);
-      const u = bg?.getUniforms ? bg.getUniforms() : bg?.material?.uniforms;
+      const u = uniforms || mat?.uniforms || mesh?.material?.uniforms;
       if (u?.uTint) u.uTint.value.set(mainColor.r, mainColor.g, mainColor.b);
       if (u?.uMainColor) u.uMainColor.value.set(mainColor);
 
@@ -93,7 +93,7 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
 
   // 新增的 setAudioDrive 方法，用来控制流彩效果
   function setAudioDrive({ sparkle, intensity, ...otherParams }) {
-    const u = bg?.getUniforms ? bg.getUniforms() : bg?.material?.uniforms;
+    const u = uniforms || mat?.uniforms || mesh?.material?.uniforms;
     if (u?.uSparkle) u.uSparkle.value = sparkle ?? 0.15;
     if (u?.uIntensity) u.uIntensity.value = intensity ?? 1.0;
   }

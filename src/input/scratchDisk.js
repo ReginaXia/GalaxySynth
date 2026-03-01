@@ -2,41 +2,46 @@
 import * as THREE from "three";
 
 /**
- * World-Polar Scratch Disk
- * 基于“星云所在世界平面”的极坐标计算
- * 与星云上世界空间布局的 note hint 100% 对齐
+ * Local-Polar Scratch Disk (stable)
+ * - 用“hitPoint(世界平面交点) -> nebula group 本地坐标”计算极坐标
+ * - 跟随 nebula group 旋转/缩放，不会出现“点到旁边/角度漂移”
+ * - 内置轻微 hold，避免边缘抖动导致背景/音频频闪
  */
 export function createScratchDisk({ camera, nebulaSystem, steps = 16 }) {
-  let activeDiskCenterW = null;
-  let activeDiskRadiusW = 1.8;
-  let activeDiskInnerW = 0.15;
+  let activeDiskCenterW = null;   // world center (for planeY + debug)
   let activePlaneY = 0;
+
+  // LOCAL 半径：和 group.worldToLocal 对齐
+  let activeDiskRadiusL = 1.8;
+  let activeDiskInnerL = 0.15;
+
+  let activeGroup = null;
+  let _holdUntilMs = 0;
 
   const _raycaster = new THREE.Raycaster();
   const _plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-  const _hit = new THREE.Vector3();
-  const _v = new THREE.Vector3();
+  const _hitW = new THREE.Vector3();
+  const _hitL = new THREE.Vector3();
 
-  // 选中星云时缓存中心与半径
   function cacheFromNebula(galaxyId) {
-    if (!galaxyId) {
-      activeDiskCenterW = null;
-      return;
-    }
+    activeGroup = null;
+    activeDiskCenterW = null;
+    if (!galaxyId) return;
 
     const c = nebulaSystem.getCluster?.(galaxyId);
-    if (!c) return;
+    if (!c?.group) return;
 
+    activeGroup = c.group;
     activeDiskCenterW = c.group.getWorldPosition(new THREE.Vector3());
     activePlaneY = activeDiskCenterW.y;
 
     const sizeScale = c.preset?.shape?.sizeScale ?? 1.0;
-    const groupScale = c.group.scale?.x ?? 1.0;
 
-    activeDiskRadiusW = 1.9 * sizeScale * groupScale;
+    // ✅ 与 note hint / gp.worldToLocal 对齐：本地半径不乘 groupScale
+    activeDiskRadiusL = 1.9 * sizeScale;
 
     // 中心死区，避免角度抖动
-    activeDiskInnerW = Math.max(0.08, activeDiskRadiusW * 0.18);
+    activeDiskInnerL = Math.max(0.08, activeDiskRadiusL * 0.18);
   }
 
   function getHitOnActivePlane(pointerNDC) {
@@ -46,9 +51,8 @@ export function createScratchDisk({ camera, nebulaSystem, steps = 16 }) {
     _plane.constant = -activePlaneY;
 
     _raycaster.setFromCamera(pointerNDC, camera);
-    const ok = _raycaster.ray.intersectPlane(_plane, _hit);
-
-    return ok ? _hit : null;
+    const ok = _raycaster.ray.intersectPlane(_plane, _hitW);
+    return ok ? _hitW : null;
   }
 
   function update({ pointerNDC, pointerDown, move01, activeNebulaKey }) {
@@ -56,8 +60,9 @@ export function createScratchDisk({ camera, nebulaSystem, steps = 16 }) {
       ok: false,
       inDisk: false,
       centerW: activeDiskCenterW,
-      radiusW: activeDiskRadiusW,
-      innerW: activeDiskInnerW,
+      radiusL: activeDiskRadiusL,
+      innerL: activeDiskInnerL,
+      planeY: activePlaneY,
       theta01: 0,
       r01: 0,
       step: undefined,
@@ -70,32 +75,32 @@ export function createScratchDisk({ camera, nebulaSystem, steps = 16 }) {
       },
     };
 
-    if (
-      !pointerDown ||
-      !activeNebulaKey ||
-      !activeDiskCenterW ||
-      !pointerNDC
-    ) {
-      return out;
-    }
+    if (!pointerDown || !activeNebulaKey || !activeGroup || !pointerNDC) return out;
 
-    const hit = getHitOnActivePlane(pointerNDC);
-    if (!hit) return out;
+    const hitW = getHitOnActivePlane(pointerNDC);
+    if (!hitW) return out;
 
-    _v.copy(hit).sub(activeDiskCenterW);
+    // ✅ 关键：用 group.worldToLocal，跟随旋转/缩放
+    _hitL.copy(hitW);
+    activeGroup.worldToLocal(_hitL);
 
-    const dx = _v.x;
-    const dz = _v.z;
-    const distW = Math.hypot(dx, dz);
+    const dx = _hitL.x;
+    const dz = _hitL.z;
+    const distL = Math.hypot(dx, dz);
 
-    const inDisk =
-      distW <= activeDiskRadiusW &&
-      distW >= activeDiskInnerW;
+    const inDiskNow = distL <= activeDiskRadiusL && distL >= activeDiskInnerL;
 
     out.ok = true;
-    out.inDisk = inDisk;
 
+    const nowMs = performance.now();
+    if (inDiskNow) _holdUntilMs = nowMs + 120;
+    const inDisk = inDiskNow || (nowMs < _holdUntilMs);
+
+    out.inDisk = inDisk;
     if (!inDisk) return out;
+
+    // clamp dist inside for stable r01 while holding
+    const distClamped = Math.min(activeDiskRadiusL, Math.max(activeDiskInnerL, distL));
 
     let ang = Math.atan2(dz, dx);
     if (ang < 0) ang += Math.PI * 2;
@@ -103,8 +108,8 @@ export function createScratchDisk({ camera, nebulaSystem, steps = 16 }) {
     const theta01 = ang / (Math.PI * 2);
 
     const r01 = THREE.MathUtils.clamp(
-      (distW - activeDiskInnerW) /
-        Math.max(1e-6, activeDiskRadiusW - activeDiskInnerW),
+      (distClamped - activeDiskInnerL) /
+        Math.max(1e-6, activeDiskRadiusL - activeDiskInnerL),
       0,
       1
     );
@@ -129,15 +134,11 @@ export function createScratchDisk({ camera, nebulaSystem, steps = 16 }) {
   function getState() {
     return {
       centerW: activeDiskCenterW,
-      radiusW: activeDiskRadiusW,
-      innerW: activeDiskInnerW,
+      radiusL: activeDiskRadiusL,
+      innerL: activeDiskInnerL,
       planeY: activePlaneY,
     };
   }
 
-  return {
-    cacheFromNebula,
-    update,
-    getState,
-  };
+  return { cacheFromNebula, update, getState };
 }

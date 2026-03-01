@@ -4,6 +4,7 @@ import * as Tone from "tone";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 
 import { setupGalaxyGUI } from "./ui/galaxyGui.js";
 import { setupMeteorGUI } from "./ui/meteorGui.js";
@@ -88,8 +89,16 @@ renderer.setPixelRatio(__pixelRatio);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1;
+renderer.toneMappingExposure = 0.9;
 document.body.appendChild(renderer.domElement);
+  // --- Pointer helpers (IMPORTANT: use canvas rect, not window size) ---
+  function getPointerNDCFromEvent(e) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    const y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+    return { x, y };
+  }
+
 
 // -------------------------------------
 // Scene / Camera
@@ -118,8 +127,8 @@ const bg = await createDreamyBackground(scene, camera, { palette: 'pearl' });
 
 // 初始时禁用流动效果和亮度
   bg.uniforms.uFlow.value = 0;
-  bg.uniforms.uSparkle.value = 0;
-  bg.uniforms.uIntensity.value = 0; 
+  bg.uniforms.uSparkle.value = 0.02;
+  bg.uniforms.uIntensity.value = 0.12; 
 
   let isInteracting = false;
 
@@ -181,7 +190,15 @@ starTexture.colorSpace = THREE.SRGBColorSpace;
 // -------------------------------------
 // Post (Bloom)
 // -------------------------------------
-const composer = new EffectComposer(renderer);
+// Use a HalfFloat render target to reduce banding (especially with ACES + Bloom + large smooth gradients).
+// This is the single most effective fix when dithering in the shader is not enough.
+const composerRT = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {
+  format: THREE.RGBAFormat,
+  type: THREE.HalfFloatType,
+  depthBuffer: true,
+  stencilBuffer: false,
+});
+const composer = new EffectComposer(renderer, composerRT);
 composer.addPass(new RenderPass(scene, camera));
 
 const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.65, 0.22);
@@ -190,6 +207,61 @@ composer.addPass(bloomPass);
 bloomPass.strength = 1;
 bloomPass.radius = 1;
 bloomPass.threshold = 0.7;
+
+// -------------------------------------
+// Final Dither Pass (post) - kills remaining banding after ACES + Bloom
+// -------------------------------------
+const DitherShader = {
+  uniforms: {
+    tDiffuse: { value: null },
+    amount: { value: 0.007 }, // 0.004~0.012 (higher = less banding, more grain)
+  },
+  vertexShader: /* glsl */`
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */`
+    uniform sampler2D tDiffuse;
+    uniform float amount;
+    varying vec2 vUv;
+
+    float hash12(vec2 p){
+      vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+      p3 += dot(p3, p3.yzx + 33.33);
+      return fract((p3.x + p3.y) * p3.z);
+    }
+
+    vec3 linearToSrgb(vec3 c){ return pow(max(c, 0.0), vec3(1.0/2.2)); }
+    vec3 srgbToLinear(vec3 c){ return pow(max(c, 0.0), vec3(2.2)); }
+
+    void main(){
+      vec3 col = texture2D(tDiffuse, vUv).rgb;
+
+      // Dither in perceptual (sRGB-ish) space, then return to linear.
+      vec3 srgb = linearToSrgb(col);
+
+      float n1 = hash12(gl_FragCoord.xy);
+      float n2 = hash12(gl_FragCoord.xy + 17.0);
+      float tri = (n1 + n2) - 1.0; // -1..1 triangular distribution
+
+      srgb += tri * amount;
+
+      col = srgbToLinear(srgb);
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `,
+};
+
+const ditherPass = new ShaderPass(DitherShader);
+composer.addPass(ditherPass);
+
+// Expose for quick debugging/tweaks in devtools:
+// window.__ditherPass.uniforms.amount.value = 0.010;
+window.__ditherPass = ditherPass;
+
 
 // -------------------------------------
 // Raycast plane (y = 0)
@@ -205,79 +277,34 @@ let activeNebulaKey = "C_pluck";
 let lastInteractionTime = 0; 
 
 
-// 鼠标点击事件
-  window.addEventListener("click", (e) => {
-    // 将鼠标位置转为NDC坐标
-    pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
-    pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
+// 鼠标点击事件：仅设置目标状态（不要在事件里开新的 RAF 动画，避免叠加与抖动）
+window.addEventListener("click", (e) => {
+  // 将鼠标位置转为NDC坐标
+  const ndc = getPointerNDCFromEvent(e);
+    pointer.x = ndc.x;
+    pointer.y = ndc.y;
 
-    // 通过射线检测当前鼠标是否在星云上
-    raycaster.setFromCamera(pointer, camera);
-    const intersects = raycaster.intersectObject(nebulaSystem.root, true); // 检测星云
+  // 通过射线检测当前鼠标是否在星云上
+  raycaster.setFromCamera(pointer, camera);
+  const intersects = raycaster.intersectObject(nebulaSystem.root, true); // 检测星云
 
-    if (intersects.length > 0) {
-      // 鼠标点击到星云
-      if (!isInteracting) {
-        isInteracting = true;
-        lastInteractionTime = Date.now();
-        // 激活背景流动效果和亮度，渐渐亮起
-        fadeInBackground();
-      }
-    } else {
-      // 鼠标点击没有点击到星云
-      if (isInteracting) {
-        isInteracting = false;
-        // 恢复黑色背景并禁用流动效果，渐渐变暗
-        fadeOutBackground();
-      }
-    }
-  });
-
-  // 鼠标移动事件
-  window.addEventListener("mousemove", () => {
-    if (isInteracting && Date.now() - lastInteractionTime > 500) {
-      // 如果鼠标没有再交互且超过 0.5 秒，背景渐渐变暗
-      fadeOutBackground();
-    }
-  });
-
-  // 背景渐渐亮起
-  function fadeInBackground() {
-    const startTime = Date.now();
-    const duration = 500;  // 渐变时间 0.5秒
-
-    function update() {
-      const elapsedTime = Date.now() - startTime;
-      const progress = Math.min(elapsedTime / duration, 1);  // 计算渐变的进度
-      bg.uniforms.uFlow.value = Math.min(bg.uniforms.uFlow.value + progress * 0.5, 1.0);
-      bg.uniforms.uSparkle.value = Math.min(bg.uniforms.uSparkle.value + progress * 0.15, 0.15);
-      bg.uniforms.uIntensity.value = Math.min(bg.uniforms.uIntensity.value + progress * 1.0, 1.0);
-
-      if (elapsedTime < duration) {
-        requestAnimationFrame(update);
-      }
-    }
-    update();
+  if (intersects.length > 0) {
+    // 点击到星云：进入互动态
+    isInteracting = true;
+    lastInteractionTime = Date.now();
+  } else {
+    // 点空白：退出互动态
+    isInteracting = false;
   }
+});
 
-  // 背景渐渐变暗
-  function fadeOutBackground() {
-    const startTime = Date.now();
-    const duration = 500;  // 渐变时间 0.5秒
-
-    function update() {
-      const elapsedTime = Date.now() - startTime;
-      const progress = Math.min(elapsedTime / duration, 1);  // 计算渐变的进度
-      bg.uniforms.uFlow.value = Math.max(bg.uniforms.uFlow.value - progress * 0.5, 0.0);
-      bg.uniforms.uSparkle.value = Math.max(bg.uniforms.uSparkle.value - progress * 0.15, 0.0);
-      bg.uniforms.uIntensity.value = Math.max(bg.uniforms.uIntensity.value - progress * 1.0, 0.0);
-
-      if (elapsedTime < duration) {
-        requestAnimationFrame(update);
-      }
-    }
-    update();
+// 鼠标移动：若一段时间没有继续互动，就回到 idle（更像“呼吸式”自然收敛）
+window.addEventListener("mousemove", () => {
+  if (isInteracting && Date.now() - lastInteractionTime > 500) {
+    isInteracting = false;
   }
+});
+
 
 
 // -------------------------------------
@@ -300,19 +327,8 @@ let noteHint = null;
 window.addEventListener("pointermove", (e) => {
   __markPointerMoved(e.clientX, e.clientY);
   noteHint?.setPointerClientXY?.(e.clientX, e.clientY);
-
-  // ✅ 用 renderer.domElement 的真实区域来算 NDC（避免 GUI/缩放/非全屏导致拾取偏移）
-  const el = renderer?.domElement;
-  if (el && typeof el.getBoundingClientRect === "function") {
-    const r = el.getBoundingClientRect();
-    const x = (e.clientX - r.left) / Math.max(1e-6, r.width);
-    const y = (e.clientY - r.top) / Math.max(1e-6, r.height);
-    pointer.x = x * 2 - 1;
-    pointer.y = -(y * 2 - 1);
-  } else {
-    pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
-    pointer.y = -((e.clientY / window.innerHeight) * 2 - 1);
-  }
+  pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
+  pointer.y = -((e.clientY / window.innerHeight) * 2 - 1);
 });
 
 
@@ -321,6 +337,12 @@ window.addEventListener("pointermove", (e) => {
 // -------------------------------------
 
 let pointerDown = false;
+
+// --- Background 3-stage envelope (Attack/Sustain/Release) ---
+let bgSustain = 0; // 0..1
+let bgAttack  = 0; // 0..1
+let bgRelease = 0; // 0..1
+let __inDiskThisFrame = false;
 
 // ✅ 浏览器需要用户手势才能启动音频：首次 pointerdown 自动 resume Tone AudioContext
 window.addEventListener("pointerdown", async () => {
@@ -351,8 +373,17 @@ function __markPointerMoved(clientX, clientY) {
   }
 }
 
-window.addEventListener("pointerdown", () => (pointerDown = true));
-window.addEventListener("pointerup",   () => (pointerDown = false));
+window.addEventListener("pointerdown", () => {
+  pointerDown = true;
+  // instant visual hit
+  bgAttack = Math.min(1.0, bgAttack + 1.0);
+  bgRelease = 1.0;
+});
+window.addEventListener("pointerup",   () => {
+  pointerDown = false;
+  // let it ring out
+  bgRelease = Math.max(bgRelease, 0.8);
+});
 
 
 
@@ -1042,15 +1073,47 @@ startStepSequencer();
 
 if (Tone.Transport.state !== "started") Tone.Transport.start();
 
-// 更新背景效果函数
+// Slight louder master (can tweak: -6, -3, 0)
+try { Tone.Destination.volume.value = -6; } catch {}
+
+// 更新背景效果函数（只在 tick 里做平滑，避免事件回调里开 RAF）
+// 注意：这组“交互态”是给你做整体气氛（暗->亮）用的；
+// 具体 note / scratch 的颜色注入仍然由后面的 bg.setAudio 驱动。
 function updateBackgroundEffects(dt) {
-  // 如果用户有交互，逐渐增加流动和亮度效果
-  if (isInteracting) {
-    bg.uniforms.uFlow.value = THREE.MathUtils.damp(bg.uniforms.uFlow.value, 1.0, 5.0, dt);
-    bg.uniforms.uSparkle.value = THREE.MathUtils.damp(bg.uniforms.uSparkle.value, 0.15, 5.0, dt);
-    bg.uniforms.uIntensity.value = THREE.MathUtils.damp(bg.uniforms.uIntensity.value, 1.0, 5.0, dt);
+  // playingNow: in scratch disk + pointer held
+  const playingNow = (__inDiskThisFrame && pointerDown);
+
+  // Sustain follows hand
+  const sustainTarget = playingNow ? 1.0 : 0.0;
+  bgSustain = THREE.MathUtils.damp(bgSustain, sustainTarget, 12.0, dt);
+
+  // Attack: fast decay (click / initial press)
+  bgAttack = THREE.MathUtils.damp(bgAttack, 0.0, 20.0, dt);
+
+  // Release: slow decay tail
+  bgRelease = THREE.MathUtils.damp(bgRelease, 0.0, 3.0, dt);
+
+  // Combine into an activity signal
+  const activity = THREE.MathUtils.clamp(
+    0.15 + 0.85 * bgSustain + 0.75 * bgAttack + 0.35 * bgRelease,
+    0.0, 1.0
+  );
+
+  // Keep a non-zero idle base, then boost quickly on activity
+  const intensityTarget = 0.10 + 1.10 * activity;
+  const flowTarget      = 0.00 + 1.15 * activity;
+  const sparkleTarget   = 0.02 + 0.22 * activity;
+
+  bg.uniforms.uIntensity.value = THREE.MathUtils.damp(bg.uniforms.uIntensity.value, intensityTarget, 10.0, dt);
+  bg.uniforms.uFlow.value      = THREE.MathUtils.damp(bg.uniforms.uFlow.value,      flowTarget,      10.0, dt);
+  bg.uniforms.uSparkle.value   = THREE.MathUtils.damp(bg.uniforms.uSparkle.value,   sparkleTarget,   10.0, dt);
+
+  // Optional: if bg shader has uPulse, punch it with attack for instant feedback
+  if (bg.uniforms.uPulse) {
+    bg.uniforms.uPulse.value = Math.max(bg.uniforms.uPulse.value * 0.90, bgAttack);
   }
 }
+
 
 function tick() {
 
@@ -1059,8 +1122,7 @@ function tick() {
   cameraControl?.update?.(dt);
   const t = clock.getElapsedTime();
 
-  // 更新背景效果
-  updateBackgroundEffects(dt);
+  // 更新背景效果（移到计算 inDisk 之后，保证即时跟手）
 
 // --- dynamic resolution scaling (keeps FPS stable)
 __fpsEMA = __fpsEMA * 0.9 + (1 / Math.max(1e-4, dt)) * 0.1;
@@ -1157,18 +1219,24 @@ const hasNebulaHit = !!nebulaHit;
 
   let disturb = hitPoint;
 
+  let inDisk = false;
+
   if (pointerDown && activeNebulaKey && activeDiskCenterW) {
     const centerN = activeDiskCenterW.clone().project(camera);
     const dx = pointer.x - centerN.x;
     const dy = pointer.y - centerN.y;
     const dist = Math.hypot(dx, dy);
 
-    const inDisk = dist <= activeDiskOuterNDC;
+    inDisk = dist <= activeDiskOuterNDC;
     if (inDisk) {
       // 用 raycast 平面的 hitPoint 也行；这里保留 disturb = hitPoint
       disturb = hitPoint;
     }
   }
+
+  __inDiskThisFrame = inDisk;
+  updateBackgroundEffects(dt);
+
 
   nebulaSystem.update(disturb, t);
 
@@ -1269,7 +1337,6 @@ if ((nowMs - __lastUIUpdateMs) > uiIntervalMs) {
   const psForAudio = { ...ps, trigger: trig };
 
   // ✅ Lead Gate：不要依赖 raycast hit（外圈很容易 miss）；只要在 active 星云的演奏盘 inDisk 内就允许发声
-  let inDisk = false;
   let isActiveNebulaHovered = false;
 
   // 每帧更新一次盘面 NDC 半径（跟随相机缩放）
@@ -1390,11 +1457,12 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     const sScratch = audio.getState()?.scratch;
 
     // "playing" = holding mouse + hovering the active nebula + scratch has some velocity
-    const scratchVel01 = THREE.MathUtils.clamp((sScratch?.velocity ?? 0) / 1.2, 0, 1);
+    const rawVel = (sScratch?.velocity ?? 0);
+    const scratchVel01 = THREE.MathUtils.clamp(rawVel / 0.35, 0, 1); // 1.2 -> 0.35
     const isPlaying = !!(pointerDown && isActiveNebulaHovered && scratchVel01 > 0.01);
 
     // Smooth presence (leadE)
-    const targetLead = isPlaying ? Math.min(1.0, 0.10 + 0.90 * scratchVel01) : 0.0;
+    const targetLead = isPlaying ? Math.min(1.0, 0.22 + 0.95 * scratchVel01) : 0.0;
     bgLeadE = THREE.MathUtils.damp(bgLeadE, targetLead, 5.0, dt);
 
     // Smooth pitch/vel/theta (prefer scratch state; fallback to bgDrive)
@@ -1455,6 +1523,9 @@ window.addEventListener("resize", () => {
   renderer.setSize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+
+  // Keep composer RT in sync (HalfFloat target)
+  composerRT.setSize(w, h);
   composer.setSize(w, h);
   bloomPass.setSize(w, h);
 });
