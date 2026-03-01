@@ -110,6 +110,18 @@ vec3 applyContrast(vec3 c, float k){
   return (c - 0.5) * k + 0.5;
 }
 
+// --- sRGB-space dithering helpers (for banding reduction) ---
+vec3 linearToSrgb(vec3 c){ return pow(max(c, 0.0), vec3(1.0/2.2)); }
+vec3 srgbToLinear(vec3 c){ return pow(max(c, 0.0), vec3(2.2)); }
+
+// Interleaved / stable hash (0..1)
+float hash12(vec2 p){
+  // Use a slightly different hash than hash21 to decorrelate
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+
 void main(){
   // View direction / sphere normal
   vec3 V = normalize(cameraPosition - vWorldPos);
@@ -166,8 +178,25 @@ void main(){
   float sheen = (fres * (0.35 + 0.85*e) + (band2-0.5) * 0.25) * uPearl;
 
   float pulse = saturate(uPulse) * (0.2 + 0.8*vel);
-  float d = length((uv - uNotePos) * vec2(1.2, 1.0));
-  float ink = pulse * exp(-d * (6.0 + 10.0*e));
+
+// Note injection distance in "sky UV" space
+vec2 noteVec = (uv - uNotePos) * vec2(1.2, 1.0);
+float d = length(noteVec);
+
+// Domain-dither the injection edge to kill contour banding during big color jumps.
+// Use *very* small spatial jitter + slight temporal drift (so it doesn't look like a static pattern).
+float nA = hash12(gl_FragCoord.xy + uTime * 60.0);
+float nB = hash12(gl_FragCoord.xy * 0.71 + 17.0 + uTime * 37.0);
+float tri = (nA + nB) - 1.0; // -1..1 triangular noise
+d += tri * 0.0035;           // 0.002~0.006 (bigger = stronger anti-banding)
+
+// Exponential falloff (soft blob)
+float inkFall = exp(-d * (6.0 + 10.0*e));
+
+// Edge micro-jitter in mask space (prevents visible rings after toneMapping/bloom)
+inkFall = saturate(inkFall + tri * 0.02);
+
+float ink = pulse * inkFall;
 
   float wCloud = (0.25 + 0.55*e2) * band;
   float wSheen = (0.18 + 0.65*e)  * (0.35 + 0.65*band2) * uPearl;
@@ -195,17 +224,30 @@ void main(){
   col = applySaturation(col, 1.0 + uSat);
   col = applyContrast(col, uContrast);
 
-  float bright = uIntensity * (0.55 + 1.25*e);
+  float bright = uIntensity * (0.55 + 1.10*e);
+  bright = min(bright, 1.35); // 防止过曝导致中心出现奇怪的红形状
   col *= bright;
 
-  col = pow(saturate(col), vec3(0.92));
+  // ✅ 让 Three.js 的 toneMapping / 输出色彩空间接管 gamma（避免重复 gamma 导致 banding）
+  col = max(col, vec3(0.0));
 
-  float dither = fract(
-      sin(dot(gl_FragCoord.xy, vec2(12.9898,78.233)))
-      * 43758.5453
-  );
 
-  col += (dither - 0.5) / 255.0;
+  // Keep some HDR headroom for bloom (avoid hard clamp to 0..1 here)
+  col = min(col, vec3(4.0));
 
-  gl_FragColor = vec4(saturate(col), 1.0);
+  // --- Final pass: sRGB-space triangular dithering (best-effort banding removal) ---
+  // Apply in sRGB space because banding is most visible after toneMapping/output encoding.
+  vec3 srgb = linearToSrgb(col);
+
+  float dn1 = hash12(gl_FragCoord.xy);
+  float dn2 = hash12(gl_FragCoord.xy + 19.19);
+  float dtri = (dn1 + dn2) - 1.0; // -1..1
+
+  // Strength guideline:
+  // 0.006 = subtle, 0.010 = strong. Injection moments may need stronger.
+  srgb += dtri * 0.010;
+
+  col = srgbToLinear(srgb);
+
+  gl_FragColor = vec4(col, 1.0);
 }

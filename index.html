@@ -15,6 +15,16 @@
         user-select:none;
       }
 
+      #gui-container {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        z-index: 9999;
+        width: 100%;
+        background: rgba(0, 0, 0, 0.7); /* 可选，增加背景颜色 */
+        padding: 10px;
+      }
+
       #tempo-ring{
         position: fixed;
         left: 40px;
@@ -29,7 +39,7 @@
         user-select: none;
         touch-action: none;
       }
-
+      
       /* 一个小点当作刻度 */
       #tempo-handle{
         position: absolute;
