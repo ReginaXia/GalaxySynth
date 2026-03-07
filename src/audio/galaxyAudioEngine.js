@@ -484,8 +484,8 @@ now = safeNow;
 
     // ---- expression ----
     // 快速转 = 更亮、更响
-    const velocity = clamp01((0.24 + speed * 0.62) * expr.velocityMul);
-    const dur = Math.max(0.09, (0.24 - speed * 0.035) * expr.durMul);
+    const velocity = clamp01((0.40 + speed * 0.62) * expr.velocityMul);
+    const dur = Math.max(0.11, (0.22 - speed * 0.02) * expr.durMul);
 
     // Trigger immediately (omit explicit time) to avoid Tone scheduling monotonic-time errors in rapid interactions.
     instrument.triggerAttackRelease(note, dur, now, velocity);

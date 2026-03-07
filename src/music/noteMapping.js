@@ -44,10 +44,11 @@ export function stepToBoundaryTheta01(step, steps = NOTE_STEPS) {
 }
 
 export function r01ToOctaveOffset(r01) {
-  // Stronger radial register separation:
-  // inner(near center) -> -24, middle -> -12, outer -> 0
-  if (r01 < 0.33) return -24;
-  if (r01 < 0.66) return -12;
+  // Refined inverted radial register mapping:
+  // 0.00–0.15 -> +36, 0.15–0.33 -> +24, 0.33–0.66 -> +12, 0.66–1.00 -> 0
+  if (r01 < 0.15) return 36;
+  if (r01 < 0.33) return 24;
+  if (r01 < 0.66) return 12;
   return 0;
 }
 

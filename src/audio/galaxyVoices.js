@@ -48,34 +48,8 @@ export function createGalaxyVoices() {async function safeTriggerAttackRelease(in
   }
 
   function pickInstrument(key) {
-    const list = ["violin", "cello", "organ", "harp", "piano"];
-    return list[hashString(key) % list.length];
+    return "celestial_base";
   }
-
-  const nebulaInstruments = {
-    violin: new Tone.Synth({
-      oscillator: { type: "triangle" },
-      envelope: { attack: 0.03, decay: 0.26, sustain: 0.36, release: 1.35 },
-    }),
-
-    cello: new Tone.Synth({
-      oscillator: { type: "triangle" },
-      envelope: { attack: 0.05, decay: 0.30, sustain: 0.42, release: 1.55 },
-    }),
-    organ: new Tone.Synth({
-      oscillator: { type: "sine" },
-      envelope: { attack: 0.04, decay: 0.20, sustain: 0.58, release: 1.45 },
-    }),
-    harp: new Tone.PluckSynth({ attackNoise: 0.45, dampening: 2800, resonance: 0.82 }),
-    piano: new Tone.Synth({
-      oscillator: { type: "triangle" },
-      envelope: { attack: 0.015, decay: 0.24, sustain: 0.06, release: 1.75 },
-    }),
-  };
-
-  Object.values(nebulaInstruments).forEach(inst => {
-    inst.volume.value = -14.5;
-  });
 
 
   // ---- FX (先声明，避免引用顺序问题) ----
@@ -125,26 +99,113 @@ export function createGalaxyVoices() {async function safeTriggerAttackRelease(in
   bell.volume.value = -22;
 
 
-  // ---- Nebula scratch instruments routing ----
-  // 让 violin/cello/organ/harp/piano 也走同一套空间效果，声音才“融入银河”
-  // 建一个专门 scratchBus
-  const scratchBus = new Tone.Gain(1.0);
-  const scratchHP = new Tone.Filter({ type: "highpass", frequency: 140, Q: 0.2 });
-  const scratchLP = new Tone.Filter({ type: "lowpass", frequency: 8800, Q: 0.2 });
-  const scratchAir = new Tone.EQ3({ low: -3.5, mid: -0.5, high: 3.0 });
-  const scratchChorus = new Tone.Chorus({ frequency: 0.28, delayTime: 2.4, depth: 0.24, wet: 0.10 }).start();
-  const scratchDelay = new Tone.FeedbackDelay({ delayTime: "16n", feedback: 0.18, wet: 0.07 });
-  scratchBus.chain(scratchHP, scratchLP, scratchAir, scratchChorus, scratchDelay, compressor, limiter, Tone.Destination);
+  // ---- Nebula scratch architecture: Transient + Core + Air + Halo ----
+  const scratchDryBus = new Tone.Gain(1.45);
+  const scratchHP = new Tone.Filter({ type: "highpass", frequency: 120, Q: 0.2 });
+  const scratchLP = new Tone.Filter({ type: "lowpass", frequency: 13200, Q: 0.2 });
+  const scratchTone = new Tone.EQ3({ low: -2.0, mid: 0.0, high: 2.5 });
+  const scratchComp = new Tone.Compressor(-17, 2);
+  scratchDryBus.chain(scratchHP, scratchLP, scratchTone, scratchComp, limiter, Tone.Destination);
 
-  // Bright, transparent space (avoid dark/wet cloud)
-  const scratchReverb = new Tone.Reverb({ decay: 3.6, preDelay: 0.02, wet: 0.14 });
-  scratchBus.connect(scratchReverb);
-  scratchReverb.toDestination();
+  const haloSendBus = new Tone.Gain(1.0);
+  const haloHP = new Tone.Filter({ type: "highpass", frequency: 1900, Q: 0.2 });
+  const haloLP = new Tone.Filter({ type: "lowpass", frequency: 12000, Q: 0.2 });
+  const haloShimmer = new Tone.PitchShift({ pitch: 12, windowSize: 0.05, wet: 0.08 });
+  const haloReverb = new Tone.Reverb({ decay: 3.2, preDelay: 0.02, wet: 0.16 });
+  haloSendBus.chain(haloHP, haloLP, haloShimmer, haloReverb, limiter, Tone.Destination);
 
-  // 每个 nebula 乐器走 scratchBus
-  Object.values(nebulaInstruments).forEach((inst) => {
-    inst.connect(scratchBus);
-  });
+  function createCelestialVoice() {
+    const transient = new Tone.Synth({
+      oscillator: { type: "triangle" },
+      envelope: { attack: 0.001, decay: 0.032, sustain: 0.0, release: 0.035 },
+    });
+    transient.volume.value = -10.5;
+
+    // Core layer: CelestialCore (sine center + subtle FM richness + light overtone).
+    const coreCarrier = new Tone.Synth({
+      oscillator: { type: "sine" },
+      envelope: { attack: 0.01, decay: 0.30, sustain: 0.09, release: 0.80 },
+    });
+    coreCarrier.volume.value = -10.5;
+
+    const coreFM = new Tone.FMSynth({
+      harmonicity: 1.5,
+      modulationIndex: 2.2,
+      oscillator: { type: "sine" },
+      envelope: { attack: 0.01, decay: 0.28, sustain: 0.06, release: 0.78 },
+      modulation: { type: "triangle" },
+      modulationEnvelope: { attack: 0.01, decay: 0.18, sustain: 0.0, release: 0.26 },
+    });
+    coreFM.volume.value = -16.5;
+
+    const coreBell = new Tone.Synth({
+      oscillator: { type: "triangle" },
+      envelope: { attack: 0.005, decay: 0.22, sustain: 0.0, release: 0.55 },
+    });
+    coreBell.volume.value = -22.5;
+
+    const airSpark = new Tone.Synth({
+      oscillator: { type: "sine" },
+      envelope: { attack: 0.001, decay: 0.045, sustain: 0.0, release: 0.08 },
+    });
+    airSpark.volume.value = -22.5;
+
+    const transientHP = new Tone.Filter({ type: "highpass", frequency: 3800, Q: 0.35 });
+    const transientLP = new Tone.Filter({ type: "lowpass", frequency: 13000, Q: 0.2 });
+    const coreBus = new Tone.Gain(1.0);
+    const coreHP = new Tone.Filter({ type: "highpass", frequency: 200, Q: 0.25 });
+    const coreLP = new Tone.Filter({ type: "lowpass", frequency: 6200, Q: 0.2 });
+    const airHP = new Tone.Filter({ type: "highpass", frequency: 4500, Q: 0.4 });
+    const airLP = new Tone.Filter({ type: "lowpass", frequency: 12500, Q: 0.25 });
+
+    const transientLayer = new Tone.Gain(0.72);
+    const coreLayer = new Tone.Gain(0.88);
+    const airLayer = new Tone.Gain(0.16);
+
+    transient.chain(transientHP, transientLP, transientLayer);
+    coreCarrier.connect(coreBus);
+    coreFM.connect(coreBus);
+    coreBell.connect(coreBus);
+    coreBus.chain(coreHP, coreLP, coreLayer);
+    airSpark.chain(airHP, airLP, airLayer);
+
+    function sendLayer(layer, dry = 1, halo = 0.25) {
+      const dryTap = new Tone.Gain(dry);
+      const haloTap = new Tone.Gain(halo);
+      layer.connect(dryTap);
+      layer.connect(haloTap);
+      dryTap.connect(scratchDryBus);
+      haloTap.connect(haloSendBus);
+    }
+
+    sendLayer(transientLayer, 1.0, 0.24);
+    sendLayer(coreLayer, 1.0, 0.34);
+    sendLayer(airLayer, 1.0, 0.46);
+
+    return {
+      triggerAttackRelease(note, dur, time, vel = 0.9) {
+        const now = time ?? Tone.now();
+        const velocity = Math.max(0.05, Math.min(1, vel));
+        const coreDur = Math.max(0.10, (typeof dur === "number" ? dur : 0.14) * 1.0);
+        const transientDur = Math.max(0.025, coreDur * 0.22);
+        const airDur = Math.max(0.040, coreDur * 0.28);
+
+        const topNote = Tone.Frequency(note).transpose(24).toNote();
+        transient.triggerAttackRelease(topNote, transientDur, now, velocity * 0.80);
+        coreCarrier.triggerAttackRelease(note, coreDur, now, velocity * 0.92);
+        coreFM.triggerAttackRelease(note, coreDur * 0.92, now, velocity * 0.42);
+        const corePartial = Tone.Frequency(note).transpose(12).toNote();
+        coreBell.triggerAttackRelease(corePartial, coreDur * 0.56, now, velocity * 0.30);
+        const airNote = Tone.Frequency(note).transpose(24).toNote();
+        airSpark.triggerAttackRelease(airNote, airDur, now, velocity * 0.34);
+      },
+      set() {},
+    };
+  }
+
+  const nebulaInstruments = {
+    celestial_base: createCelestialVoice(),
+  };
 
 
   // ---- Routing ----
