@@ -44,9 +44,11 @@ export function stepToBoundaryTheta01(step, steps = NOTE_STEPS) {
 }
 
 export function r01ToOctaveOffset(r01) {
-  if (r01 < 0.33) return 12;
-  if (r01 < 0.66) return 0;
-  return -12;
+  // Stronger radial register separation:
+  // inner(near center) -> -24, middle -> -12, outer -> 0
+  if (r01 < 0.33) return -24;
+  if (r01 < 0.66) return -12;
+  return 0;
 }
 
 export function midiToNoteName(midi) {

@@ -186,9 +186,9 @@ export function createNebulaNoteHintController({
   function fallbackPreview({ theta01, r01 }) {
     const degree = Math.floor(clamp01(theta01) * STEPS) % STEPS;
     let octave = 4;
-    if (r01 < 0.33) octave = 5;
-    else if (r01 < 0.66) octave = 4;
-    else octave = 3;
+    if (r01 < 0.33) octave = 2;
+    else if (r01 < 0.66) octave = 3;
+    else octave = 4;
     return { note: `${letterArr[degree]}${octave}`, degree, step: degree };
   }
 

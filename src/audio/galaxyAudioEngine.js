@@ -1,6 +1,6 @@
 // src/audio/galaxyAudioEngine.js
 import * as Tone from "tone";
-import { MAJOR_SCALE, mapThetaRToNoteIntent, quantizeWithHysteresis } from "../music/noteMapping.js";
+import { MAJOR_SCALE, mapThetaRToNoteIntent, quantizeWithHysteresis, r01ToOctaveOffset } from "../music/noteMapping.js";
 
 function clamp01(x) {
   return Math.max(0, Math.min(1, x));
@@ -541,10 +541,7 @@ now = safeNow;
     margin = 0.18,          // hysteresis margin
   }) {
     // octaveOffset mapping must match playNebulaScratch
-    let octaveOffset = 0;
-    if (r01 < 0.33) octaveOffset = +12;
-    else if (r01 < 0.66) octaveOffset = 0;
-    else octaveOffset = -12;
+    const octaveOffset = r01ToOctaveOffset(r01);
 
     const baseMidi = Tone.Frequency("C4").toMidi();
     const rootMidi = baseMidi + octaveOffset;
