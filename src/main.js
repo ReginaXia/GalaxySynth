@@ -139,7 +139,7 @@ const cameraControl = createCameraControlSystem({
   zoomSpeed: 0.0018, // 可以从 0.0012~0.0022 调
 });
 
-const bg = await createDreamyBackground(scene, camera, { palette: 'pearl' });
+const bg = await createDreamyBackground(scene, camera, { palette: 'aurora' });
 
 // 初始时禁用流动效果和亮度
   bg.uniforms.uFlow.value = 0;

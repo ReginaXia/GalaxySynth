@@ -224,9 +224,9 @@ inkFall = saturate(inkFall + tri * 0.02);
 
 float ink = pulse * inkFall;
 
-  float wCloud = (0.25 + 0.55*e2) * band;
-  float wSheen = (0.18 + 0.65*e)  * (0.35 + 0.65*band2) * uPearl;
-  float wInk   = ink;
+  float wCloud = (0.20 + 0.42*e2) * band;
+  float wSheen = (0.26 + 0.62*e)  * (0.38 + 0.62*band2) * uPearl;
+  float wInk   = ink * (0.46 + 0.26*e);
 
   vec3 c0 = palette4(musicalT + sheen * 0.45 + (f-0.5)*0.25);
   vec3 c1 = palette4(musicalT + 0.33 + sheen * 0.75 + (g-0.5)*0.35);

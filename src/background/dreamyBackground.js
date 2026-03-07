@@ -4,9 +4,10 @@ import bgVert from "./shaders/bg.vert.glsl?raw";
 import bgFrag from "./shaders/bg.frag.glsl?raw";
 
 export const BACKGROUND_PALETTES = {
-  pearl: { name: "Pearl Shell", colors: ["#7AF7FF","#FF4FD8","#C9A6FF","#FFD27A"] },
+  pearl: { name: "Pearl Shell", colors: ["#73EFFF","#86A8FF","#C9B8FF","#FF9FD2"] },
   candy: { name: "Cotton Candy", colors: ["#61D9FF","#FF6BD6","#FFB86B","#B6FF8A"] },
-  aurora:{ name: "Aurora Soft",  colors: ["#4CF0FF","#7E7CFF","#FF65C8","#8CFFB8"] },
+  aurora:{ name: "Aurora Soft",  colors: ["#45E9FF","#6F86FF","#BDA7FF","#A7FFD9"] },
+  cosmic:{ name: "Cosmic Iris",  colors: ["#52E9FF","#6A7CFF","#A99BFF","#E2A6FF"] },
   neo:   { name: "Neo Dream",    colors: ["#3DFFB8","#3D7BFF","#FF3DF2","#FFE83D"] },
 };
 
@@ -18,11 +19,11 @@ function clamp01(x){ return Math.max(0, Math.min(1, x)); }
 
 export async function createDreamyBackground(scene, camera = null, opts = {}){
   const radius = opts.radius ?? 2000;
-  const base = new THREE.Color(opts.baseColor ?? "#131527");
-  const paletteKey = opts.palette ?? "pearl";
+  const base = new THREE.Color(opts.baseColor ?? "#070B18");
+  const paletteKey = opts.palette ?? "aurora";
   const pal = BACKGROUND_PALETTES[paletteKey] ?? BACKGROUND_PALETTES.pearl;
 
-  const mainColor = new THREE.Color("#ff7ccf");
+  const mainColor = new THREE.Color("#7ca0ff");
 
   const uniforms = {
     uTime: { value: 0 },
@@ -33,12 +34,12 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
     uMouse:   { value: new THREE.Vector2(0.5, 0.5) },
 
     uBase:      { value: new THREE.Vector3(base.r, base.g, base.b) },
-    uIntensity: { value: opts.intensity ?? 0.75 },
+    uIntensity: { value: opts.intensity ?? 0.82 },
     uFlow:      { value: opts.flow ?? 1.0 },
-    uScale:     { value: opts.scale ?? 1.0 },
-    uWarp:      { value: opts.warp ?? 0.75 },
-    uDetail:    { value: opts.detail ?? 0.55 },
-    uPearl:     { value: opts.pearl ?? 0.8 },
+    uScale:     { value: opts.scale ?? 0.9 },
+    uWarp:      { value: opts.warp ?? 0.58 },
+    uDetail:    { value: opts.detail ?? 0.42 },
+    uPearl:     { value: opts.pearl ?? 0.92 },
     uSparkle:   { value: opts.sparkle ?? 0.15 },
     uSat:       { value: opts.sat ?? 0.45 },
     uContrast:  { value: opts.contrast ?? 0.9 },
@@ -80,12 +81,6 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
       const u = uniforms || mat?.uniforms || mesh?.material?.uniforms;
       if (u?.uTint) u.uTint.value.set(mainColor.r, mainColor.g, mainColor.b);
       if (u?.uMainColor) u.uMainColor.value.set(mainColor);
-
-      // 让渐变颜色更加平滑，避免过于明显的分界线
-      if (u?.uPal0) u.uPal0.value.set(mainColor.r * 0.8, mainColor.g * 0.8, mainColor.b * 0.8);
-      if (u?.uPal1) u.uPal1.value.set(mainColor.r * 0.6, mainColor.g * 0.6, mainColor.b * 0.6);
-      if (u?.uPal2) u.uPal2.value.set(mainColor.r * 1.2, mainColor.g * 1.2, mainColor.b * 1.2);
-      if (u?.uPal3) u.uPal3.value.set(mainColor.r * 1.4, mainColor.g * 1.4, mainColor.b * 1.4);
     } catch (e) {
       console.warn("setMainColor failed:", e);
     }
@@ -98,7 +93,7 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
     if (u?.uIntensity) u.uIntensity.value = intensity ?? 1.0;
   }
 
-  setMainColor(mainColor);  // 初始化时把默认颜色设置为深青色
+  setMainColor(mainColor);
 
   const api = {
     mesh,
@@ -155,7 +150,7 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
 export function setupBackgroundGUI(gui, bg) {
   if (!gui || !bg) return;
   const params = {
-    palette: "pearl",
+    palette: "aurora",
     intensity: bg.uniforms.uIntensity.value,
     flow: bg.uniforms.uFlow.value,
     scale: bg.uniforms.uScale.value,
