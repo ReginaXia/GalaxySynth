@@ -54,27 +54,27 @@ export function createGalaxyVoices() {async function safeTriggerAttackRelease(in
 
   const nebulaInstruments = {
     violin: new Tone.Synth({
-      oscillator: { type: "sawtooth" },
-      envelope: { attack: 0.02, decay: 0.15, sustain: 0.4, release: 0.9 },
+      oscillator: { type: "triangle" },
+      envelope: { attack: 0.06, decay: 0.38, sustain: 0.45, release: 1.8 },
     }),
 
     cello: new Tone.Synth({
       oscillator: { type: "triangle" },
-      envelope: { attack: 0.05, decay: 0.25, sustain: 0.6, release: 1.3 },
+      envelope: { attack: 0.08, decay: 0.45, sustain: 0.55, release: 2.2 },
     }),
     organ: new Tone.Synth({
       oscillator: { type: "sine" },
-      envelope: { attack: 0.02, decay: 0.12, sustain: 0.75, release: 0.9 },
+      envelope: { attack: 0.06, decay: 0.25, sustain: 0.68, release: 1.9 },
     }),
-    harp: new Tone.PluckSynth(),
+    harp: new Tone.PluckSynth({ attackNoise: 0.45, dampening: 2800, resonance: 0.82 }),
     piano: new Tone.Synth({
       oscillator: { type: "sine" },
-      envelope: { attack: 0.008, decay: 0.25, sustain: 0.0, release: 1.6 },
+      envelope: { attack: 0.02, decay: 0.32, sustain: 0.08, release: 2.4 },
     }),
   };
 
   Object.values(nebulaInstruments).forEach(inst => {
-    inst.volume.value = -14;
+    inst.volume.value = -16;
   });
 
 
@@ -129,10 +129,12 @@ export function createGalaxyVoices() {async function safeTriggerAttackRelease(in
   // 让 violin/cello/organ/harp/piano 也走同一套空间效果，声音才“融入银河”
   // 建一个专门 scratchBus
   const scratchBus = new Tone.Gain(1.0);
-  scratchBus.chain(compressor, limiter, Tone.Destination);
+  const scratchFilter = new Tone.Filter({ type: "lowpass", frequency: 2600, Q: 0.45 });
+  const scratchChorus = new Tone.Chorus({ frequency: 0.22, delayTime: 2.2, depth: 0.35, wet: 0.12 }).start();
+  scratchBus.chain(scratchFilter, scratchChorus, compressor, limiter, Tone.Destination);
 
   // 轻一点空间（不是主空间）
-  const scratchReverb = new Tone.Reverb({ decay: 3.2, wet: 0.18 });
+  const scratchReverb = new Tone.Reverb({ decay: 5.4, wet: 0.22 });
   scratchBus.connect(scratchReverb);
   scratchReverb.toDestination();
 
