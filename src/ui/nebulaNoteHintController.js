@@ -294,11 +294,13 @@ export function createNebulaNoteHintController({
       for (let i = 0; i < STEPS; i++) {
         const idx = b * STEPS + i;
         const theta = stepToCenterTheta01(i, STEPS) * Math.PI * 2;
-        const px = cluster.center.x + Math.cos(theta) * ringR;
-        const pz = cluster.center.z + Math.sin(theta) * ringR;
-        const py = cluster.center.y + params.bandHeight + 0.05 * Math.sin(t * 1.7 + i + b * 0.7);
-
-        bandLabels[idx].position.set(px, py, pz);
+        const localPos = new THREE.Vector3(
+          Math.cos(theta) * ringR,
+          params.bandHeight + 0.05 * Math.sin(t * 1.7 + i + b * 0.7),
+          Math.sin(theta) * ringR
+        );
+        const worldPos = cluster.group.localToWorld(localPos);
+        bandLabels[idx].position.copy(worldPos);
         bandLabels[idx].quaternion.copy(camera.quaternion);
 
         bandSetText[idx](params.labelMode === "solfege" ? solfegeArr[i] : letterArr[i]);

@@ -1,25 +1,27 @@
 import * as THREE from "three";
 import { clamp01, mapThetaRToNoteIntent } from "../music/noteMapping.js";
 
-function computePolarFromInteractionDisk(cluster, pointerNDC, camera) {
+function computePolarFromInteractionDisk(cluster, pointerNDC, camera, nebulaSystem) {
   if (!cluster?.group || !pointerNDC || !camera) return null;
-  const centerW = cluster.group.getWorldPosition(new THREE.Vector3());
   const raycaster = new THREE.Raycaster();
-  const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -centerW.y);
+  const localPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0); // true nebula-local disk plane (y=0)
+  const hitL = new THREE.Vector3();
   const hitW = new THREE.Vector3();
+  const invWorld = cluster.group.matrixWorld.clone().invert();
 
   raycaster.setFromCamera(pointerNDC, camera);
-  const ok = raycaster.ray.intersectPlane(plane, hitW);
+  const rayLocal = raycaster.ray.clone().applyMatrix4(invWorld);
+  const ok = rayLocal.intersectPlane(localPlane, hitL);
   if (!ok) return null;
+  hitW.copy(hitL);
+  cluster.group.localToWorld(hitW);
 
-  const local = hitW.clone();
-  cluster.group.worldToLocal(local);
-
-  const dx = local.x;
-  const dz = local.z;
+  const dx = hitL.x;
+  const dz = hitL.z;
   const dist = Math.hypot(dx, dz);
   const sizeScale = cluster?.preset?.shape?.sizeScale ?? 1.0;
-  const radius = Math.max(1e-4, 1.9 * sizeScale);
+  const baseUIRadius = nebulaSystem?.attractionUI?.radius ?? 1.55;
+  const radius = Math.max(1e-4, baseUIRadius * sizeScale);
   const inner = Math.max(0.08, radius * 0.18);
 
   let ang = Math.atan2(dz, dx);
@@ -45,7 +47,7 @@ export function resolveNoteIntent({
   if (!galaxyId) return null;
 
   const cluster = nebulaSystem?.getCluster?.(galaxyId) ?? null;
-  const polar = computePolarFromInteractionDisk(cluster, pointerNDC, camera);
+  const polar = computePolarFromInteractionDisk(cluster, pointerNDC, camera, nebulaSystem);
 
   if (!polar) return null;
 
