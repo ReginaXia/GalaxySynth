@@ -107,11 +107,17 @@ export function createGalaxyVoices() {async function safeTriggerAttackRelease(in
   const scratchComp = new Tone.Compressor(-17, 2);
   scratchDryBus.chain(scratchHP, scratchLP, scratchTone, scratchComp, limiter, Tone.Destination);
 
-  const haloSendBus = new Tone.Gain(1.0);
+  // Very light celestial halo (kept subtle and easy to tune)
+  const HALO_GAIN = 1.12;
+  const HALO_SHIMMER_WET = 0.10;
+  const HALO_REVERB_DECAY = 3.4;
+  const HALO_REVERB_WET = 0.19;
+
+  const haloSendBus = new Tone.Gain(HALO_GAIN);
   const haloHP = new Tone.Filter({ type: "highpass", frequency: 1900, Q: 0.2 });
   const haloLP = new Tone.Filter({ type: "lowpass", frequency: 12000, Q: 0.2 });
-  const haloShimmer = new Tone.PitchShift({ pitch: 12, windowSize: 0.05, wet: 0.08 });
-  const haloReverb = new Tone.Reverb({ decay: 3.2, preDelay: 0.02, wet: 0.16 });
+  const haloShimmer = new Tone.PitchShift({ pitch: 12, windowSize: 0.05, wet: HALO_SHIMMER_WET });
+  const haloReverb = new Tone.Reverb({ decay: HALO_REVERB_DECAY, preDelay: 0.024, wet: HALO_REVERB_WET });
   haloSendBus.chain(haloHP, haloLP, haloShimmer, haloReverb, limiter, Tone.Destination);
 
   function createCelestialVoice() {
@@ -178,9 +184,10 @@ export function createGalaxyVoices() {async function safeTriggerAttackRelease(in
       haloTap.connect(haloSendBus);
     }
 
-    sendLayer(transientLayer, 1.0, 0.24);
-    sendLayer(coreLayer, 1.0, 0.34);
-    sendLayer(airLayer, 1.0, 0.46);
+    // Keep dry articulation, add a faint trailing glow behind each note.
+    sendLayer(transientLayer, 1.0, 0.28);
+    sendLayer(coreLayer, 1.0, 0.40);
+    sendLayer(airLayer, 1.0, 0.52);
 
     return {
       triggerAttackRelease(note, dur, time, vel = 0.9) {
