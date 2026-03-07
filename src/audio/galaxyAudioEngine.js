@@ -49,6 +49,19 @@ function pitch01ToNote(p01, root = "A3") {
   return Tone.Frequency(root).transpose(octave * 12 + degree).toNote();
 }
 
+function radialExpressionFromR01(r01) {
+  // 0=center, 1=outer -> center gets brighter/louder/snappier
+  const center01 = clamp01(1 - r01);
+  const edge01 = 1 - center01;
+  return {
+    center01,
+    edge01,
+    velocityMul: lerp(0.82, 1.22, center01),
+    durMul: lerp(1.20, 0.80, center01),
+    brightness01: lerp(0.28, 0.95, center01),
+  };
+}
+
 export function createGalaxyAudioEngine() {
   let started = false;
   const nebulaState = new Map();
@@ -466,12 +479,23 @@ now = safeNow;
     const note = noteName ?? mapped.noteName;
     const noteMidi = (midi != null) ? midi : mapped.midi;
     const octaveOffset = Math.round(noteMidi - 60 - degree);
+    const expr = radialExpressionFromR01(r01);
 
 
     // ---- expression ----
     // 快速转 = 更亮、更响
-    const velocity = clamp01(0.25 + speed * 0.9);
-    const dur = Math.max(0.08, 0.22 - speed * 0.06);  
+    const velocity = clamp01((0.25 + speed * 0.9) * expr.velocityMul);
+    const dur = Math.max(0.06, (0.22 - speed * 0.06) * expr.durMul);
+
+    // Per-trigger brightness gesture for scratch instruments.
+    // This is intentionally subtle and globally safe for mixed instrument types.
+    if (typeof instrument?.set === "function") {
+      try {
+        instrument.set({
+          oscillator: { type: expr.brightness01 > 0.72 ? "sawtooth" : "triangle" },
+        });
+      } catch {}
+    }
 
     // Trigger immediately (omit explicit time) to avoid Tone scheduling monotonic-time errors in rapid interactions.
     instrument.triggerAttackRelease(note, dur, now, velocity);
@@ -492,6 +516,7 @@ now = safeNow;
       instrument,
       velocity,
       dur,
+      expression: expr,
     };
 
 

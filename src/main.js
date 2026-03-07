@@ -1411,10 +1411,12 @@ if ((nowMs - __lastUIUpdateMs) > uiIntervalMs) {
 // Use pointer speed + scratch radius as a proxy for "energy"
 const localVel01 = THREE.MathUtils.clamp(Math.max(move01, r01 * 0.25), 0, 1);
 const localPitch01 = THREE.MathUtils.clamp(theta01, 0, 1); // stable, varies around the disk
+const radialCenter01 = THREE.MathUtils.clamp(1 - r01, 0, 1);
+const radialExpress = THREE.MathUtils.lerp(0.15, 1.0, radialCenter01);
 
-bgDrive.leadE = Math.max(bgDrive.leadE, localVel01);
+bgDrive.leadE = Math.max(bgDrive.leadE, Math.max(localVel01, radialExpress * 0.85));
 bgDrive.pitch01 = localPitch01;
-bgDrive.vel01 = localVel01;
+bgDrive.vel01 = Math.max(localVel01, radialExpress * 0.75);
 bgDrive.theta01 = theta01;
 
 
