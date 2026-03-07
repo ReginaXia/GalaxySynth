@@ -56,8 +56,8 @@ function radialExpressionFromR01(r01) {
   return {
     center01,
     edge01,
-    velocityMul: lerp(0.78, 1.00, center01),
-    durMul: lerp(1.35, 1.05, center01),
+    velocityMul: lerp(0.88, 1.08, center01),
+    durMul: lerp(1.10, 0.92, center01),
     brightness01: lerp(0.24, 0.68, center01),
   };
 }
@@ -484,8 +484,8 @@ now = safeNow;
 
     // ---- expression ----
     // 快速转 = 更亮、更响
-    const velocity = clamp01((0.18 + speed * 0.55) * expr.velocityMul);
-    const dur = Math.max(0.12, (0.34 - speed * 0.04) * expr.durMul);
+    const velocity = clamp01((0.24 + speed * 0.62) * expr.velocityMul);
+    const dur = Math.max(0.09, (0.24 - speed * 0.035) * expr.durMul);
 
     // Trigger immediately (omit explicit time) to avoid Tone scheduling monotonic-time errors in rapid interactions.
     instrument.triggerAttackRelease(note, dur, now, velocity);

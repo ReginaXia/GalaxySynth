@@ -55,26 +55,26 @@ export function createGalaxyVoices() {async function safeTriggerAttackRelease(in
   const nebulaInstruments = {
     violin: new Tone.Synth({
       oscillator: { type: "triangle" },
-      envelope: { attack: 0.06, decay: 0.38, sustain: 0.45, release: 1.8 },
+      envelope: { attack: 0.03, decay: 0.26, sustain: 0.36, release: 1.35 },
     }),
 
     cello: new Tone.Synth({
       oscillator: { type: "triangle" },
-      envelope: { attack: 0.08, decay: 0.45, sustain: 0.55, release: 2.2 },
+      envelope: { attack: 0.05, decay: 0.30, sustain: 0.42, release: 1.55 },
     }),
     organ: new Tone.Synth({
       oscillator: { type: "sine" },
-      envelope: { attack: 0.06, decay: 0.25, sustain: 0.68, release: 1.9 },
+      envelope: { attack: 0.04, decay: 0.20, sustain: 0.58, release: 1.45 },
     }),
     harp: new Tone.PluckSynth({ attackNoise: 0.45, dampening: 2800, resonance: 0.82 }),
     piano: new Tone.Synth({
-      oscillator: { type: "sine" },
-      envelope: { attack: 0.02, decay: 0.32, sustain: 0.08, release: 2.4 },
+      oscillator: { type: "triangle" },
+      envelope: { attack: 0.015, decay: 0.24, sustain: 0.06, release: 1.75 },
     }),
   };
 
   Object.values(nebulaInstruments).forEach(inst => {
-    inst.volume.value = -16;
+    inst.volume.value = -14.5;
   });
 
 
@@ -129,12 +129,15 @@ export function createGalaxyVoices() {async function safeTriggerAttackRelease(in
   // 让 violin/cello/organ/harp/piano 也走同一套空间效果，声音才“融入银河”
   // 建一个专门 scratchBus
   const scratchBus = new Tone.Gain(1.0);
-  const scratchFilter = new Tone.Filter({ type: "lowpass", frequency: 2600, Q: 0.45 });
-  const scratchChorus = new Tone.Chorus({ frequency: 0.22, delayTime: 2.2, depth: 0.35, wet: 0.12 }).start();
-  scratchBus.chain(scratchFilter, scratchChorus, compressor, limiter, Tone.Destination);
+  const scratchHP = new Tone.Filter({ type: "highpass", frequency: 140, Q: 0.2 });
+  const scratchLP = new Tone.Filter({ type: "lowpass", frequency: 8800, Q: 0.2 });
+  const scratchAir = new Tone.EQ3({ low: -3.5, mid: -0.5, high: 3.0 });
+  const scratchChorus = new Tone.Chorus({ frequency: 0.28, delayTime: 2.4, depth: 0.24, wet: 0.10 }).start();
+  const scratchDelay = new Tone.FeedbackDelay({ delayTime: "16n", feedback: 0.18, wet: 0.07 });
+  scratchBus.chain(scratchHP, scratchLP, scratchAir, scratchChorus, scratchDelay, compressor, limiter, Tone.Destination);
 
-  // 轻一点空间（不是主空间）
-  const scratchReverb = new Tone.Reverb({ decay: 5.4, wet: 0.22 });
+  // Bright, transparent space (avoid dark/wet cloud)
+  const scratchReverb = new Tone.Reverb({ decay: 3.6, preDelay: 0.02, wet: 0.14 });
   scratchBus.connect(scratchReverb);
   scratchReverb.toDestination();
 
