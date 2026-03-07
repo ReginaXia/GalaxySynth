@@ -1,5 +1,6 @@
 // src/audio/galaxyAudioEngine.js
 import * as Tone from "tone";
+import { MAJOR_SCALE, mapThetaRToNoteIntent, quantizeWithHysteresis } from "../music/noteMapping.js";
 
 function clamp01(x) {
   return Math.max(0, Math.min(1, x));
@@ -22,41 +23,8 @@ function nz(v) {
 }
 
 
-function wrapStep(i, steps) {
-  const s = Math.max(1, steps | 0);
-  return ((i % s) + s) % s;
-}
-
-// Hysteresis quantizer: "stick" to lastStep until you pass boundary by margin
-function quantizeWithHysteresis(theta01, steps, lastStep, margin = 0.18) {
-  const s = Math.max(1, steps | 0);
-
-  // continuous position in [0, s)
-  const x = clamp01(theta01) * s;
-
-  // if no history, fall back
-  if (lastStep == null || lastStep < 0) return Math.floor(x) % s;
-
-  // compare to center of last step (lastStep + 0.5), wrap diff to shortest direction
-  let d = x - (lastStep + 0.5);
-  // wrap to [-s/2, s/2]
-  d = ((d + s / 2) % s) - s / 2;
-
-  // if still inside the "sticky" zone, keep lastStep
-  // Each bin width is 1; boundary is at ±0.5 from center.
-  const keepZone = 0.5 - margin; // margin越大越“吸附”
-  if (Math.abs(d) <= keepZone) return wrapStep(lastStep, s);
-
-  // otherwise, move one step toward direction
-  const next = lastStep + (d > 0 ? 1 : -1);
-  return wrapStep(next, s);
-}
-
-
-
 // Safe scale: minor pentatonic (never too wrong)
 // const MINOR_PENTA = [0, 3, 5, 7, 10];
-const MAJOR_SCALE = [0, 2, 4, 5, 7, 9, 11]; // semitones
 
 function quantize(v, steps) {
   const s = Math.max(1, steps | 0);
@@ -432,6 +400,10 @@ let __globalMonotonicStartTime = -Infinity;
     galaxyId,
     theta01,
     r01 = 0.5,
+    noteName = null,
+    midi = null,
+    step: intentStep = null,
+    degree: intentDegree = null,
     instrument,
     now = Tone.now(),
   }) {
@@ -446,24 +418,13 @@ if (safeNow <= __globalMonotonicStartTime) safeNow = __globalMonotonicStartTime 
 __globalMonotonicStartTime = safeNow;
 now = safeNow;
 
-
-    // 0(中心)更高、1(外圈)更低：invert
-    const inv = clamp01(1 - r01);
-
-    // octaveOffset: 中心 +12 或 +24，外圈 0 或 -12
-    // 先给你一个“好听且不极端”的范围：外圈低一八度，中心高一八度
-    let octaveOffset = 0;
-    if (r01 < 0.33) octaveOffset = +12;      // 中心：高八度
-    else if (r01 < 0.66) octaveOffset = 0;   // 中间：本八度
-    else octaveOffset = -12;                 // 外圈：低八度
-
-
-    const baseMidi = Tone.Frequency("C4").toMidi();
-    const rootMidi = baseMidi + octaveOffset;
-    const rootNote = Tone.Frequency(rootMidi, "midi").toNote();
-
     const STEPS = MAJOR_SCALE.length;
-    const BASE_ROOT = "C4";
+    const mapped = mapThetaRToNoteIntent({
+      galaxyId,
+      theta01,
+      r01,
+      timeMs: now * 1000,
+    });
 
     // ---- state ----
     const st =
@@ -478,7 +439,7 @@ now = safeNow;
     // DJ-like sticky stepping (better feel, avoids edge jitter)
     // ---- step quantization ----
     // DJ-like sticky stepping (better feel, avoids edge jitter)
-    const step = quantizeWithHysteresis(theta01, STEPS, st.lastStep, 0.18);
+    const step = (intentStep != null) ? intentStep : quantizeWithHysteresis(theta01, STEPS, st.lastStep, 0.18);
 // ✅ 如果 step 没变：不重触发音，但要更新状态（否则 dt/dTheta 会乱）
     if (step === st.lastStep) {
       st.lastTheta = theta01;
@@ -500,13 +461,10 @@ now = safeNow;
     const dt = Math.max(0.001, now - st.lastTime);
     const speed = Math.abs(dTheta) / dt; // “转速感”
 
-    const direction = Math.sign(dTheta) || 1;
-
-    // ---- musical mapping ----
-    // ---- musical mapping ----
-    // ✅ 直接用离散音阶 degree，避免 step/7 造成的浮点 floor 偏差
-    const degree = MAJOR_SCALE[step]; // 0,2,4,5,7,9,11
-    const note = Tone.Frequency(rootNote).transpose(degree).toNote();
+    const degree = (intentDegree != null) ? intentDegree : MAJOR_SCALE[step];
+    const note = noteName ?? mapped.noteName;
+    const noteMidi = (midi != null) ? midi : mapped.midi;
+    const octaveOffset = Math.round(noteMidi - 60 - degree);
 
 
     // ---- expression ----
@@ -520,7 +478,7 @@ now = safeNow;
         // ---- expose for HUD / visuals ----
     out.lastNote = note;
     out.lastNoteTime = now;
-    out.lastMidi = Tone.Frequency(note).toMidi();
+    out.lastMidi = noteMidi;
 
     out.scratch = {
       galaxyId,

@@ -26,6 +26,9 @@ import { createGalaxyVoices } from "./audio/galaxyVoices.js";
 import { createAudioMonitorUI } from "./ui/audioMonitor.js";
 
 import { createCameraControlSystem } from "./input/cameraControlSystem.js";
+import { musicState } from "./state/musicState.js";
+import { resolveNoteIntent } from "./interaction/resolveNoteIntent.js";
+import { onPointerMove, onPointerDown, onPointerMovePressed, onPointerUp } from "./interaction/intentStateMachine.js";
 
 import starsVert from "./shaders/stars.vert.glsl?raw";
 import starsFrag from "./shaders/stars.frag.glsl?raw";
@@ -59,6 +62,16 @@ debugHud.textContent = "HUD ready";
 
 
 document.body.appendChild(debugHud);
+
+const DEBUG_INTENT = true;
+const __lastIntentLog = { hover: null, active: null, last: null };
+function logIntentChange(kind, intent) {
+  if (!DEBUG_INTENT) return;
+  const next = intent?.noteName ?? null;
+  if (__lastIntentLog[kind] === next) return;
+  __lastIntentLog[kind] = next;
+  console.log(`[intent] ${kind}:`, next ?? "-");
+}
 
 
 (async function main(){
@@ -200,7 +213,7 @@ let nebulaHit = null; // 存当前命中的物体（可用于后续“active neb
 
 let frameCount = 0;
 
-let activeNebulaKey = "C_pluck";
+let activeNebulaKey = null;
 
 let lastInteractionTime = 0; 
 
@@ -341,7 +354,14 @@ function __markPointerMoved(clientX, clientY) {
 }
 
 window.addEventListener("pointerdown", () => (pointerDown = true));
-window.addEventListener("pointerup",   () => (pointerDown = false));
+window.addEventListener("pointerup", () => {
+  pointerDown = false;
+  onPointerUp(musicState);
+  activeNebulaKey = null;
+  activeDiskCenterW = null;
+  logIntentChange("last", musicState.lastIntent);
+  logIntentChange("active", musicState.activeIntent);
+});
 
 
 
@@ -454,12 +474,14 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     interactionMode = "orbit";
     activeNebulaKey = null; // ✅ ESC 退出当前星云控制
+    musicState.activeIntent = null;
   }
 });
 
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     activeNebulaKey = null;
+    musicState.activeIntent = null;
   }
 });
 
@@ -730,29 +752,30 @@ canvas.addEventListener("pointerdown", (e) => {
     return;
   }
 
-  // ✅ 普通左键：做“即时 pick”（不依赖 hoveredNebulaKey）
+  // 左键：activeIntent = hoverIntent（null 则保持 null）
   if (e.button === 0) {
     const pick = pickNebulaAtEvent(e);
+    const hoverAtDown = resolveNoteIntent({
+      mode: "hover",
+      galaxyId: pick?.galaxyId ?? null,
+      nebulaHit: pick?.hit ?? null,
+      nebulaSystem,
+      nowMs: performance.now(),
+    });
+    onPointerMove(musicState, hoverAtDown);
+    logIntentChange("hover", musicState.hoverIntent);
 
-    if (pick?.galaxyId) {
-      activeNebulaKey = pick.galaxyId;
+    onPointerDown(musicState);
+    logIntentChange("active", musicState.activeIntent);
 
+    if (musicState.activeIntent?.galaxyId) {
+      activeNebulaKey = musicState.activeIntent.galaxyId;
       cacheActiveDiskFromNebula(activeNebulaKey);
-
-
-      // 可选：确认音（你之前已经做过）
-      // const inst = voices.getNebulaInstrument(activeNebulaKey);
-      // inst?.triggerAttackRelease("C5", "16n", Tone.now(), 0.9);
-
-      // 进入演奏：不旋转
-      return;
     } else {
-      // 点空白：取消选中
       activeNebulaKey = null;
       activeDiskCenterW = null;
-      // 点空白本身不旋转；想旋转请按 Alt（手感更一致）
-      return;
     }
+    return;
   }
 });
 
@@ -1125,6 +1148,36 @@ if (shouldPickNebula) {
 nebulaHit = nebulaHitLocal;
 const hasNebulaHit = !!nebulaHit;
 
+  const hoverIntentNow = resolveNoteIntent({
+    mode: "hover",
+    galaxyId: hoveredNebulaKey,
+    nebulaHit: nebulaHitLocal,
+    nebulaSystem,
+    nowMs,
+  });
+  onPointerMove(musicState, hoverIntentNow);
+  logIntentChange("hover", musicState.hoverIntent);
+  hoveredNebulaKey = musicState.hoverIntent?.galaxyId ?? null;
+
+  const activeGalaxyId = musicState.activeIntent?.galaxyId ?? activeNebulaKey;
+  if (pointerDown && activeGalaxyId && activeDiskCenterW) {
+    const activeIntentNow = resolveNoteIntent({
+      mode: "active",
+      galaxyId: activeGalaxyId,
+      pointerNDC: pointer,
+      camera,
+      diskCenterW: activeDiskCenterW,
+      diskInnerNDC: activeDiskInnerNDC,
+      diskOuterNDC: activeDiskOuterNDC,
+      nowMs,
+    });
+    onPointerMovePressed(musicState, activeIntentNow, 0.18);
+    logIntentChange("active", musicState.activeIntent);
+  }
+
+  activeNebulaKey = musicState.activeIntent?.galaxyId ?? null;
+  if (activeNebulaKey && !activeDiskCenterW) cacheActiveDiskFromNebula(activeNebulaKey);
+
 
 
 
@@ -1182,15 +1235,19 @@ const hasNebulaHit = !!nebulaHit;
 
   const aHud = audio.getState();
   const s = aHud.scratch;
+  const hoverIntent = musicState.hoverIntent;
+  const activeIntent = musicState.activeIntent;
+  const lastIntent = musicState.lastIntent;
 
 
   // --- Debug HUD update (must be inside tick)
-  const hoverInst = hoveredNebulaKey ? voices.getNebulaInstrumentName(hoveredNebulaKey) : "-";
-  const activeInst = activeNebulaKey ? voices.getNebulaInstrumentName(activeNebulaKey) : "-";
+  const hoverInst = hoverIntent?.galaxyId ? voices.getNebulaInstrumentName(hoverIntent.galaxyId) : "-";
+  const activeInst = activeIntent?.galaxyId ? voices.getNebulaInstrumentName(activeIntent.galaxyId) : "-";
 
-  const noteStr = aHud.lastNote ?? "-";
-  const midiStr = (typeof aHud.lastMidi === "number") ? aHud.lastMidi : "-";
-  const stepStr = s ? `${s.step + 1}/${s.steps}` : "-";
+  const truthIntent = activeIntent ?? hoverIntent ?? lastIntent;
+  const noteStr = truthIntent?.noteName ?? "-";
+  const midiStr = (typeof truthIntent?.midi === "number") ? truthIntent.midi : "-";
+  const stepStr = truthIntent ? `${(truthIntent.step ?? 0) + 1}/7` : "-";
   const octStr  = s ? `${s.octaveOffset}` : "-";
 
 // UI (note hints) can be expensive; update at limited rate.
@@ -1198,8 +1255,8 @@ const uiHz = pointerDown ? 30 : 15;
 const uiIntervalMs = 1000 / uiHz;
 if ((nowMs - __lastUIUpdateMs) > uiIntervalMs) {
   __lastUIUpdateMs = nowMs;
-  const focusNebulaForHint = (pointerDown && activeNebulaKey) ? activeNebulaKey : hoveredNebulaKey;
-  noteHint?.update?.(focusNebulaForHint);
+  const focusIntentForHint = (pointerDown && activeIntent) ? activeIntent : hoverIntent;
+  noteHint?.update?.(focusIntentForHint?.galaxyId ?? null, focusIntentForHint);
 }
 
   // Debug HUD is surprisingly expensive if updated every frame.
@@ -1208,9 +1265,9 @@ if ((nowMs - __lastUIUpdateMs) > uiIntervalMs) {
     debugHud.textContent =
       `mode:   ${interactionMode}
 ` +
-      `hover:  ${hoveredNebulaKey ?? "-"}
+      `hover:  ${hoverIntent?.galaxyId ?? "-"}
 ` +
-      `active: ${activeNebulaKey ?? "-"}
+      `active: ${activeIntent?.galaxyId ?? "-"}
 ` +
       `hit:    ${hasNebulaHit ? "yes" : "no"}
 ` +
@@ -1220,39 +1277,19 @@ if ((nowMs - __lastUIUpdateMs) > uiIntervalMs) {
 ` +
       `note:   ${noteStr}  (midi ${midiStr})
 ` +
-      `step:   ${stepStr}  degree:${s?.degree ?? "-"}
+      `step:   ${stepStr}  degree:${truthIntent?.degree ?? "-"}
 ` +
       `oct:    ${octStr}
 ` +
-      `theta:  ${(s?.theta01 ?? 0).toFixed(3)}
+      `theta:  ${(truthIntent?.theta01 ?? 0).toFixed(3)}
 ` +
-      `r:      ${(s?.r01 ?? 0).toFixed(3)}
+      `r:      ${(truthIntent?.r01 ?? 0).toFixed(3)}
 ` +
       `vel:    ${(s?.velocity ?? 0).toFixed(2)} dur:${(s?.dur ?? 0).toFixed(3)}`;
   }
 
   const trig = ps.trigger;
   if (trig) ps.trigger = false;
-
-
-  // click 发生时：如果命中星云，就切 activeNebulaId（用 hoveredNebulaKey）
-  if (trig && hoveredNebulaKey) {
-    const prev = activeNebulaKey;
-
-    // if (hoveredNebulaKey) {
-    //   activeNebulaKey = hoveredNebulaKey;
-    //   interactionMode = "play";   // ✅ 选中星云 → 锁定演奏模式
-    // } else {
-    //   interactionMode = "orbit";  // ✅ 点空白 → 解锁旋转
-    // }
-
-    // 立刻给一个“音色确认音”：点击就能听到变化
-    if (prev !== activeNebulaKey) {
-      const inst = voices.getNebulaInstrument(activeNebulaKey);
-      // 选一个固定音高，避免你以为“音高变了=音色变了”
-      inst?.triggerAttackRelease("C5", "16n", Tone.now(), 0.9);
-    }
-  }
 
 
   // 4) 音频：先喂，再更新（Lead Gate: only when hovering nebula）
@@ -1265,32 +1302,24 @@ if ((nowMs - __lastUIUpdateMs) > uiIntervalMs) {
   // 每帧更新一次盘面 NDC 半径（跟随相机缩放）
   updateActiveDiskNdcRadii();
 
-  if (pointerDown && activeNebulaKey && activeDiskCenterW) {
-    const centerN = activeDiskCenterW.clone().project(camera);
+  if (pointerDown && activeNebulaKey && activeDiskCenterW && musicState.activeIntent) {
+    const activeProbeIntent = resolveNoteIntent({
+      mode: "active",
+      galaxyId: activeNebulaKey,
+      pointerNDC: pointer,
+      camera,
+      diskCenterW: activeDiskCenterW,
+      diskInnerNDC: activeDiskInnerNDC,
+      diskOuterNDC: activeDiskOuterNDC,
+      nowMs,
+    });
 
-    const dx = pointer.x - centerN.x;
-    const dy = pointer.y - centerN.y;
-    const dist = Math.hypot(dx, dy);
-
-    // ✅ 容错演奏盘：在 outer 半径内、且避开中心死区
-    inDisk = dist <= activeDiskOuterNDC && dist >= activeDiskInnerNDC;
-
-    // ✅ 只要按住鼠标并且在演奏盘范围内，就认为是在“演奏当前 active 星云”
+    inDisk = !!activeProbeIntent;
     isActiveNebulaHovered = pointerDown && !!activeNebulaKey && !!activeDiskCenterW && inDisk;
 
-
     if (inDisk) {
-      let ang = Math.atan2(dy, dx);
-      if (ang < 0) ang += Math.PI * 2;
-      const theta01 = ang / (Math.PI * 2);
-
-      // ✅ r01: 0(靠近中心) -> 1(靠近外圈)
-      const r01 = THREE.MathUtils.clamp(
-        (dist - activeDiskInnerNDC) /
-          Math.max(1e-6, (activeDiskOuterNDC - activeDiskInnerNDC)),
-        0,
-        1
-      );
+      const theta01 = musicState.activeIntent.theta01;
+      const r01 = musicState.activeIntent.r01;
 
       // --- feed background from lead gesture (safe, no undefined)
 // --- feed background from lead gesture (stable mapping)
@@ -1315,7 +1344,7 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
 
 
       const instrument = voices?.getNebulaInstrument?.(activeNebulaKey);
-      noteHint?.setInteractionSample?.(activeNebulaKey, theta01, r01);
+      noteHint?.setInteractionSample?.(activeNebulaKey, musicState.activeIntent.theta01, musicState.activeIntent.r01);
       // 给镜头一个演奏脉冲
 
       // const distance = camera.position.distanceTo(cameraControl.getTarget?.() ?? new THREE.Vector3(0,0,0));
@@ -1330,8 +1359,12 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
 
       audio.playNebulaScratch({
         galaxyId: activeNebulaKey,
-        theta01,
-        r01,
+        theta01: musicState.activeIntent.theta01,
+        r01: musicState.activeIntent.r01,
+        step: musicState.activeIntent.step,
+        degree: musicState.activeIntent.degree,
+        noteName: musicState.activeIntent.noteName,
+        midi: musicState.activeIntent.midi,
         instrument,
       });
     }

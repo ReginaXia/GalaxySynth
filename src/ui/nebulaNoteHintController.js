@@ -332,7 +332,7 @@ export function createNebulaNoteHintController({
     }
   }
 
-  function update(hoveredNebulaId) {
+  function update(hoveredNebulaId, truthIntent = null) {
     const nowMs = performance.now();
 
     if (!params.enabled || !hoveredNebulaId) {
@@ -346,15 +346,29 @@ export function createNebulaNoteHintController({
       return;
     }
 
-    // try to use interactionSample (exact theta/r used for audio)
+    // Prefer unified truth intent from musicState; fallback stays display-only.
     let theta01 = null;
     let r01 = null;
+    let infoFromTruth = null;
 
-    if (
+    if (truthIntent && truthIntent.galaxyId === hoveredNebulaId) {
+      theta01 = truthIntent.theta01;
+      r01 = truthIntent.r01;
+      infoFromTruth = {
+        note: truthIntent.noteName,
+        midi: truthIntent.midi,
+        step: truthIntent.step,
+        degree: truthIntent.step,
+        theta01: truthIntent.theta01,
+        r01: truthIntent.r01,
+      };
+    }
+
+    if (!infoFromTruth && (
       interactionSample &&
       interactionSample.id === hoveredNebulaId &&
       (nowMs - interactionSample.timeMs) < 1500
-    ) {
+    )) {
       theta01 = interactionSample.theta01;
       r01 = interactionSample.r01;
     } else {
@@ -387,7 +401,7 @@ st.smoothTheta01 = usingSample ? theta01 : smoothWrap01(st.smoothTheta01, theta0
 
     st.lastSeenMs = nowMs;
 
-    const info = previewNote({ galaxyId: hoveredNebulaId, theta01: st.smoothTheta01, r01, state: st });
+    const info = infoFromTruth ?? previewNote({ galaxyId: hoveredNebulaId, theta01: st.smoothTheta01, r01, state: st });
 
     // update local sticky step from preview result
     if (typeof info.step === "number") st.lastStep = info.step;
@@ -421,10 +435,6 @@ st.smoothTheta01 = usingSample ? theta01 : smoothWrap01(st.smoothTheta01, theta0
 
     const info = previewNote({ galaxyId: pick.galaxyId, theta01: tr.theta01, r01: tr.r01, state: st });
     if (typeof info.step === "number") st.lastStep = info.step;
-
-    const inst = voices?.getNebulaInstrument?.(pick.galaxyId);
-    // DO NOT pass explicit time to avoid Tone "start time" assertions in rapid clicks
-    inst?.triggerAttackRelease(info.note, "16n", undefined, 0.95);
 
     return pick;
   }

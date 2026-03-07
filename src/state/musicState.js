@@ -1,4 +1,7 @@
 export const musicState = {
+  hoverIntent: null,
+  activeIntent: null,
+  lastIntent: null,
 
   activeNote: -1,
   targetNote: -1,
@@ -17,6 +20,18 @@ export function setActiveNote(note){
   musicState.activeNote = note;
   musicState.targetHue = note / 12;
 
+}
+
+export function setHoverIntent(intent) {
+  musicState.hoverIntent = intent ? { ...intent } : null;
+}
+
+export function setActiveIntent(intent) {
+  musicState.activeIntent = intent ? { ...intent } : null;
+}
+
+export function setLastIntent(intent) {
+  musicState.lastIntent = intent ? { ...intent } : null;
 }
 
 export function updateMusicState(){
