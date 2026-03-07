@@ -847,6 +847,20 @@ canvas.addEventListener("pointerdown", (e) => {
     if (musicState.activeIntent?.galaxyId) {
       activeNebulaKey = musicState.activeIntent.galaxyId;
       cacheActiveDiskFromNebula(activeNebulaKey);
+      const instrument = voices?.getNebulaInstrument?.(activeNebulaKey);
+      if (instrument) {
+        audio.playNebulaScratch({
+          galaxyId: activeNebulaKey,
+          theta01: musicState.activeIntent.theta01,
+          r01: musicState.activeIntent.r01,
+          step: musicState.activeIntent.step,
+          degree: musicState.activeIntent.degree,
+          noteName: musicState.activeIntent.noteName,
+          midi: musicState.activeIntent.midi,
+          forceTrigger: true,
+          instrument,
+        });
+      }
     } else {
       activeNebulaKey = null;
       activeDiskCenterW = null;

@@ -404,6 +404,7 @@ let __globalMonotonicStartTime = -Infinity;
     midi = null,
     step: intentStep = null,
     degree: intentDegree = null,
+    forceTrigger = false,
     instrument,
     now = Tone.now(),
   }) {
@@ -441,7 +442,7 @@ now = safeNow;
     // DJ-like sticky stepping (better feel, avoids edge jitter)
     const step = (intentStep != null) ? intentStep : quantizeWithHysteresis(theta01, STEPS, st.lastStep, 0.18);
 // ✅ 如果 step 没变：不重触发音，但要更新状态（否则 dt/dTheta 会乱）
-    if (step === st.lastStep) {
+    if (!forceTrigger && step === st.lastStep) {
       st.lastTheta = theta01;
       st.lastTime = now;
       nebulaState.set(galaxyId, st);
