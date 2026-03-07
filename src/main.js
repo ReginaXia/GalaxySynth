@@ -95,6 +95,8 @@ let bgPitch01 = 0.5;   // 0..1
 let bgVel01 = 0.0;     // 0..1
 let bgTheta01 = 0.0;   // 0..1
 let bgPulse = 0.0;     // 0..1 (note trigger)
+let bgClickPulse = 0.0; // click-triggered ripple source
+let bgClickPulseVis = 0.0; // attack-shaped pulse
 let bgLastStep = -1;
 let bgNoteHue = 0.86;
 let bgNoteSeed = 0.0;
@@ -115,6 +117,11 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1;
 document.body.appendChild(renderer.domElement);
+
+function __bgRiseFall(current, target, dt, rise = 16.0, fall = 4.0) {
+  const k = target > current ? rise : fall;
+  return THREE.MathUtils.damp(current, target, k, dt);
+}
 
 // -------------------------------------
 // Scene / Camera
@@ -227,82 +234,13 @@ let frameCount = 0;
 
 let activeNebulaKey = null;
 
-let lastInteractionTime = 0; 
+let lastInteractionTime = 0;
 
-
-// 鼠标点击事件
-  window.addEventListener("click", (e) => {
-    // 将鼠标位置转为NDC坐标
-    pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
-    pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
-
-    // 通过射线检测当前鼠标是否在星云上
-    raycaster.setFromCamera(pointer, camera);
-    const intersects = raycaster.intersectObject(nebulaSystem.root, true); // 检测星云
-
-    if (intersects.length > 0) {
-      // 鼠标点击到星云
-      if (!isInteracting) {
-        isInteracting = true;
-        lastInteractionTime = Date.now();
-        // 激活背景流动效果和亮度，渐渐亮起
-        fadeInBackground();
-      }
-    } else {
-      // 鼠标点击没有点击到星云
-      if (isInteracting) {
-        isInteracting = false;
-        // 恢复黑色背景并禁用流动效果，渐渐变暗
-        fadeOutBackground();
-      }
-    }
-  });
-
-  // 鼠标移动事件
-  window.addEventListener("mousemove", () => {
-    if (isInteracting && Date.now() - lastInteractionTime > 500) {
-      // 如果鼠标没有再交互且超过 0.5 秒，背景渐渐变暗
-      fadeOutBackground();
-    }
-  });
-
-  // 背景渐渐亮起
-  function fadeInBackground() {
-    const startTime = Date.now();
-    const duration = 500;  // 渐变时间 0.5秒
-
-    function update() {
-      const elapsedTime = Date.now() - startTime;
-      const progress = Math.min(elapsedTime / duration, 1);  // 计算渐变的进度
-      bg.uniforms.uFlow.value = Math.min(bg.uniforms.uFlow.value + progress * 0.5, 1.0);
-      bg.uniforms.uSparkle.value = Math.min(bg.uniforms.uSparkle.value + progress * 0.15, 0.15);
-      bg.uniforms.uIntensity.value = Math.min(bg.uniforms.uIntensity.value + progress * 1.0, 1.0);
-
-      if (elapsedTime < duration) {
-        requestAnimationFrame(update);
-      }
-    }
-    update();
-  }
-
-  // 背景渐渐变暗
-  function fadeOutBackground() {
-    const startTime = Date.now();
-    const duration = 500;  // 渐变时间 0.5秒
-
-    function update() {
-      const elapsedTime = Date.now() - startTime;
-      const progress = Math.min(elapsedTime / duration, 1);  // 计算渐变的进度
-      bg.uniforms.uFlow.value = Math.max(bg.uniforms.uFlow.value - progress * 0.5, 0.0);
-      bg.uniforms.uSparkle.value = Math.max(bg.uniforms.uSparkle.value - progress * 0.15, 0.0);
-      bg.uniforms.uIntensity.value = Math.max(bg.uniforms.uIntensity.value - progress * 1.0, 0.0);
-
-      if (elapsedTime < duration) {
-        requestAnimationFrame(update);
-      }
-    }
-    update();
-  }
+function triggerBackgroundPulse(strength = 1.0) {
+  const s = THREE.MathUtils.clamp(strength, 0, 1);
+  bgClickPulse = Math.max(bgClickPulse, s);
+  bgPulse = Math.max(bgPulse, 0.75 * s);
+}
 
 
 // -------------------------------------
@@ -860,6 +798,7 @@ canvas.addEventListener("pointerdown", (e) => {
           forceTrigger: true,
           instrument,
         });
+        triggerBackgroundPulse(1.0);
       }
     } else {
       activeNebulaKey = null;
@@ -1147,12 +1086,7 @@ if (Tone.Transport.state !== "started") Tone.Transport.start();
 
 // 更新背景效果函数
 function updateBackgroundEffects(dt) {
-  // 如果用户有交互，逐渐增加流动和亮度效果
-  if (isInteracting) {
-    bg.uniforms.uFlow.value = THREE.MathUtils.damp(bg.uniforms.uFlow.value, 1.0, 5.0, dt);
-    bg.uniforms.uSparkle.value = THREE.MathUtils.damp(bg.uniforms.uSparkle.value, 0.15, 5.0, dt);
-    bg.uniforms.uIntensity.value = THREE.MathUtils.damp(bg.uniforms.uIntensity.value, 1.0, 5.0, dt);
-  }
+  // legacy path disabled; background is driven by audio/interaction envelopes in tick()
 }
 
 function tick() {
@@ -1503,33 +1437,46 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
   {
     const sScratch = audio.getState()?.scratch;
 
-    // "playing" = holding mouse + hovering the active nebula + scratch has some velocity
     const scratchVel01 = THREE.MathUtils.clamp((sScratch?.velocity ?? 0) / 1.2, 0, 1);
-    const isPlaying = !!(pointerDown && isActiveNebulaHovered && scratchVel01 > 0.01);
+    const isPlaying = !!(pointerDown && isActiveNebulaHovered);
+    const interactionNow = !!(pointerDown && (isActiveNebulaHovered || musicState.activeIntent));
 
-    // Smooth presence (leadE)
-    const targetLead = isPlaying ? Math.min(1.0, 0.10 + 0.90 * scratchVel01) : 0.0;
-    bgLeadE = THREE.MathUtils.damp(bgLeadE, targetLead, 5.0, dt);
+    // Click pulse envelope: immediate rise (0.03~0.08s), slower fade (0.5~0.8s)
+    bgClickPulse = Math.max(0.0, bgClickPulse - dt / 0.65);
+    bgClickPulseVis = __bgRiseFall(bgClickPulseVis, bgClickPulse, dt, 26.0, 4.2);
+
+    // Immediate interaction drive for hold/slide, with no hover-delay dependency.
+    const baseHold = interactionNow ? 0.28 : 0.0;
+    const targetLead = THREE.MathUtils.clamp(baseHold + scratchVel01 * 0.78 + bgClickPulseVis * 0.55, 0, 1);
+    bgLeadE = __bgRiseFall(bgLeadE, targetLead, dt, 18.0, 5.0);
 
     // Smooth pitch/vel/theta (prefer scratch state; fallback to bgDrive)
     const targetPitch = (typeof sScratch?.pitch01 === "number") ? sScratch.pitch01 : bgDrive.pitch01;
-    const targetVel   = isPlaying ? scratchVel01 : 0.0;
+    const targetVel   = interactionNow ? Math.max(0.12, scratchVel01) : 0.0;
     const targetTheta = (typeof sScratch?.theta01 === "number") ? sScratch.theta01 : bgDrive.theta01;
 
-    bgPitch01 = THREE.MathUtils.damp(bgPitch01, THREE.MathUtils.clamp(targetPitch, 0, 1), 8.0, dt);
-    bgVel01   = THREE.MathUtils.damp(bgVel01,   THREE.MathUtils.clamp(targetVel,   0, 1), 10.0, dt);
-    bgTheta01 = THREE.MathUtils.damp(bgTheta01, THREE.MathUtils.clamp(targetTheta, 0, 1), 10.0, dt);
+    bgPitch01 = __bgRiseFall(bgPitch01, THREE.MathUtils.clamp(targetPitch, 0, 1), dt, 14.0, 7.0);
+    bgVel01   = __bgRiseFall(bgVel01,   THREE.MathUtils.clamp(targetVel,   0, 1), dt, 16.0, 6.0);
+    bgTheta01 = __bgRiseFall(bgTheta01, THREE.MathUtils.clamp(targetTheta, 0, 1), dt, 14.0, 8.0);
+
+    // Directly drive visible flow/brightness response (keeps click + hold responsive).
+    const flowTarget = THREE.MathUtils.clamp(0.06 + bgLeadE * 0.95 + bgClickPulseVis * 0.65, 0, 1.25);
+    const sparkleTarget = THREE.MathUtils.clamp(0.015 + bgLeadE * 0.18 + bgClickPulseVis * 0.16, 0, 0.32);
+    const intensityTarget = THREE.MathUtils.clamp(0.12 + bgLeadE * 1.0 + bgClickPulseVis * 0.75, 0, 1.35);
+    bg.uniforms.uFlow.value = __bgRiseFall(bg.uniforms.uFlow.value, flowTarget, dt, 18.0, 4.8);
+    bg.uniforms.uSparkle.value = __bgRiseFall(bg.uniforms.uSparkle.value, sparkleTarget, dt, 14.0, 5.0);
+    bg.uniforms.uIntensity.value = __bgRiseFall(bg.uniforms.uIntensity.value, intensityTarget, dt, 16.0, 4.6);
 
     // Pulse: when step changes while playing
     const stepNow = (typeof sScratch?.step === "number") ? sScratch.step : -1;
     if (isPlaying && stepNow >= 0 && stepNow !== bgLastStep) {
       bgLastStep = stepNow;
-      bgPulse = 1.0;
+      triggerBackgroundPulse(0.85);
       bgNoteSeed = t;
       bgNoteHue = (stepNow % STEPS) / STEPS;
       bgDrive.noteSeed = bgNoteSeed;
     }
-    bgPulse = Math.max(0.0, bgPulse - dt * 2.6);
+    bgPulse = Math.max(0.0, bgPulse - dt / 0.70);
 
     // Feed shader uniforms (new dreamyBackground API)
     if (bg && bg.setAudio) {
