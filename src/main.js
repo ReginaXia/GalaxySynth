@@ -29,6 +29,7 @@ import { createCameraControlSystem } from "./input/cameraControlSystem.js";
 import { musicState } from "./state/musicState.js";
 import { resolveNoteIntent } from "./interaction/resolveNoteIntent.js";
 import { onPointerMove, onPointerDown, onPointerMovePressed, onPointerUp } from "./interaction/intentStateMachine.js";
+import { NOTE_STEPS, stepToBoundaryTheta01, stepToCenterTheta01 } from "./music/noteMapping.js";
 
 import starsVert from "./shaders/stars.vert.glsl?raw";
 import starsFrag from "./shaders/stars.frag.glsl?raw";
@@ -64,6 +65,7 @@ debugHud.textContent = "HUD ready";
 document.body.appendChild(debugHud);
 
 const DEBUG_INTENT = true;
+const DEBUG_NOTE_OVERLAY = true;
 const __lastIntentLog = { hover: null, active: null, last: null };
 function logIntentChange(kind, intent) {
   if (!DEBUG_INTENT) return;
@@ -72,6 +74,16 @@ function logIntentChange(kind, intent) {
   __lastIntentLog[kind] = next;
   console.log(`[intent] ${kind}:`, next ?? "-");
 }
+
+const noteOverlay = document.createElement("canvas");
+noteOverlay.style.cssText = `
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  pointer-events: none;
+`;
+document.body.appendChild(noteOverlay);
+const noteOverlayCtx = noteOverlay.getContext("2d");
 
 
 (async function main(){
@@ -633,6 +645,69 @@ const nebulaSystem = createNebulaSystem({
 
 setupGalaxyGUI({ camera, renderer, nebulaSystem });
 
+function resizeNoteOverlay() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  noteOverlay.width = w;
+  noteOverlay.height = h;
+}
+
+function worldToOverlayXY(v3) {
+  const p = v3.clone().project(camera);
+  return {
+    x: (p.x * 0.5 + 0.5) * noteOverlay.width,
+    y: (1 - (p.y * 0.5 + 0.5)) * noteOverlay.height,
+  };
+}
+
+function drawNoteAlignmentOverlay(intent) {
+  if (!DEBUG_NOTE_OVERLAY || !noteOverlayCtx) return;
+  const ctx = noteOverlayCtx;
+  ctx.clearRect(0, 0, noteOverlay.width, noteOverlay.height);
+
+  if (!intent?.galaxyId) return;
+  const cluster = nebulaSystem.getCluster?.(intent.galaxyId);
+  if (!cluster?.group) return;
+
+  const sizeScale = cluster?.preset?.shape?.sizeScale ?? 1.0;
+  const radius = Math.max(1e-4, 1.9 * sizeScale);
+
+  const centerW = cluster.group.localToWorld(new THREE.Vector3(0, 0, 0));
+  const center2 = worldToOverlayXY(centerW);
+
+  ctx.strokeStyle = "rgba(120,200,255,0.65)";
+  ctx.lineWidth = 1;
+
+  for (let i = 0; i < NOTE_STEPS; i++) {
+    const a = stepToBoundaryTheta01(i, NOTE_STEPS) * Math.PI * 2;
+    const p = cluster.group.localToWorld(new THREE.Vector3(Math.cos(a) * radius, 0, Math.sin(a) * radius));
+    const p2 = worldToOverlayXY(p);
+    ctx.beginPath();
+    ctx.moveTo(center2.x, center2.y);
+    ctx.lineTo(p2.x, p2.y);
+    ctx.stroke();
+  }
+
+  for (let i = 0; i < NOTE_STEPS; i++) {
+    const a = stepToCenterTheta01(i, NOTE_STEPS) * Math.PI * 2;
+    const p = cluster.group.localToWorld(new THREE.Vector3(Math.cos(a) * radius, 0, Math.sin(a) * radius));
+    const p2 = worldToOverlayXY(p);
+    ctx.fillStyle = (i === intent.step) ? "rgba(255,255,120,0.95)" : "rgba(255,255,255,0.7)";
+    ctx.beginPath();
+    ctx.arc(p2.x, p2.y, i === intent.step ? 4 : 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (intent.hitWorld) {
+    const hit2 = worldToOverlayXY(intent.hitWorld);
+    ctx.fillStyle = "rgba(255,80,80,0.95)";
+    ctx.beginPath();
+    ctx.arc(hit2.x, hit2.y, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+resizeNoteOverlay();
+
 function cacheActiveDiskFromNebula(galaxyId) {
   if (!galaxyId) {
     activeDiskCenterW = null;
@@ -755,11 +830,12 @@ canvas.addEventListener("pointerdown", (e) => {
   // 左键：activeIntent = hoverIntent（null 则保持 null）
   if (e.button === 0) {
     const pick = pickNebulaAtEvent(e);
+    const ndc = getPointerNDCFromEvent(e);
     const hoverAtDown = resolveNoteIntent({
-      mode: "hover",
       galaxyId: pick?.galaxyId ?? null,
-      nebulaHit: pick?.hit ?? null,
       nebulaSystem,
+      pointerNDC: ndc,
+      camera,
       nowMs: performance.now(),
     });
     onPointerMove(musicState, hoverAtDown);
@@ -1149,10 +1225,10 @@ nebulaHit = nebulaHitLocal;
 const hasNebulaHit = !!nebulaHit;
 
   const hoverIntentNow = resolveNoteIntent({
-    mode: "hover",
     galaxyId: hoveredNebulaKey,
-    nebulaHit: nebulaHitLocal,
     nebulaSystem,
+    pointerNDC: pointer,
+    camera,
     nowMs,
   });
   onPointerMove(musicState, hoverIntentNow);
@@ -1162,13 +1238,10 @@ const hasNebulaHit = !!nebulaHit;
   const activeGalaxyId = musicState.activeIntent?.galaxyId ?? activeNebulaKey;
   if (pointerDown && activeGalaxyId && activeDiskCenterW) {
     const activeIntentNow = resolveNoteIntent({
-      mode: "active",
       galaxyId: activeGalaxyId,
+      nebulaSystem,
       pointerNDC: pointer,
       camera,
-      diskCenterW: activeDiskCenterW,
-      diskInnerNDC: activeDiskInnerNDC,
-      diskOuterNDC: activeDiskOuterNDC,
       nowMs,
     });
     onPointerMovePressed(musicState, activeIntentNow, 0.18);
@@ -1245,6 +1318,7 @@ const hasNebulaHit = !!nebulaHit;
   const activeInst = activeIntent?.galaxyId ? voices.getNebulaInstrumentName(activeIntent.galaxyId) : "-";
 
   const truthIntent = activeIntent ?? hoverIntent ?? lastIntent;
+  drawNoteAlignmentOverlay(truthIntent);
   const noteStr = truthIntent?.noteName ?? "-";
   const midiStr = (typeof truthIntent?.midi === "number") ? truthIntent.midi : "-";
   const stepStr = truthIntent ? `${(truthIntent.step ?? 0) + 1}/7` : "-";
@@ -1304,13 +1378,10 @@ if ((nowMs - __lastUIUpdateMs) > uiIntervalMs) {
 
   if (pointerDown && activeNebulaKey && activeDiskCenterW && musicState.activeIntent) {
     const activeProbeIntent = resolveNoteIntent({
-      mode: "active",
       galaxyId: activeNebulaKey,
+      nebulaSystem,
       pointerNDC: pointer,
       camera,
-      diskCenterW: activeDiskCenterW,
-      diskInnerNDC: activeDiskInnerNDC,
-      diskOuterNDC: activeDiskOuterNDC,
       nowMs,
     });
 
@@ -1485,6 +1556,7 @@ tick();
 window.addEventListener("resize", () => {
   const w = window.innerWidth;
   const h = window.innerHeight;
+  resizeNoteOverlay();
   renderer.setSize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();

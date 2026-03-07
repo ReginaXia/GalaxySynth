@@ -1,6 +1,7 @@
 // src/ui/nebulaNoteHintController.js
 import * as THREE from "three";
 import * as Tone from "tone";
+import { NOTE_STEPS, stepToCenterTheta01 } from "../music/noteMapping.js";
 
 function clamp01(x) { return Math.max(0, Math.min(1, x)); }
 
@@ -123,7 +124,7 @@ export function createNebulaNoteHintController({
 
   // band sprites: maxBands * 7
   const MAX_BANDS = Math.max(1, Math.min(8, params.maxBands));
-  const STEPS = 7;
+  const STEPS = NOTE_STEPS;
 
   const bandLabels = [];
   const bandSetText = [];
@@ -282,11 +283,6 @@ export function createNebulaNoteHintController({
       }
     }
 
-    // spiral-ish offset based on length (visual match to arms)
-    const shape = cluster?.preset?.shape ?? {};
-    const length = shape.length ?? 1.0;
-    const twist = 8.5 + (15.5 - 8.5) * clamp01((length - 0.5) / 1.2);
-
     const t = performance.now() * 0.001;
 
     // hide all first
@@ -295,16 +291,11 @@ export function createNebulaNoteHintController({
     for (let b = 0; b < bands; b++) {
       const r01 = r01List[b];
       const ringR = baseR * r01;
-      const spiralOffset = r01 * twist * 0.15;
-
       for (let i = 0; i < STEPS; i++) {
         const idx = b * STEPS + i;
-
-        const theta = (i / STEPS) * Math.PI * 2 + spiralOffset;
-
-        const drift = params.bandDrift * Math.sin(t * 1.5 + i * 0.9 + b);
-        const px = cluster.center.x + Math.cos(theta) * (ringR + drift);
-        const pz = cluster.center.z + Math.sin(theta) * (ringR + drift);
+        const theta = stepToCenterTheta01(i, STEPS) * Math.PI * 2;
+        const px = cluster.center.x + Math.cos(theta) * ringR;
+        const pz = cluster.center.z + Math.sin(theta) * ringR;
         const py = cluster.center.y + params.bandHeight + 0.05 * Math.sin(t * 1.7 + i + b * 0.7);
 
         bandLabels[idx].position.set(px, py, pz);
