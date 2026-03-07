@@ -28,7 +28,7 @@ function makeGlowTextSprite(text = "C", opts = {}) {
     map: texture,
     transparent: true,
     depthWrite: false,
-    depthTest: true,
+    depthTest: false,
   });
 
   const sprite = new THREE.Sprite(material);
@@ -99,7 +99,7 @@ export function createNebulaNoteHintController({
     cursorDrift: 0.05,
 
     // multi-band hints
-    showBands: false,
+    showBands: true,
     maxBands: 4,
     bandScale: 1.0,
     bandHeight: 0.22,
@@ -167,21 +167,18 @@ export function createNebulaNoteHintController({
   }
 
   function estimateNebulaBaseRadius(cluster) {
-    // Local-space radius: keep angle/r mapping stable even when the nebula group rotates.
+    const uiR = nebulaSystem?.attractionUI?.radius ?? 1.55;
     const sizeScale = cluster?.preset?.shape?.sizeScale ?? 1.0;
-    // 与 scratchDisk / 本地坐标对齐
-    return 1.9 * sizeScale;
+    const groupScale = cluster?.group?.scale?.x ?? 1.0;
+    return uiR * sizeScale * groupScale;
   }
 
   function computeTheta01AndR01(cluster, worldPoint) {
-    // IMPORTANT: compute in nebula LOCAL space so the mapping rotates with the star field.
-    const gp = cluster?.group;
-    if (!gp) return { theta01: 0, r01: 0 };
-    const v = gp.worldToLocal(worldPoint.clone());
+    const v = worldPoint.clone().sub(cluster.center);
     const theta = Math.atan2(v.z, v.x);
     const theta01 = (theta / (Math.PI * 2) + 1) % 1;
     const baseR = Math.max(1e-4, estimateNebulaBaseRadius(cluster));
-    const r01 = clamp01(Math.hypot(v.x, v.z) / baseR);
+    const r01 = clamp01(v.length() / baseR);
     return { theta01, r01 };
   }
 
@@ -380,15 +377,13 @@ export function createNebulaNoteHintController({
       hoverState.set(hoveredNebulaId, st);
     }
 
-        const usingSample =
-      interactionSample &&
-      interactionSample.id === hoveredNebulaId &&
-      (nowMs - interactionSample.timeMs) < 1500;
+    const usingSample =
+  interactionSample &&
+  interactionSample.id === hoveredNebulaId &&
+  (nowMs - interactionSample.timeMs) < 1500;
 
-    // 当跟随 audio truth 时，不做平滑（避免“环上追逐”造成跳动/闪烁）
-    st.smoothTheta01 = usingSample
-      ? theta01
-      : smoothWrap01(st.smoothTheta01, theta01, params.smoothTheta);
+// When following audio truth, DO NOT smooth (avoids “cycle around the ring” chasing)
+st.smoothTheta01 = usingSample ? theta01 : smoothWrap01(st.smoothTheta01, theta01, params.smoothTheta);
 
     st.lastSeenMs = nowMs;
 
