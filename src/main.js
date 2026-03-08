@@ -130,6 +130,21 @@ function __bgRiseFall(current, target, dt, rise = 16.0, fall = 4.0) {
   return THREE.MathUtils.damp(current, target, k, dt);
 }
 
+function __wrap01(v) {
+  return ((v % 1) + 1) % 1;
+}
+
+function __bgRiseFallWrap(current, target, dt, rise = 16.0, fall = 4.0) {
+  const c = __wrap01(current);
+  const t = __wrap01(target);
+  let d = t - c;
+  if (d > 0.5) d -= 1.0;
+  if (d < -0.5) d += 1.0;
+  const linearTarget = c + d;
+  const k = linearTarget > c ? rise : fall;
+  return __wrap01(THREE.MathUtils.damp(c, linearTarget, k, dt));
+}
+
 // -------------------------------------
 // Scene / Camera
 // -------------------------------------
@@ -1937,7 +1952,8 @@ bgDrive.theta01 = theta01;
 
     // ✅ 给背景一个“随音符变化的色相驱动”（避免一直停留在同一主色）
     // 这里用 theta + pitch 的混合做一个稳定又有变化的 hue（0..1）
-    bgDrive.noteHue = (theta01 + bgDrive.pitch01 * 0.65) % 1.0;
+    // Keep note hue tied to angular position directly to avoid abrupt composite wrap jumps.
+    bgDrive.noteHue = ((theta01 % 1) + 1) % 1;
 // trigger a short "ink injection" pulse
 bgDrive.pulse = 1.0;
 bgDrive.noteSeed = (Math.random() * 0.999) + 0.001;
@@ -2080,7 +2096,7 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
 
     bgPitch01 = __bgRiseFall(bgPitch01, THREE.MathUtils.clamp(targetPitch, 0, 1), dt, 14.0, 7.0);
     bgVel01   = __bgRiseFall(bgVel01,   THREE.MathUtils.clamp(targetVel,   0, 1), dt, 16.0, 6.0);
-    bgTheta01 = __bgRiseFall(bgTheta01, THREE.MathUtils.clamp(targetTheta, 0, 1), dt, 14.0, 8.0);
+    bgTheta01 = __bgRiseFallWrap(bgTheta01, THREE.MathUtils.clamp(targetTheta, 0, 1), dt, 14.0, 8.0);
 
     // Directly drive visible flow/brightness response (keeps click + hold responsive).
     const cinematicGain = cinematicState.enabled ? (1.0 + cinematicState.energy * 0.42) : 1.0;
