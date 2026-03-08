@@ -156,7 +156,7 @@ void main(){
   vec3 dir = normalize(vWorldPos - cameraPosition);
   vec2 uv = vec2(atan(dir.z, dir.x) / (6.2831853) + 0.5, asin(dir.y) / 3.1415926 + 0.5);
 
-  float t = uTime * (0.016 + 0.16 * uFlow);
+  float t = uTime * (0.016 + 0.22 * uFlow);
 
   float e = saturate(uLeadE);
   float e2 = e*e;
@@ -176,8 +176,8 @@ void main(){
 
   vec2 w1 = vec2(fbm(p * 0.75 + vec2(t, -t)), fbm(p * 0.75 + vec2(-t, t)));
   vec2 w2 = vec2(fbm(p * 1.30 + vec2(-t*1.2, t*0.8)), fbm(p * 1.30 + vec2(t*0.9, -t*0.9)));
-  vec2 materialWarp = (vec2(flowA - 0.5, flowB - 0.5)) * (0.10 + 0.14 * uWarp) * (0.45 + 0.35 * e);
-  vec2 warp = (w1 - 0.5) * (0.55 + 0.85*e) * uWarp + (w2 - 0.5) * (0.18 + 0.45*e) * uDetail + materialWarp;
+  vec2 materialWarp = (vec2(flowA - 0.5, flowB - 0.5)) * (0.10 + 0.16 * uWarp) * (0.45 + 0.45 * e);
+  vec2 warp = (w1 - 0.5) * (0.60 + 1.05*e) * uWarp + (w2 - 0.5) * (0.22 + 0.52*e) * uDetail + materialWarp;
 
   // Step 2B: localized interaction energy + transport.
   vec2 dInt = uv - uInteractionPos;
@@ -194,8 +194,8 @@ void main(){
   vec2 localVectorField = swirlDir * swirlPhase * 0.030 + dInt * (-0.020);
 
   vec2 flowUV = p;
-  flowUV += localVectorField * energy;
-  flowUV += flowDir * energy * 0.15;
+  flowUV += localVectorField * energy * 1.18;
+  flowUV += flowDir * energy * 0.22;
 
   vec2 q = flowUV + warp;
   float f = fbm(q * 0.70 + vec2(0.0, t*0.45));
@@ -229,7 +229,7 @@ band2 = saturate(band2 + jitter);
 
 float palettePhase = (0.62 + t * 0.06 + (materialField - 0.5) * 0.14);
 
-  float sheen = (fres * (0.35 + 0.85*e) + (band2-0.5) * 0.25) * uPearl;
+  float sheen = (fres * (0.35 + 1.05*e) + (band2-0.5) * 0.28) * uPearl;
 
   float pulse = saturate(uPulse) * (0.2 + 0.8*vel);
 
@@ -296,7 +296,7 @@ float ink = pulse * inkFall;
      spectralMagenta * wMagenta +
      spectralGold    * wGold) / wSum;
 
-  float spectralBlend = (0.02 + 0.12 * materialRidge) * (0.30 + 0.55 * e) * (0.35 + 0.65 * fres);
+  float spectralBlend = (0.03 + 0.16 * materialRidge) * (0.35 + 0.65 * e) * (0.35 + 0.65 * fres);
   c0 = mix(c0, spectralCol, spectralBlend * 0.45);
   c1 = mix(c1, spectralCol, spectralBlend * 0.65);
 
@@ -304,7 +304,7 @@ float ink = pulse * inkFall;
   col = mix(col, c0, wCloud);
   col = mix(col, c1, wSheen);
   col = mix(col, cInk, wInk);
-  col = mix(col, spectralCol, (0.01 + 0.05 * materialRidge) * (0.35 + 0.45 * e) * (0.30 + 0.70 * fres));
+  col = mix(col, spectralCol, (0.015 + 0.075 * materialRidge) * (0.35 + 0.62 * e) * (0.30 + 0.70 * fres));
 
   float sp = 0.0;
   if (uSparkle > 0.001){
@@ -319,7 +319,7 @@ float ink = pulse * inkFall;
   col = applySaturation(col, 1.0 + uSat);
   col = applyContrast(col, uContrast);
 
-  float bright = uIntensity * (0.55 + 1.10*e);
+  float bright = uIntensity * (0.52 + 1.22*e);
   bright = min(bright, 1.35); // 防止过曝导致中心出现奇怪的红形状
   col *= bright;
 
