@@ -18,6 +18,7 @@ import { createMeteorSystem } from "./meteor/meteorSystem.js";
 import { createDreamyBackground } from "./background/dreamyBackground";
 
 import { createPerformanceState } from "./performance/performanceState";
+import { createAutoPlayConductor } from "./performance/autoPlayConductor.js";
 import { createMouseKeyboardController } from "./input/mouseKeyboardController";
 import { createGalaxyAudioEngine } from "./audio/galaxyAudioEngine";
 
@@ -32,7 +33,7 @@ import { createCameraControlSystem } from "./input/cameraControlSystem.js";
 import { musicState } from "./state/musicState.js";
 import { resolveNoteIntent } from "./interaction/resolveNoteIntent.js";
 import { onPointerMove, onPointerDown, onPointerMovePressed, onPointerUp } from "./interaction/intentStateMachine.js";
-import { NOTE_STEPS, MAJOR_SCALE, mapThetaRToNoteIntent, stepToBoundaryTheta01, stepToCenterTheta01, wrapStep } from "./music/noteMapping.js";
+import { NOTE_STEPS, stepToBoundaryTheta01, stepToCenterTheta01 } from "./music/noteMapping.js";
 
 import starsVert from "./shaders/stars.vert.glsl?raw";
 import starsFrag from "./shaders/stars.frag.glsl?raw";
@@ -600,13 +601,6 @@ const cinematicState = {
   prevMeteor: null,
 };
 
-const autoPlayState = {
-  enabled: false,
-  style: "dream", // dream | sparkle | calm
-  tempo: 86,
-  lastStepIndex: -1,
-};
-
 function smoothPulse01(x) {
   const t = THREE.MathUtils.clamp(x, 0, 1);
   return Math.sin(t * Math.PI);
@@ -651,112 +645,12 @@ const nebulaSystem = createNebulaSystem({
   starTexture,
 });
 
-const AUTO_ROLE_IDS = ["A_pad", "B_bell", "C_pluck", "D_sparkle", "E_air"];
-const AUTO_CHORDS = [
-  [0, 4, 7],   // C
-  [9, 0, 4],   // Am
-  [5, 9, 0],   // F
-  [7, 11, 2],  // G
-];
-
-function autoResolveGalaxy(roleIdx) {
-  const fixedId = AUTO_ROLE_IDS[roleIdx];
-  if (nebulaSystem.getCluster?.(fixedId)) return fixedId;
-  const list = nebulaSystem.clusters ?? [];
-  return list[roleIdx]?.id ?? list[0]?.id ?? null;
-}
-
-function semiToStep(semi) {
-  const idx = MAJOR_SCALE.indexOf(((semi % 12) + 12) % 12);
-  return idx >= 0 ? idx : 0;
-}
-
-function autoTriggerRole(galaxyId, step, r01, vel = 0.65, dur = 0.18) {
-  if (!galaxyId) return;
-  const theta01 = stepToCenterTheta01(step, NOTE_STEPS);
-  const intent = mapThetaRToNoteIntent({ galaxyId, theta01, r01, timeMs: performance.now() });
-  const instrument = voices?.getNebulaInstrument?.(galaxyId);
-  if (!instrument) return;
-  audio.playNebulaScratch({
-    galaxyId,
-    theta01: intent.theta01,
-    r01: intent.r01,
-    step: intent.step,
-    degree: intent.degree,
-    noteName: intent.noteName,
-    midi: intent.midi,
-    instrument,
-    forceTrigger: true,
-    now: Tone.now(),
-  });
-  nebulaSystem.triggerNotePulse({
-    galaxyId,
-    theta01: intent.theta01,
-    strength: THREE.MathUtils.clamp(0.55 + vel * 0.40, 0, 1),
-  });
-  triggerBackgroundPulse(0.45);
-}
-
-function updateAutoPlay(tSec) {
-  if (!autoPlayState.enabled || pointerDown) return;
-  const stepDur = (60 / Math.max(50, Math.min(160, autoPlayState.tempo))) / 4; // 16th note
-  const stepIndex = Math.floor(tSec / stepDur);
-  if (stepIndex === autoPlayState.lastStepIndex) return;
-  autoPlayState.lastStepIndex = stepIndex;
-
-  const s16 = ((stepIndex % 16) + 16) % 16;
-  const bar = Math.floor(stepIndex / 16);
-  const chord = AUTO_CHORDS[((bar % AUTO_CHORDS.length) + AUTO_CHORDS.length) % AUTO_CHORDS.length];
-  const chordSteps = chord.map(semiToStep);
-  const root = chordSteps[0];
-
-  const style = autoPlayState.style;
-  const styleVel = style === "sparkle" ? 0.76 : style === "calm" ? 0.58 : 0.66;
-  const styleDurMul = style === "sparkle" ? 0.82 : style === "calm" ? 1.28 : 1.0;
-
-  const gA = autoResolveGalaxy(0);
-  const gB = autoResolveGalaxy(1);
-  const gC = autoResolveGalaxy(2);
-  const gD = autoResolveGalaxy(3);
-  const gE = autoResolveGalaxy(4);
-
-  // A: harmonic bed
-  if (s16 === 0 || s16 === 8) {
-    const step = s16 === 0 ? root : chordSteps[1];
-    autoTriggerRole(gA, step, 0.82, styleVel * 0.74, 0.42 * styleDurMul);
-  }
-
-  // B: lead motif (8th notes)
-  if ((s16 & 1) === 0) {
-    const motif = style === "calm"
-      ? [0, 1, 2, 1, 0, 2, 1, 0]
-      : style === "sparkle"
-        ? [2, 3, 4, 3, 2, 5, 4, 3]
-        : [1, 2, 3, 2, 1, 4, 3, 2];
-    const k = motif[(s16 / 2) % motif.length];
-    const step = wrapStep(root + k, NOTE_STEPS);
-    autoTriggerRole(gB, step, 0.22, styleVel * 0.96, 0.18 * styleDurMul);
-  }
-
-  // C: arpeggio engine (16th)
-  {
-    const arpIdx = [0, 1, 2, 1][s16 % 4];
-    const step = chordSteps[arpIdx];
-    autoTriggerRole(gC, step, 0.38, styleVel * 0.84, 0.13 * styleDurMul);
-  }
-
-  // D: sparkle accents
-  if (s16 === 7 || s16 === 15 || (style === "sparkle" && (s16 === 3 || s16 === 11))) {
-    const step = wrapStep(root + (style === "sparkle" ? 5 : 4), NOTE_STEPS);
-    autoTriggerRole(gD, step, 0.16, styleVel * 0.70, 0.11 * styleDurMul);
-  }
-
-  // E: airy counter line
-  if (s16 === 4 || s16 === 12) {
-    const step = wrapStep(root + (style === "calm" ? 2 : 3), NOTE_STEPS);
-    autoTriggerRole(gE, step, 0.28, styleVel * 0.78, 0.24 * styleDurMul);
-  }
-}
+const autoPlayConductor = createAutoPlayConductor({
+  nebulaSystem,
+  voices,
+  audio,
+  triggerBackgroundPulse,
+});
 
 function focusCameraToGalaxy(galaxyId) {
   if (!galaxyId) return;
@@ -1194,9 +1088,11 @@ function applyUiState() {
   if (autoPlayTempoLabel) autoPlayTempoLabel.textContent = String(Math.round(uiState.autoPlayTempo ?? 86));
   cinematicState.enabled = !!uiState.cinematic;
   audio?.setNebulaHarmony?.({ enabled: !!uiState.harmonyLayer });
-  autoPlayState.enabled = !!uiState.autoPlay;
-  autoPlayState.style = uiState.autoPlayStyle ?? "dream";
-  autoPlayState.tempo = Number(uiState.autoPlayTempo ?? 86);
+  autoPlayConductor?.setConfig?.({
+    enabled: !!uiState.autoPlay,
+    style: uiState.autoPlayStyle ?? "dream",
+    tempo: Number(uiState.autoPlayTempo ?? 86),
+  });
 
   const showPlay = uiState.visible && uiState.showPlay;
   const showLook = uiState.visible && uiState.showLook;
@@ -1285,7 +1181,6 @@ if (harmonyChk) {
 if (autoPlayChk) {
   autoPlayChk.addEventListener("change", () => {
     uiState.autoPlay = !!autoPlayChk.checked;
-    autoPlayState.lastStepIndex = -1;
     applyUiState();
   });
 }
@@ -1789,7 +1684,7 @@ function tick() {
     }
   }
   const t = clock.getElapsedTime();
-  updateAutoPlay(t);
+  autoPlayConductor?.update?.(t, { pointerDown });
 
   // 更新背景效果
   updateBackgroundEffects(dt);
