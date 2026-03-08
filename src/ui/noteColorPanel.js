@@ -1,8 +1,6 @@
 const STORAGE_KEY = "GalaxySynth_NoteColorMap_v1";
-const DEFAULT_MIX = 0.52;
-const DEFAULT_PEARL = 0.62;
-const DEFAULT_GLOW = 0.56;
 const NOTE_LABELS = ["Do", "Re", "Mi", "Fa", "Sol", "La", "Si"];
+
 const DEFAULT_COLORS = [
   "#8fd3ff",
   "#7f9dff",
@@ -12,6 +10,14 @@ const DEFAULT_COLORS = [
   "#6de7c4",
   "#ffd58a",
 ];
+const DEFAULTS = {
+  mix: 0.52,
+  strict: false,
+  pearl: 0.62,
+  glow: 0.56,
+  richness: 0.58,
+  dream: 0.52,
+};
 
 function clamp01(x) {
   return Math.max(0, Math.min(1, x));
@@ -19,13 +25,10 @@ function clamp01(x) {
 
 function hexToRgb01(hex) {
   const s = String(hex || "").trim().replace("#", "");
-  const h = (s.length === 3) ? s.split("").map((c) => c + c).join("") : s;
+  const h = s.length === 3 ? s.split("").map((c) => c + c).join("") : s;
   const n = parseInt(h, 16);
   if (!Number.isFinite(n)) return [1, 1, 1];
-  const r = (n >> 16) & 255;
-  const g = (n >> 8) & 255;
-  const b = n & 255;
-  return [r / 255, g / 255, b / 255];
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 }
 
 function loadState() {
@@ -36,38 +39,80 @@ function loadState() {
     if (!Array.isArray(p.colors) || p.colors.length < 7) return null;
     return {
       colors: p.colors.slice(0, 7),
-      mix: clamp01(Number(p.mix ?? DEFAULT_MIX)),
+      mix: clamp01(Number(p.mix ?? DEFAULTS.mix)),
       strict: !!p.strict,
-      pearl: clamp01(Number(p.pearl ?? DEFAULT_PEARL)),
-      glow: clamp01(Number(p.glow ?? DEFAULT_GLOW)),
+      pearl: clamp01(Number(p.pearl ?? DEFAULTS.pearl)),
+      glow: clamp01(Number(p.glow ?? DEFAULTS.glow)),
+      richness: clamp01(Number(p.richness ?? DEFAULTS.richness)),
+      dream: clamp01(Number(p.dream ?? DEFAULTS.dream)),
     };
   } catch {
     return null;
   }
 }
 
-function saveState(colors, mix, strict = false, pearl = DEFAULT_PEARL, glow = DEFAULT_GLOW) {
+function saveState(state) {
   try {
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
-        colors,
-        mix: clamp01(mix),
-        strict: !!strict,
-        pearl: clamp01(pearl),
-        glow: clamp01(glow),
+        colors: state.colors,
+        mix: clamp01(state.mix),
+        strict: !!state.strict,
+        pearl: clamp01(state.pearl),
+        glow: clamp01(state.glow),
+        richness: clamp01(state.richness),
+        dream: clamp01(state.dream),
       })
     );
   } catch {}
 }
 
+function makeRangeRow(root, name, initial, onInput) {
+  const wrap = document.createElement("div");
+  wrap.style.cssText = "margin-top:8px;";
+  root.appendChild(wrap);
+
+  const label = document.createElement("div");
+  label.style.cssText = "display:flex; justify-content:space-between; margin-bottom:4px;";
+  wrap.appendChild(label);
+
+  const n = document.createElement("span");
+  n.textContent = name;
+  label.appendChild(n);
+
+  const value = document.createElement("span");
+  label.appendChild(value);
+
+  const input = document.createElement("input");
+  input.type = "range";
+  input.min = "0";
+  input.max = "1";
+  input.step = "0.01";
+  input.value = String(initial);
+  input.style.width = "100%";
+  wrap.appendChild(input);
+
+  const sync = (v) => {
+    value.textContent = `${Math.round(v * 100)}%`;
+    input.value = String(v);
+  };
+  sync(initial);
+  input.addEventListener("input", () => onInput(clamp01(Number(input.value)), sync));
+  return { input, sync };
+}
+
 export function createNoteColorPanel() {
   const saved = loadState();
-  const colors = saved?.colors ?? [...DEFAULT_COLORS];
-  let mix = saved?.mix ?? DEFAULT_MIX;
-  let strict = !!saved?.strict;
-  let pearl = saved?.pearl ?? DEFAULT_PEARL;
-  let glow = saved?.glow ?? DEFAULT_GLOW;
+  const state = {
+    colors: saved?.colors ?? [...DEFAULT_COLORS],
+    mix: saved?.mix ?? DEFAULTS.mix,
+    strict: saved?.strict ?? DEFAULTS.strict,
+    pearl: saved?.pearl ?? DEFAULTS.pearl,
+    glow: saved?.glow ?? DEFAULTS.glow,
+    richness: saved?.richness ?? DEFAULTS.richness,
+    dream: saved?.dream ?? DEFAULTS.dream,
+  };
 
   const root = document.createElement("div");
   root.className = "custom-ui note-color-panel";
@@ -76,7 +121,7 @@ export function createNoteColorPanel() {
     "right:12px",
     "bottom:16px",
     "z-index:9999",
-    "width:220px",
+    "width:224px",
     "padding:10px 12px",
     "border-radius:12px",
     "background:rgba(10,12,22,0.68)",
@@ -106,48 +151,56 @@ export function createNoteColorPanel() {
 
     const input = document.createElement("input");
     input.type = "color";
-    input.value = colors[i];
+    input.value = state.colors[i];
     input.style.cssText = "width:48px; height:20px; border:none; padding:0; background:transparent;";
     input.addEventListener("input", () => {
-      colors[i] = input.value;
-      saveState(colors, mix, strict, pearl, glow);
+      state.colors[i] = input.value;
+      saveState(state);
     });
     rows.appendChild(input);
     colorInputs.push(input);
   }
 
-  const mixWrap = document.createElement("div");
-  mixWrap.style.cssText = "margin-top:10px;";
-  root.appendChild(mixWrap);
+  makeRangeRow(root, "Note Color Mix", state.mix, (v, sync) => {
+    state.mix = v;
+    sync(v);
+    saveState(state);
+  });
 
-  const mixLabel = document.createElement("div");
-  mixLabel.style.cssText = "display:flex; justify-content:space-between; margin-bottom:4px;";
-  mixWrap.appendChild(mixLabel);
-  const mixName = document.createElement("span");
-  mixName.textContent = "Note Color Mix";
-  mixLabel.appendChild(mixName);
-  const mixValue = document.createElement("span");
-  mixLabel.appendChild(mixValue);
+  const strictWrap = document.createElement("label");
+  strictWrap.style.cssText = "display:flex; align-items:center; gap:6px; margin-top:8px; opacity:0.95;";
+  const strictInput = document.createElement("input");
+  strictInput.type = "checkbox";
+  strictInput.checked = !!state.strict;
+  strictInput.addEventListener("change", () => {
+    state.strict = !!strictInput.checked;
+    saveState(state);
+  });
+  const strictText = document.createElement("span");
+  strictText.textContent = "Strict Note Color";
+  strictWrap.appendChild(strictInput);
+  strictWrap.appendChild(strictText);
+  root.appendChild(strictWrap);
 
-  const mixInput = document.createElement("input");
-  mixInput.type = "range";
-  mixInput.min = "0";
-  mixInput.max = "1";
-  mixInput.step = "0.01";
-  mixInput.value = String(mix);
-  mixInput.style.width = "100%";
-  mixWrap.appendChild(mixInput);
-
-  function syncMixUi() {
-    mixValue.textContent = `${Math.round(mix * 100)}%`;
-    mixInput.value = String(mix);
-  }
-  syncMixUi();
-
-  mixInput.addEventListener("input", () => {
-    mix = clamp01(Number(mixInput.value));
-    syncMixUi();
-    saveState(colors, mix, strict, pearl, glow);
+  const pearlRow = makeRangeRow(root, "Pearl", state.pearl, (v, sync) => {
+    state.pearl = v;
+    sync(v);
+    saveState(state);
+  });
+  const glowRow = makeRangeRow(root, "Glow", state.glow, (v, sync) => {
+    state.glow = v;
+    sync(v);
+    saveState(state);
+  });
+  const richnessRow = makeRangeRow(root, "Richness", state.richness, (v, sync) => {
+    state.richness = v;
+    sync(v);
+    saveState(state);
+  });
+  const dreamRow = makeRangeRow(root, "Dream", state.dream, (v, sync) => {
+    state.dream = v;
+    sync(v);
+    saveState(state);
   });
 
   const actions = document.createElement("div");
@@ -156,119 +209,54 @@ export function createNoteColorPanel() {
 
   const resetBtn = document.createElement("button");
   resetBtn.textContent = "Reset";
-  resetBtn.style.cssText = "flex:1; border:0; border-radius:8px; padding:5px 8px; background:#2a2f49; color:#e9ecff; cursor:pointer;";
+  resetBtn.style.cssText =
+    "flex:1; border:0; border-radius:8px; padding:5px 8px; background:#2a2f49; color:#e9ecff; cursor:pointer;";
   resetBtn.addEventListener("click", () => {
     for (let i = 0; i < 7; i++) {
-      colors[i] = DEFAULT_COLORS[i];
-      colorInputs[i].value = colors[i];
+      state.colors[i] = DEFAULT_COLORS[i];
+      colorInputs[i].value = state.colors[i];
     }
-    mix = DEFAULT_MIX;
-    strict = false;
-    strictInput.checked = strict;
-    pearl = DEFAULT_PEARL;
-    glow = DEFAULT_GLOW;
-    pearlInput.value = String(pearl);
-    glowInput.value = String(glow);
-    syncMixUi();
-    syncPearlUi();
-    syncGlowUi();
-    saveState(colors, mix, strict, pearl, glow);
+    state.mix = DEFAULTS.mix;
+    state.strict = DEFAULTS.strict;
+    state.pearl = DEFAULTS.pearl;
+    state.glow = DEFAULTS.glow;
+    state.richness = DEFAULTS.richness;
+    state.dream = DEFAULTS.dream;
+    strictInput.checked = !!state.strict;
+    pearlRow.sync(state.pearl);
+    glowRow.sync(state.glow);
+    richnessRow.sync(state.richness);
+    dreamRow.sync(state.dream);
+    saveState(state);
   });
   actions.appendChild(resetBtn);
-
-  const strictWrap = document.createElement("label");
-  strictWrap.style.cssText = "display:flex; align-items:center; gap:6px; margin-top:8px; opacity:0.95;";
-  const strictInput = document.createElement("input");
-  strictInput.type = "checkbox";
-  strictInput.checked = strict;
-  strictInput.addEventListener("change", () => {
-    strict = !!strictInput.checked;
-    saveState(colors, mix, strict, pearl, glow);
-  });
-  const strictText = document.createElement("span");
-  strictText.textContent = "Strict Note Color";
-  strictWrap.appendChild(strictInput);
-  strictWrap.appendChild(strictText);
-  root.appendChild(strictWrap);
-
-  const pearlWrap = document.createElement("div");
-  pearlWrap.style.cssText = "margin-top:8px;";
-  root.appendChild(pearlWrap);
-  const pearlLabel = document.createElement("div");
-  pearlLabel.style.cssText = "display:flex; justify-content:space-between; margin-bottom:4px;";
-  pearlWrap.appendChild(pearlLabel);
-  const pearlName = document.createElement("span");
-  pearlName.textContent = "Pearl";
-  pearlLabel.appendChild(pearlName);
-  const pearlValue = document.createElement("span");
-  pearlLabel.appendChild(pearlValue);
-  const pearlInput = document.createElement("input");
-  pearlInput.type = "range";
-  pearlInput.min = "0";
-  pearlInput.max = "1";
-  pearlInput.step = "0.01";
-  pearlInput.value = String(pearl);
-  pearlInput.style.width = "100%";
-  pearlWrap.appendChild(pearlInput);
-  function syncPearlUi() {
-    pearlValue.textContent = `${Math.round(pearl * 100)}%`;
-  }
-  syncPearlUi();
-  pearlInput.addEventListener("input", () => {
-    pearl = clamp01(Number(pearlInput.value));
-    syncPearlUi();
-    saveState(colors, mix, strict, pearl, glow);
-  });
-
-  const glowWrap = document.createElement("div");
-  glowWrap.style.cssText = "margin-top:8px;";
-  root.appendChild(glowWrap);
-  const glowLabel = document.createElement("div");
-  glowLabel.style.cssText = "display:flex; justify-content:space-between; margin-bottom:4px;";
-  glowWrap.appendChild(glowLabel);
-  const glowName = document.createElement("span");
-  glowName.textContent = "Glow";
-  glowLabel.appendChild(glowName);
-  const glowValue = document.createElement("span");
-  glowLabel.appendChild(glowValue);
-  const glowInput = document.createElement("input");
-  glowInput.type = "range";
-  glowInput.min = "0";
-  glowInput.max = "1";
-  glowInput.step = "0.01";
-  glowInput.value = String(glow);
-  glowInput.style.width = "100%";
-  glowWrap.appendChild(glowInput);
-  function syncGlowUi() {
-    glowValue.textContent = `${Math.round(glow * 100)}%`;
-  }
-  syncGlowUi();
-  glowInput.addEventListener("input", () => {
-    glow = clamp01(Number(glowInput.value));
-    syncGlowUi();
-    saveState(colors, mix, strict, pearl, glow);
-  });
 
   document.body.appendChild(root);
 
   return {
     root,
     getMix() {
-      return mix;
+      return state.mix;
     },
     isStrict() {
-      return strict;
+      return state.strict;
     },
     getPearl() {
-      return pearl;
+      return state.pearl;
     },
     getGlow() {
-      return glow;
+      return state.glow;
+    },
+    getRichness() {
+      return state.richness;
+    },
+    getDream() {
+      return state.dream;
     },
     getColorRgb01(step) {
       const idx = Number.isFinite(step) ? ((step % 7) + 7) % 7 : -1;
       if (idx < 0) return null;
-      return hexToRgb01(colors[idx]);
+      return hexToRgb01(state.colors[idx]);
     },
     setVisible(visible) {
       root.style.display = visible ? "" : "none";

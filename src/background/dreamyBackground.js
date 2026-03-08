@@ -57,6 +57,8 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
     uNoteColor: { value: new THREE.Vector3(0.0, 0.0, 0.0) },
     uNoteColorMix: { value: 0.0 },
     uNoteColorStrict: { value: 0.0 },
+    uRichness: { value: 0.58 },
+    uDream: { value: 0.52 },
     uInteractionPos: { value: new THREE.Vector2(0.5, 0.5) },
     uEmitPos0: { value: new THREE.Vector2(0.5, 0.5) },
     uEmitPos1: { value: new THREE.Vector2(0.5, 0.5) },
@@ -141,6 +143,8 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
       noteColor = null,
       noteColorMix = 0,
       noteColorStrict = 0,
+      richness = uniforms.uRichness.value,
+      dream = uniforms.uDream.value,
       emitters = null,
     } = {}) {
       uniforms.uLeadE.value   = clamp01(leadE);
@@ -153,6 +157,8 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
       uniforms.uNoteHue.value  = noteHue ?? 0;
       uniforms.uNoteColorMix.value = clamp01(noteColorMix ?? 0);
       uniforms.uNoteColorStrict.value = clamp01(noteColorStrict ?? 0);
+      uniforms.uRichness.value = clamp01(richness ?? uniforms.uRichness.value);
+      uniforms.uDream.value = clamp01(dream ?? uniforms.uDream.value);
       if (noteColor && typeof noteColor.r === "number") {
         uniforms.uNoteColor.value.set(
           clamp01(noteColor.r),

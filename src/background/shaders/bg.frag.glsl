@@ -66,6 +66,8 @@ uniform vec2  uNotePos;    // 0..1
 uniform vec3  uNoteColor;  // 0..1 custom per-note tint
 uniform float uNoteColorMix; // 0..1
 uniform float uNoteColorStrict; // 0..1
+uniform float uRichness; // 0..1
+uniform float uDream; // 0..1
 
 // Three.js built-in uniform (DO NOT redeclare!)
 // uniform vec3 cameraPosition;
@@ -181,6 +183,9 @@ void main(){
   p += m * (0.06 + 0.12*e);
 
   // Large-scale slow material flow layers (richness without noisy boiling).
+  float rich = saturate(uRichness);
+  float dreamy = saturate(uDream);
+
   float flowA = fbm(p * 0.36 + vec2(t * 0.28, -t * 0.22));
   float flowB = fbm((p + vec2(2.7, -1.9)) * 0.22 + vec2(-t * 0.20, t * 0.26));
   float flowC = fbm((p + vec2(-3.1, 1.7)) * 0.58 + vec2(t * 0.11, -t * 0.09));
@@ -239,10 +244,10 @@ g = mix(g, h, 0.14);
 // Medium/high-frequency anisotropic filaments for richer "liquid light" density.
 float filA = fbm(q * 4.8 + vec2(t * 0.92, -t * 0.78));
 float filB = fbm((q + vec2(6.1, -3.7)) * 6.2 + vec2(-t * 0.66, t * 0.58));
-float filament = pow(saturate(abs(filA - filB) * 1.72), 1.28);
-float filC = fbm((q + vec2(-4.3, 2.5)) * 8.8 + vec2(t * 0.52, -t * 0.48));
-float filamentHi = pow(saturate(abs(filC - h) * 1.95), 1.18);
-float vein = pow(saturate(abs(g - f) * 1.75), 1.30);
+  float filament = pow(saturate(abs(filA - filB) * mix(1.45, 1.95, rich)), mix(1.34, 1.14, rich));
+  float filC = fbm((q + vec2(-4.3, 2.5)) * 8.8 + vec2(t * 0.52, -t * 0.48));
+  float filamentHi = pow(saturate(abs(filC - h) * mix(1.65, 2.15, rich)), mix(1.24, 1.10, rich));
+  float vein = pow(saturate(abs(g - f) * mix(1.55, 2.05, rich)), mix(1.34, 1.16, rich));
 
 // Smooth remap (avoid near-binary masks)
 float band  = pow(saturate(f),  1.10);
@@ -282,7 +287,7 @@ inkFall = saturate(inkFall + tri * 0.02);
 float ink = pulse * inkFall;
 
   float richness = 0.35 + 0.45 * e;
-  float wCloud = (0.10 + 0.24*e2) * band * mix(0.76, 1.08, materialRidge * richness);
+  float wCloud = (0.09 + 0.20*e2) * band * mix(0.74, 1.05, materialRidge * richness);
   float wSheen = (0.26 + 0.62*e)  * (0.38 + 0.62*band2) * uPearl * mix(0.78, 1.22, (1.0 - materialRidge) * richness);
   float wInk   = ink * (0.46 + 0.26*e);
 
@@ -367,10 +372,10 @@ float ink = pulse * inkFall;
   // Richer iridescent micro-structure without global overbright fog.
   float filamentMask = filament * (0.36 + 0.64 * materialRidge) * (0.32 + 0.68 * fres) * (0.28 + 0.72 * bandEdge);
   vec3 filamentCol = mix(spectralCol, c1, 0.55);
-  col += filamentCol * filamentMask * (0.16 + 0.20 * e);
-  col += mix(c0, spectralCol, 0.42) * filamentHi * (0.06 + 0.10 * e) * (0.30 + 0.70 * materialRidge);
+  col += filamentCol * filamentMask * (0.10 + 0.24 * rich) * (0.70 + 0.30 * e);
+  col += mix(c0, spectralCol, 0.42) * filamentHi * (0.03 + 0.13 * rich) * (0.30 + 0.70 * materialRidge);
   vec3 veinCol = mix(c0, spectralCol, 0.68);
-  col += veinCol * vein * (0.05 + 0.10 * e) * (0.26 + 0.74 * materialRidge);
+  col += veinCol * vein * (0.03 + 0.11 * rich) * (0.60 + 0.40 * e) * (0.26 + 0.74 * materialRidge);
 
   // Local "cosmic sunset" glow injection from note color (localized only).
   vec3 warmSunset = vec3(1.00, 0.62, 0.36);
@@ -394,12 +399,12 @@ float ink = pulse * inkFall;
   float emitMask = saturate(e0g + e1g + e2g);
   float emitSheen = (0.38 + 0.62 * fres) * (0.30 + 0.70 * materialRidge);
   col += emitCol * (0.30 + 0.62 * emitSheen + (0.22 + 0.35 * strictK) * saturate(uNoteColorMix));
-  col = mix(col, col + emitCol * 0.20, emitMask * 0.22);
+  col = mix(col, col + emitCol * mix(0.14, 0.26, dreamy), emitMask * mix(0.18, 0.30, dreamy));
 
   // Deep pockets with subtle chroma breathing to avoid flatness on large displays.
   float pocketPulse = 0.5 + 0.5 * sin(t * 0.55 + materialField * 5.2 + uTheta01 * 6.28318);
   vec3 pocketCol = mix(vec3(0.03, 0.05, 0.10), spectralCol * 0.55, 0.52 + 0.48 * pocketPulse);
-  col = mix(col, col + pocketCol * 0.10, materialPocket * (0.35 + 0.65 * e));
+  col = mix(col, col + pocketCol * (0.06 + 0.08 * rich), materialPocket * (0.35 + 0.65 * e));
 
   // Preserve dark separations so motion reads as fine flow, not full-screen wash.
   float darkGap = (1.0 - materialRidge) * (0.45 + 0.55 * (1.0 - band));
@@ -415,6 +420,11 @@ float ink = pulse * inkFall;
   }
   vec3 sparkleCol = mix(c1, spectralCol, 0.62);
   col += sp * sparkleCol;
+
+  // Dreamy soft glow only around edges/highlight structures (keeps color coordinated).
+  float dreamMask = (0.25 + 0.75 * fres) * (0.35 + 0.65 * materialRidge);
+  vec3 dreamCol = mix(spectralCol, vec3(0.62, 0.56, 0.78), 0.18);
+  col = mix(col, col + dreamCol * 0.20, dreamy * dreamMask * (0.22 + 0.22 * e));
 
   vec3 satCol = applySaturation(col, 1.12 + uSat * 1.24);
   float satMaskRidge = pow(saturate(materialRidge), 1.1);

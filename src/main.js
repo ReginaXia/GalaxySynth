@@ -1528,6 +1528,8 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     const sScratch = audio.getState()?.scratch;
     const pearlUi = THREE.MathUtils.clamp(noteColorUI?.getPearl?.() ?? 0.62, 0, 1);
     const glowUi = THREE.MathUtils.clamp(noteColorUI?.getGlow?.() ?? 0.56, 0, 1);
+    const richnessUi = THREE.MathUtils.clamp(noteColorUI?.getRichness?.() ?? 0.58, 0, 1);
+    const dreamUi = THREE.MathUtils.clamp(noteColorUI?.getDream?.() ?? 0.52, 0, 1);
 
     const scratchVel01 = THREE.MathUtils.clamp((sScratch?.velocity ?? 0) / 1.2, 0, 1);
     const isPlaying = !!(pointerDown && isActiveNebulaHovered);
@@ -1561,14 +1563,14 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     bgTheta01 = __bgRiseFall(bgTheta01, THREE.MathUtils.clamp(targetTheta, 0, 1), dt, 14.0, 8.0);
 
     // Directly drive visible flow/brightness response (keeps click + hold responsive).
-    const flowTarget = THREE.MathUtils.clamp((0.020 + bgLeadE * 0.90 + bgClickPulseVis * 0.62) * (0.80 + 0.35 * glowUi), 0, 1.12);
+    const flowTarget = THREE.MathUtils.clamp((0.020 + bgLeadE * 0.90 + bgClickPulseVis * 0.62) * (0.80 + 0.35 * glowUi) * (0.92 + 0.22 * richnessUi), 0, 1.12);
     const sparkleTarget = THREE.MathUtils.clamp((0.005 + bgLeadE * 0.16 + bgClickPulseVis * 0.15) * (0.62 + 0.52 * glowUi), 0, 0.28);
-    const satTarget = THREE.MathUtils.clamp(0.28 + bgLeadE * 0.46 + bgClickPulseVis * 0.24, 0.24, 0.92);
+    const satTarget = THREE.MathUtils.clamp(0.26 + bgLeadE * 0.46 + bgClickPulseVis * 0.24 + dreamUi * 0.10, 0.22, 0.96);
     // auto-dim to keep nebula readable
     const readabilityLimiter = interactionNow ? 0.84 : 0.92;
     const intensityTarget = THREE.MathUtils.clamp((0.010 + bgLeadE * 0.42 + bgClickPulseVis * 0.22) * readabilityLimiter * (0.64 + 0.56 * glowUi), 0.01, 0.56);
     bg.uniforms.uFlow.value = __bgRiseFall(bg.uniforms.uFlow.value, flowTarget, dt, 12.0, 1.5);
-    bg.uniforms.uSparkle.value = __bgRiseFall(bg.uniforms.uSparkle.value, sparkleTarget, dt, 12.0, 1.6);
+    bg.uniforms.uSparkle.value = __bgRiseFall(bg.uniforms.uSparkle.value, sparkleTarget * (0.86 + 0.28 * richnessUi), dt, 12.0, 1.6);
     bg.uniforms.uSat.value = __bgRiseFall(bg.uniforms.uSat.value, satTarget, dt, 10.0, 2.2);
     bg.uniforms.uPearl.value = __bgRiseFall(bg.uniforms.uPearl.value, 0.28 + pearlUi * 1.02, dt, 8.0, 4.0);
     bg.uniforms.uIntensity.value = __bgRiseFall(bg.uniforms.uIntensity.value, intensityTarget, dt, 11.0, 1.4);
@@ -1653,6 +1655,8 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
         noteColor,
         noteColorMix: THREE.MathUtils.clamp(strictNoteColor > 0.5 ? Math.max(colorMix, 0.52) : (colorMix * 0.90 + 0.06), 0, 1),
         noteColorStrict: strictNoteColor,
+        richness: richnessUi,
+        dream: dreamUi,
         emitters: [
           { x: bgDrive.notePos.x, y: bgDrive.notePos.y, r: ar, g: ag, b: ab, s: activeStrength },
           { x: sat1.x, y: sat1.y, r: s1r, g: s1g, b: s1b, s: satelliteStrength },
