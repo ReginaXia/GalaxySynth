@@ -1347,7 +1347,7 @@ function makeStars({ count, radius, thickness }) {
     colors[idx3 + 1] = c.g;
     colors[idx3 + 2] = c.b;
 
-    sizes[i] = 0.45 + Math.pow(Math.random(), 2.4) * 2.2;
+    sizes[i] = 0.70 + Math.pow(Math.random(), 2.2) * 3.0;
     seeds[i] = Math.random() * 1000.0;
     alphas[i] = 0.28 + Math.random() * 0.72;
   }
@@ -1367,7 +1367,7 @@ function makeStars({ count, radius, thickness }) {
     uniforms: {
       uTime: { value: 0 },
       uOpacity: { value: 0.58 },
-      uBaseSize: { value: 1.0 },
+      uBaseSize: { value: 1.35 },
       uBreath: { value: 0.60 },
       uBling: { value: 0.58 },
       uSoftness: { value: 0.76 },
@@ -1388,6 +1388,15 @@ function makeStars({ count, radius, thickness }) {
 // -------------------------------------
 const stars = makeStars({ count: 22000, radius: 120.0, thickness: 120.0 });
 scene.add(stars);
+
+function getStarScreenScale() {
+  const screenMax = Math.max(window.innerWidth, window.innerHeight);
+  return THREE.MathUtils.clamp(1.0 + (screenMax - 1400) / 2200, 1.0, 1.55);
+}
+function getStarBaseSize(sizePx = 16) {
+  return THREE.MathUtils.clamp(sizePx, 2, 28) * 0.22 * getStarScreenScale();
+}
+stars.material.uniforms.uBaseSize.value = getStarBaseSize();
 
 // --- background drive state (avoid undefined vars / keep things stable)
 const bgDrive = {
@@ -1610,11 +1619,13 @@ const hasNebulaHit = !!nebulaHit;
   const starBreathUi = THREE.MathUtils.clamp(backgroundDockUI?.getStarBreath?.() ?? 0.60, 0, 1);
   const starBlingUi = THREE.MathUtils.clamp(backgroundDockUI?.getStarBling?.() ?? 0.58, 0, 1);
   const starSoftnessUi = THREE.MathUtils.clamp(backgroundDockUI?.getStarSoftness?.() ?? 0.76, 0, 1);
+  const starSizeUi = THREE.MathUtils.clamp(backgroundDockUI?.getStarSize?.() ?? 16, 2, 28);
   stars.material.uniforms.uBreath.value = starBreathUi;
   stars.material.uniforms.uBling.value = starBlingUi;
   stars.material.uniforms.uSoftness.value = starSoftnessUi;
   stars.material.uniforms.uCross.value = THREE.MathUtils.lerp(0.22, 0.82, starBlingUi);
   stars.material.uniforms.uOpacity.value = THREE.MathUtils.lerp(0.44, 0.86, starBlingUi);
+  stars.material.uniforms.uBaseSize.value = getStarBaseSize(starSizeUi);
 
   // --- nebula & meteor
   const disturbPoint = (nebulaHit?.point ? nebulaHit.point : hitPoint);
@@ -2080,6 +2091,10 @@ window.addEventListener("resize", () => {
   camera.updateProjectionMatrix();
   composer.setSize(w, h);
   bloomPass.setSize(w, h);
+  if (stars?.material?.uniforms?.uBaseSize) {
+    const starSizeUi = THREE.MathUtils.clamp(backgroundDockUI?.getStarSize?.() ?? 16, 2, 28);
+    stars.material.uniforms.uBaseSize.value = getStarBaseSize(starSizeUi);
+  }
 });
 
 // -------------------------------------

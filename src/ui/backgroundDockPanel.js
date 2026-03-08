@@ -6,6 +6,9 @@ const STORAGE_KEY = "GalaxySynth_BackgroundDock_v1";
 function clamp01(x) {
   return Math.max(0, Math.min(1, x));
 }
+function clampRange(x, a, b) {
+  return Math.max(a, Math.min(b, x));
+}
 
 function toHex(v3) {
   const c = new THREE.Color(v3.x, v3.y, v3.z);
@@ -38,6 +41,13 @@ function loadState(defaults) {
       starBreath: clamp01(Number(s.starBreath ?? defaults.starBreath)),
       starBling: clamp01(Number(s.starBling ?? defaults.starBling)),
       starSoftness: clamp01(Number(s.starSoftness ?? defaults.starSoftness)),
+      starSize: clampRange(
+        Number.isFinite(Number(s.starSize))
+          ? (Number(s.starSize) <= 1 ? (4 + Number(s.starSize) * 20) : Number(s.starSize))
+          : defaults.starSize,
+        2,
+        28
+      ),
     };
   } catch {
     return defaults;
@@ -59,6 +69,7 @@ function saveState(state) {
         starBreath: clamp01(state.starBreath),
         starBling: clamp01(state.starBling),
         starSoftness: clamp01(state.starSoftness),
+        starSize: clampRange(state.starSize, 2, 28),
       })
     );
   } catch {}
@@ -95,6 +106,37 @@ function makeRange(root, name, init, onChange) {
   return { sync };
 }
 
+function makeNumber(root, name, init, min, max, step, onChange) {
+  const row = document.createElement("div");
+  row.style.cssText = "margin-top:6px;";
+  root.appendChild(row);
+
+  const top = document.createElement("div");
+  top.style.cssText = "display:flex; justify-content:space-between; font-size:11px; opacity:.9;";
+  row.appendChild(top);
+  const l = document.createElement("span");
+  l.textContent = name;
+  top.appendChild(l);
+  const r = document.createElement("span");
+  top.appendChild(r);
+
+  const input = document.createElement("input");
+  input.type = "number";
+  input.min = String(min);
+  input.max = String(max);
+  input.step = String(step);
+  input.style.cssText = "width:100%; border-radius:8px; border:1px solid rgba(170,190,255,.35); background:rgba(8,10,18,.45); color:#eef2ff; padding:4px 6px;";
+  row.appendChild(input);
+
+  const sync = (v) => {
+    input.value = String(v);
+    r.textContent = `${Number(v).toFixed(step >= 1 ? 0 : 1)} px`;
+  };
+  sync(init);
+  input.addEventListener("input", () => onChange(clampRange(Number(input.value), min, max), sync));
+  return { sync };
+}
+
 export function createBackgroundDockPanel({ bg }) {
   const defaults = {
     x: window.innerWidth - 300,
@@ -107,6 +149,7 @@ export function createBackgroundDockPanel({ bg }) {
     starBreath: 0.60,
     starBling: 0.58,
     starSoftness: 0.76,
+    starSize: 16,
   };
   const state = loadState(defaults);
 
@@ -250,6 +293,13 @@ export function createBackgroundDockPanel({ bg }) {
   });
   starSoftnessRow.sync(state.starSoftness);
 
+  const starSizeRow = makeNumber(body, "Star Size", state.starSize, 2, 28, 0.5, (v, sync) => {
+    state.starSize = clampRange(v, 2, 28);
+    sync(v);
+    saveState(state);
+  });
+  starSizeRow.sync(state.starSize);
+
   foldBtn.addEventListener("click", () => {
     state.collapsed = !state.collapsed;
     body.style.display = state.collapsed ? "none" : "";
@@ -337,6 +387,9 @@ export function createBackgroundDockPanel({ bg }) {
     },
     getStarSoftness() {
       return state.starSoftness;
+    },
+    getStarSize() {
+      return state.starSize;
     },
     setVisible(v) {
       root.style.display = v ? "" : "none";
