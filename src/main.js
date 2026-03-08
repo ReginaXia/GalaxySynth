@@ -1561,7 +1561,7 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     bgTheta01 = __bgRiseFall(bgTheta01, THREE.MathUtils.clamp(targetTheta, 0, 1), dt, 14.0, 8.0);
 
     // Directly drive visible flow/brightness response (keeps click + hold responsive).
-    const flowTarget = THREE.MathUtils.clamp((0.016 + bgLeadE * 0.82 + bgClickPulseVis * 0.56) * (0.80 + 0.35 * glowUi), 0, 1.05);
+    const flowTarget = THREE.MathUtils.clamp((0.020 + bgLeadE * 0.90 + bgClickPulseVis * 0.62) * (0.80 + 0.35 * glowUi), 0, 1.12);
     const sparkleTarget = THREE.MathUtils.clamp((0.005 + bgLeadE * 0.16 + bgClickPulseVis * 0.15) * (0.62 + 0.52 * glowUi), 0, 0.28);
     const satTarget = THREE.MathUtils.clamp(0.28 + bgLeadE * 0.46 + bgClickPulseVis * 0.24, 0.24, 0.92);
     // auto-dim to keep nebula readable
