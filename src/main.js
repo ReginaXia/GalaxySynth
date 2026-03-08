@@ -1513,7 +1513,8 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
   
   // 7) Bloom：只跟随 lead 能量（慢），并且整体更低
   // 这样“弹奏有光”但不会糊掉星云
-  bloomPass.strength += ((0.05 + bgMood.energy * 0.08) - bloomPass.strength) * (1 - Math.exp(-dt * 1.4));
+  const glowUiBloom = THREE.MathUtils.clamp(noteColorUI?.getGlow?.() ?? 0.56, 0, 1);
+  bloomPass.strength += ((0.03 + bgMood.energy * 0.06) * (0.55 + glowUiBloom * 0.75) - bloomPass.strength) * (1 - Math.exp(-dt * 1.4));
   bloomPass.threshold = 0.88;   // 更柔和：避免只有极亮点被硬阈值抽出来
   bloomPass.radius = 0.25;      // 让中心星光更柔，不容易出现硬形状
 
@@ -1521,6 +1522,8 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
   // Clean dt/t timing. No legacy time state object.
   {
     const sScratch = audio.getState()?.scratch;
+    const pearlUi = THREE.MathUtils.clamp(noteColorUI?.getPearl?.() ?? 0.62, 0, 1);
+    const glowUi = THREE.MathUtils.clamp(noteColorUI?.getGlow?.() ?? 0.56, 0, 1);
 
     const scratchVel01 = THREE.MathUtils.clamp((sScratch?.velocity ?? 0) / 1.2, 0, 1);
     const isPlaying = !!(pointerDown && isActiveNebulaHovered);
@@ -1554,15 +1557,16 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     bgTheta01 = __bgRiseFall(bgTheta01, THREE.MathUtils.clamp(targetTheta, 0, 1), dt, 14.0, 8.0);
 
     // Directly drive visible flow/brightness response (keeps click + hold responsive).
-    const flowTarget = THREE.MathUtils.clamp(0.016 + bgLeadE * 0.82 + bgClickPulseVis * 0.56, 0, 1.05);
-    const sparkleTarget = THREE.MathUtils.clamp(0.005 + bgLeadE * 0.16 + bgClickPulseVis * 0.15, 0, 0.28);
+    const flowTarget = THREE.MathUtils.clamp((0.016 + bgLeadE * 0.82 + bgClickPulseVis * 0.56) * (0.80 + 0.35 * glowUi), 0, 1.05);
+    const sparkleTarget = THREE.MathUtils.clamp((0.005 + bgLeadE * 0.16 + bgClickPulseVis * 0.15) * (0.62 + 0.52 * glowUi), 0, 0.28);
     const satTarget = THREE.MathUtils.clamp(0.28 + bgLeadE * 0.46 + bgClickPulseVis * 0.24, 0.24, 0.92);
     // auto-dim to keep nebula readable
     const readabilityLimiter = interactionNow ? 0.84 : 0.92;
-    const intensityTarget = THREE.MathUtils.clamp((0.012 + bgLeadE * 0.50 + bgClickPulseVis * 0.30) * readabilityLimiter, 0.01, 0.62);
+    const intensityTarget = THREE.MathUtils.clamp((0.010 + bgLeadE * 0.42 + bgClickPulseVis * 0.22) * readabilityLimiter * (0.64 + 0.56 * glowUi), 0.01, 0.56);
     bg.uniforms.uFlow.value = __bgRiseFall(bg.uniforms.uFlow.value, flowTarget, dt, 12.0, 1.5);
     bg.uniforms.uSparkle.value = __bgRiseFall(bg.uniforms.uSparkle.value, sparkleTarget, dt, 12.0, 1.6);
     bg.uniforms.uSat.value = __bgRiseFall(bg.uniforms.uSat.value, satTarget, dt, 10.0, 2.2);
+    bg.uniforms.uPearl.value = __bgRiseFall(bg.uniforms.uPearl.value, 0.28 + pearlUi * 1.02, dt, 8.0, 4.0);
     bg.uniforms.uIntensity.value = __bgRiseFall(bg.uniforms.uIntensity.value, intensityTarget, dt, 11.0, 1.4);
 
     // Pulse: when step changes while playing
@@ -1615,9 +1619,22 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
         ? { r: focusCustom[0], g: focusCustom[1], b: focusCustom[2] }
         : { r: ar, g: ag, b: ab };
       const stableNoteHue = (focusStep >= 0) ? ((focusStep % 7) / 7) : bgNoteHue;
-      const activeStrength = THREE.MathUtils.clamp(bgInteractionE * 0.95 + bgClickPulseVis * 0.25, 0, 1);
-      const hoverStrength = THREE.MathUtils.clamp((hoverIntentNow ? 0.14 : 0.0) * (0.45 + 0.55 * bgInteractionE), 0, 0.22);
-      const lastStrength = THREE.MathUtils.clamp(bgLastEmitE * 0.55, 0, 0.55);
+      const glowGain = 0.56 + 0.58 * glowUi;
+      const activeStrength = THREE.MathUtils.clamp((bgInteractionE * 0.95 + bgClickPulseVis * 0.25) * glowGain, 0, 1);
+      const hoverStrength = THREE.MathUtils.clamp((hoverIntentNow ? 0.14 : 0.0) * (0.45 + 0.55 * bgInteractionE) * glowGain, 0, 0.22);
+      const lastStrength = THREE.MathUtils.clamp(bgLastEmitE * 0.55 * glowGain, 0, 0.55);
+      const wrap01 = (v) => ((v % 1) + 1) % 1;
+      const sat1 = {
+        x: wrap01(bgDrive.notePos.x + 0.14 * Math.cos((bgTheta01 + 0.08) * Math.PI * 2)),
+        y: wrap01(bgDrive.notePos.y + 0.12 * Math.sin((bgTheta01 + 0.08) * Math.PI * 2)),
+      };
+      const sat2 = {
+        x: wrap01(bgDrive.notePos.x - 0.18 * Math.cos((bgTheta01 + 0.33) * Math.PI * 2)),
+        y: wrap01(bgDrive.notePos.y - 0.10 * Math.sin((bgTheta01 + 0.33) * Math.PI * 2)),
+      };
+      const [s1r, s1g, s1b] = mixColor([hr, hg, hb], activeCustom ?? hoverCustom);
+      const [s2r, s2g, s2b] = mixColor([lr, lg, lb], activeCustom ?? lastCustom);
+      const satelliteStrength = THREE.MathUtils.clamp(activeStrength * 0.36 + hoverStrength * 0.35 + lastStrength * 0.28, 0, 0.42);
       bg.setAudio({
         leadE: bgLeadE,
         interactionE: bgInteractionE,
@@ -1634,8 +1651,8 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
         noteColorStrict: strictNoteColor,
         emitters: [
           { x: bgDrive.notePos.x, y: bgDrive.notePos.y, r: ar, g: ag, b: ab, s: activeStrength },
-          { x: mx01, y: my01, r: hr, g: hg, b: hb, s: hoverStrength },
-          { x: bgLastEmitPos.x, y: bgLastEmitPos.y, r: lr, g: lg, b: lb, s: lastStrength },
+          { x: sat1.x, y: sat1.y, r: s1r, g: s1g, b: s1b, s: satelliteStrength },
+          { x: sat2.x, y: sat2.y, r: s2r, g: s2g, b: s2b, s: satelliteStrength * 0.92 + lastStrength * 0.28 },
         ],
       });
 

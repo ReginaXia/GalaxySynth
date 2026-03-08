@@ -1,5 +1,7 @@
 const STORAGE_KEY = "GalaxySynth_NoteColorMap_v1";
 const DEFAULT_MIX = 0.52;
+const DEFAULT_PEARL = 0.62;
+const DEFAULT_GLOW = 0.56;
 const NOTE_LABELS = ["Do", "Re", "Mi", "Fa", "Sol", "La", "Si"];
 const DEFAULT_COLORS = [
   "#8fd3ff",
@@ -36,15 +38,26 @@ function loadState() {
       colors: p.colors.slice(0, 7),
       mix: clamp01(Number(p.mix ?? DEFAULT_MIX)),
       strict: !!p.strict,
+      pearl: clamp01(Number(p.pearl ?? DEFAULT_PEARL)),
+      glow: clamp01(Number(p.glow ?? DEFAULT_GLOW)),
     };
   } catch {
     return null;
   }
 }
 
-function saveState(colors, mix, strict = false) {
+function saveState(colors, mix, strict = false, pearl = DEFAULT_PEARL, glow = DEFAULT_GLOW) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ colors, mix: clamp01(mix), strict: !!strict }));
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        colors,
+        mix: clamp01(mix),
+        strict: !!strict,
+        pearl: clamp01(pearl),
+        glow: clamp01(glow),
+      })
+    );
   } catch {}
 }
 
@@ -53,6 +66,8 @@ export function createNoteColorPanel() {
   const colors = saved?.colors ?? [...DEFAULT_COLORS];
   let mix = saved?.mix ?? DEFAULT_MIX;
   let strict = !!saved?.strict;
+  let pearl = saved?.pearl ?? DEFAULT_PEARL;
+  let glow = saved?.glow ?? DEFAULT_GLOW;
 
   const root = document.createElement("div");
   root.className = "custom-ui note-color-panel";
@@ -95,7 +110,7 @@ export function createNoteColorPanel() {
     input.style.cssText = "width:48px; height:20px; border:none; padding:0; background:transparent;";
     input.addEventListener("input", () => {
       colors[i] = input.value;
-      saveState(colors, mix, strict);
+      saveState(colors, mix, strict, pearl, glow);
     });
     rows.appendChild(input);
     colorInputs.push(input);
@@ -132,7 +147,7 @@ export function createNoteColorPanel() {
   mixInput.addEventListener("input", () => {
     mix = clamp01(Number(mixInput.value));
     syncMixUi();
-    saveState(colors, mix, strict);
+    saveState(colors, mix, strict, pearl, glow);
   });
 
   const actions = document.createElement("div");
@@ -150,8 +165,14 @@ export function createNoteColorPanel() {
     mix = DEFAULT_MIX;
     strict = false;
     strictInput.checked = strict;
+    pearl = DEFAULT_PEARL;
+    glow = DEFAULT_GLOW;
+    pearlInput.value = String(pearl);
+    glowInput.value = String(glow);
     syncMixUi();
-    saveState(colors, mix, strict);
+    syncPearlUi();
+    syncGlowUi();
+    saveState(colors, mix, strict, pearl, glow);
   });
   actions.appendChild(resetBtn);
 
@@ -162,13 +183,71 @@ export function createNoteColorPanel() {
   strictInput.checked = strict;
   strictInput.addEventListener("change", () => {
     strict = !!strictInput.checked;
-    saveState(colors, mix, strict);
+    saveState(colors, mix, strict, pearl, glow);
   });
   const strictText = document.createElement("span");
   strictText.textContent = "Strict Note Color";
   strictWrap.appendChild(strictInput);
   strictWrap.appendChild(strictText);
   root.appendChild(strictWrap);
+
+  const pearlWrap = document.createElement("div");
+  pearlWrap.style.cssText = "margin-top:8px;";
+  root.appendChild(pearlWrap);
+  const pearlLabel = document.createElement("div");
+  pearlLabel.style.cssText = "display:flex; justify-content:space-between; margin-bottom:4px;";
+  pearlWrap.appendChild(pearlLabel);
+  const pearlName = document.createElement("span");
+  pearlName.textContent = "Pearl";
+  pearlLabel.appendChild(pearlName);
+  const pearlValue = document.createElement("span");
+  pearlLabel.appendChild(pearlValue);
+  const pearlInput = document.createElement("input");
+  pearlInput.type = "range";
+  pearlInput.min = "0";
+  pearlInput.max = "1";
+  pearlInput.step = "0.01";
+  pearlInput.value = String(pearl);
+  pearlInput.style.width = "100%";
+  pearlWrap.appendChild(pearlInput);
+  function syncPearlUi() {
+    pearlValue.textContent = `${Math.round(pearl * 100)}%`;
+  }
+  syncPearlUi();
+  pearlInput.addEventListener("input", () => {
+    pearl = clamp01(Number(pearlInput.value));
+    syncPearlUi();
+    saveState(colors, mix, strict, pearl, glow);
+  });
+
+  const glowWrap = document.createElement("div");
+  glowWrap.style.cssText = "margin-top:8px;";
+  root.appendChild(glowWrap);
+  const glowLabel = document.createElement("div");
+  glowLabel.style.cssText = "display:flex; justify-content:space-between; margin-bottom:4px;";
+  glowWrap.appendChild(glowLabel);
+  const glowName = document.createElement("span");
+  glowName.textContent = "Glow";
+  glowLabel.appendChild(glowName);
+  const glowValue = document.createElement("span");
+  glowLabel.appendChild(glowValue);
+  const glowInput = document.createElement("input");
+  glowInput.type = "range";
+  glowInput.min = "0";
+  glowInput.max = "1";
+  glowInput.step = "0.01";
+  glowInput.value = String(glow);
+  glowInput.style.width = "100%";
+  glowWrap.appendChild(glowInput);
+  function syncGlowUi() {
+    glowValue.textContent = `${Math.round(glow * 100)}%`;
+  }
+  syncGlowUi();
+  glowInput.addEventListener("input", () => {
+    glow = clamp01(Number(glowInput.value));
+    syncGlowUi();
+    saveState(colors, mix, strict, pearl, glow);
+  });
 
   document.body.appendChild(root);
 
@@ -179,6 +258,12 @@ export function createNoteColorPanel() {
     },
     isStrict() {
       return strict;
+    },
+    getPearl() {
+      return pearl;
+    },
+    getGlow() {
+      return glow;
     },
     getColorRgb01(step) {
       const idx = Number.isFinite(step) ? ((step % 7) + 7) % 7 : -1;
