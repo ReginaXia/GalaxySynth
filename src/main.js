@@ -1317,58 +1317,61 @@ function makeStars({ count, radius, thickness }) {
   const colors = new Float32Array(count * 3);
   const sizes = new Float32Array(count);
   const seeds = new Float32Array(count);
+  const alphas = new Float32Array(count);
 
   for (let i = 0; i < count; i++) {
     const idx3 = i * 3;
 
-    const r = Math.pow(Math.random(), 0.45) * radius;
     const angle = Math.random() * Math.PI * 2;
-
-    const armT = r / radius;
-    const swirl = armT * 2.4;
-    const a = angle + swirl;
-
-    const y = (Math.random() - 0.5) * thickness * (1.0 - armT * 0.7);
-    const nx = (Math.random() - 0.5) * 0.25;
-    const nz = (Math.random() - 0.5) * 0.25;
-
-    const x = Math.cos(a) * r + nx;
-    const z = Math.sin(a) * r + nz;
+    const zUnit = Math.random() * 2 - 1;
+    const rr = Math.sqrt(Math.max(0, 1 - zUnit * zUnit));
+    const shell = radius * (0.82 + Math.random() * 0.18);
+    const x = Math.cos(angle) * rr * shell;
+    const y = zUnit * shell * (thickness / radius);
+    const z = Math.sin(angle) * rr * shell;
 
     positions[idx3 + 0] = x;
     positions[idx3 + 1] = y;
     positions[idx3 + 2] = z;
 
-    const t = Math.min(1, r / radius);
-    const cA = new THREE.Color("#ff72d8");
-    const cB = new THREE.Color("#b9a7ff");
-    const cC = new THREE.Color("#7fe7ff");
+    const t = Math.random();
+    const cA = new THREE.Color("#f9f2ff");
+    const cB = new THREE.Color("#d8ccff");
+    const cC = new THREE.Color("#bfe9ff");
     const c = new THREE.Color();
     if (t < 0.5) c.copy(cA).lerp(cB, t / 0.5);
     else c.copy(cB).lerp(cC, (t - 0.5) / 0.5);
-    c.lerp(new THREE.Color("#ffffff"), (1.0 - t) * 0.18);
+    c.lerp(new THREE.Color("#ffffff"), 0.14 + (1.0 - t) * 0.16);
 
     colors[idx3 + 0] = c.r;
     colors[idx3 + 1] = c.g;
     colors[idx3 + 2] = c.b;
 
-    sizes[i] = 0.18 + Math.pow(Math.random(), 2.2) * 1.2;
+    sizes[i] = 0.45 + Math.pow(Math.random(), 2.4) * 2.2;
     seeds[i] = Math.random() * 1000.0;
+    alphas[i] = 0.28 + Math.random() * 0.72;
   }
 
   geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   geo.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
   geo.setAttribute("aSeed", new THREE.BufferAttribute(seeds, 1));
+  geo.setAttribute("aAlpha", new THREE.BufferAttribute(alphas, 1));
 
   const mat = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
+    depthTest: false,
     blending: THREE.AdditiveBlending,
     vertexColors: true,
     uniforms: {
       uTime: { value: 0 },
-      uPointer: { value: new THREE.Vector2(0, 0) },
+      uOpacity: { value: 0.58 },
+      uBaseSize: { value: 1.0 },
+      uBreath: { value: 0.60 },
+      uBling: { value: 0.58 },
+      uSoftness: { value: 0.76 },
+      uCross: { value: 0.46 },
       uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) },
     },
     vertexShader: starsVert,
@@ -1377,12 +1380,13 @@ function makeStars({ count, radius, thickness }) {
 
   const points = new THREE.Points(geo, mat);
   points.frustumCulled = false;
+  points.renderOrder = -950;
   return points;
 }
 
 // Stars
 // -------------------------------------
-const stars = makeStars({ count: 65000, radius: 7.0, thickness: 1.6 });
+const stars = makeStars({ count: 22000, radius: 120.0, thickness: 120.0 });
 scene.add(stars);
 
 // --- background drive state (avoid undefined vars / keep things stable)
@@ -1600,7 +1604,17 @@ const hasNebulaHit = !!nebulaHit;
 
   // --- stars
   stars.material.uniforms.uTime.value = t;
-  stars.material.uniforms.uPointer.value.copy(pointer);
+  stars.position.copy(camera.position);
+  stars.rotation.y += dt * 0.018;
+  stars.rotation.x = Math.sin(t * 0.03) * 0.03;
+  const starBreathUi = THREE.MathUtils.clamp(backgroundDockUI?.getStarBreath?.() ?? 0.60, 0, 1);
+  const starBlingUi = THREE.MathUtils.clamp(backgroundDockUI?.getStarBling?.() ?? 0.58, 0, 1);
+  const starSoftnessUi = THREE.MathUtils.clamp(backgroundDockUI?.getStarSoftness?.() ?? 0.76, 0, 1);
+  stars.material.uniforms.uBreath.value = starBreathUi;
+  stars.material.uniforms.uBling.value = starBlingUi;
+  stars.material.uniforms.uSoftness.value = starSoftnessUi;
+  stars.material.uniforms.uCross.value = THREE.MathUtils.lerp(0.22, 0.82, starBlingUi);
+  stars.material.uniforms.uOpacity.value = THREE.MathUtils.lerp(0.44, 0.86, starBlingUi);
 
   // --- nebula & meteor
   const disturbPoint = (nebulaHit?.point ? nebulaHit.point : hitPoint);
@@ -1869,7 +1883,7 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
 
     // Directly drive visible flow/brightness response (keeps click + hold responsive).
     const flowTarget = THREE.MathUtils.clamp((0.020 + bgLeadE * 0.90 + bgClickPulseVis * 0.62) * (0.80 + 0.35 * glowUi) * (0.92 + 0.22 * richnessUi), 0, 1.12);
-    const sparkleTarget = THREE.MathUtils.clamp((0.005 + bgLeadE * 0.16 + bgClickPulseVis * 0.15) * (0.62 + 0.52 * glowUi), 0, 0.28);
+    const sparkleTarget = THREE.MathUtils.clamp(0.003 + richnessUi * 0.010, 0.001, 0.018);
     const satTargetRaw = 0.24 + bgLeadE * 0.44 + bgClickPulseVis * 0.22 + dreamUi * 0.10;
     const satTarget = THREE.MathUtils.clamp(
       satTargetRaw * (1.0 - 0.24 * darkSpaceUi),
@@ -1887,7 +1901,7 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
       0.56
     );
     bg.uniforms.uFlow.value = __bgRiseFall(bg.uniforms.uFlow.value, flowTarget, dt, 12.0, 1.5);
-    bg.uniforms.uSparkle.value = __bgRiseFall(bg.uniforms.uSparkle.value, sparkleTarget * (0.86 + 0.28 * richnessUi), dt, 12.0, 1.6);
+    bg.uniforms.uSparkle.value = __bgRiseFall(bg.uniforms.uSparkle.value, sparkleTarget, dt, 6.0, 2.6);
     bg.uniforms.uSat.value = __bgRiseFall(bg.uniforms.uSat.value, satTarget, dt, 10.0, 2.2);
     bg.uniforms.uPearl.value = __bgRiseFall(bg.uniforms.uPearl.value, 0.28 + pearlUi * 1.02, dt, 8.0, 4.0);
     bg.uniforms.uIntensity.value = __bgRiseFall(bg.uniforms.uIntensity.value, intensityTarget, dt, 11.0, 1.4);

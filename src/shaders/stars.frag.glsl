@@ -1,25 +1,32 @@
-uniform sampler2D uMap;
-uniform float uOpacity;
+precision mediump float;
+
 varying vec3 vColor;
-varying float vTw;
+varying float vTwinkle;
 varying float vAlpha;
+varying float vCrossSeed;
 
-vec3 tonemap(vec3 x){
-  // 简单 Reinhard，专治 additive 爆白
-  return x / (1.0 + x);
-}
+uniform float uOpacity;
+uniform float uSoftness;
+uniform float uCross;
 
-void main(){
-  vec4 tex = texture2D(uMap, gl_PointCoord);
+void main() {
+  vec2 p = gl_PointCoord - 0.5;
+  float d = length(p);
 
-  float a = tex.a * uOpacity * vAlpha;   // ✅ 每点不同透明度
+  float soft = mix(3.8, 1.9, clamp(uSoftness, 0.0, 1.0));
+  float core = exp(-pow(d / 0.20, soft));
+  float halo = exp(-pow(d / 0.48, 2.0)) * mix(0.16, 0.40, uSoftness);
 
-  // twinkle：范围收窄，别一下子乘到发白
-  float glow = mix(0.90, 1.18, vTw);
-  vec3 col = vColor * glow;
+  float crossW = mix(0.035, 0.085, uCross);
+  float crossX = exp(-abs(p.x) / crossW) * exp(-abs(p.y) / (0.22 + 0.08 * vCrossSeed));
+  float crossY = exp(-abs(p.y) / crossW) * exp(-abs(p.x) / (0.22 + 0.08 * (1.0 - vCrossSeed)));
+  float cross = (crossX + crossY) * 0.5;
 
-  col = tonemap(col);                    // ✅ 防爆白
-  col = pow(col, vec3(0.9));             // ✅ 轻微提对比（可删）
+  float mask = core + halo + cross * (0.10 + 0.48 * uCross);
+  float alpha = clamp(mask * vAlpha * uOpacity, 0.0, 1.0);
+  if (alpha < 0.003) discard;
 
-  gl_FragColor = vec4(col, a);
+  vec3 col = vColor * (0.82 + 0.44 * vTwinkle);
+  col += vec3(1.0) * (0.04 + 0.18 * uCross) * cross;
+  gl_FragColor = vec4(col, alpha);
 }

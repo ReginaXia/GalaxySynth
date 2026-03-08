@@ -35,6 +35,9 @@ function loadState(defaults) {
       flowDetail: clamp01(Number(s.flowDetail ?? defaults.flowDetail)),
       darkSpace: clamp01(Number(s.darkSpace ?? defaults.darkSpace)),
       localColorLift: clamp01(Number(s.localColorLift ?? defaults.localColorLift)),
+      starBreath: clamp01(Number(s.starBreath ?? defaults.starBreath)),
+      starBling: clamp01(Number(s.starBling ?? defaults.starBling)),
+      starSoftness: clamp01(Number(s.starSoftness ?? defaults.starSoftness)),
     };
   } catch {
     return defaults;
@@ -53,6 +56,9 @@ function saveState(state) {
         flowDetail: clamp01(state.flowDetail),
         darkSpace: clamp01(state.darkSpace),
         localColorLift: clamp01(state.localColorLift),
+        starBreath: clamp01(state.starBreath),
+        starBling: clamp01(state.starBling),
+        starSoftness: clamp01(state.starSoftness),
       })
     );
   } catch {}
@@ -98,6 +104,9 @@ export function createBackgroundDockPanel({ bg }) {
     flowDetail: 0.62,
     darkSpace: 0.70,
     localColorLift: 0.62,
+    starBreath: 0.60,
+    starBling: 0.58,
+    starSoftness: 0.76,
   };
   const state = loadState(defaults);
 
@@ -220,6 +229,27 @@ export function createBackgroundDockPanel({ bg }) {
   });
   localColorLiftRow.sync(state.localColorLift);
 
+  const starBreathRow = makeRange(body, "Star Breath", state.starBreath, (v, sync) => {
+    state.starBreath = v;
+    sync(v);
+    saveState(state);
+  });
+  starBreathRow.sync(state.starBreath);
+
+  const starBlingRow = makeRange(body, "Star Bling", state.starBling, (v, sync) => {
+    state.starBling = v;
+    sync(v);
+    saveState(state);
+  });
+  starBlingRow.sync(state.starBling);
+
+  const starSoftnessRow = makeRange(body, "Star Softness", state.starSoftness, (v, sync) => {
+    state.starSoftness = v;
+    sync(v);
+    saveState(state);
+  });
+  starSoftnessRow.sync(state.starSoftness);
+
   foldBtn.addEventListener("click", () => {
     state.collapsed = !state.collapsed;
     body.style.display = state.collapsed ? "none" : "";
@@ -298,6 +328,15 @@ export function createBackgroundDockPanel({ bg }) {
     },
     getLocalColorLift() {
       return state.localColorLift;
+    },
+    getStarBreath() {
+      return state.starBreath;
+    },
+    getStarBling() {
+      return state.starBling;
+    },
+    getStarSoftness() {
+      return state.starSoftness;
     },
     setVisible(v) {
       root.style.display = v ? "" : "none";
