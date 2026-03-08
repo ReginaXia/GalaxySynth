@@ -51,8 +51,13 @@ export function createGalaxyVoices() {
     D_sparkle: "digital_sparkle_tone",
     E_air: "cosmic_synth_tone",
   };
+  const profileOverrideByGalaxyId = new Map();
 
   function pickInstrument(galaxyId) {
+    if (galaxyId && profileOverrideByGalaxyId.has(galaxyId)) {
+      const override = profileOverrideByGalaxyId.get(galaxyId);
+      if (PROFILE_NAMES.includes(override)) return override;
+    }
     if (galaxyId && DEFAULT_ID_TO_PROFILE[galaxyId]) return DEFAULT_ID_TO_PROFILE[galaxyId];
     const idx = hashString(String(galaxyId ?? "")) % PROFILE_NAMES.length;
     return PROFILE_NAMES[idx];
@@ -569,6 +574,25 @@ export function createGalaxyVoices() {
     return nebulaInstruments[name] ?? nebulaInstruments.legacy_current;
   }
 
+  function getAvailableNebulaProfiles() {
+    return PROFILE_NAMES.slice();
+  }
+
+  function setNebulaInstrumentProfile(galaxyId, profileName) {
+    if (!galaxyId) return;
+    if (!profileName || profileName === "auto") {
+      profileOverrideByGalaxyId.delete(galaxyId);
+      return;
+    }
+    if (!PROFILE_NAMES.includes(profileName)) return;
+    profileOverrideByGalaxyId.set(galaxyId, profileName);
+  }
+
+  function clearNebulaInstrumentProfile(galaxyId) {
+    if (!galaxyId) return;
+    profileOverrideByGalaxyId.delete(galaxyId);
+  }
+
   return {
     setDreaminess,
     setShimmer,
@@ -576,5 +600,8 @@ export function createGalaxyVoices() {
     startTransport,
     getNebulaInstrument,
     getNebulaInstrumentName,
+    getAvailableNebulaProfiles,
+    setNebulaInstrumentProfile,
+    clearNebulaInstrumentProfile,
   };
 }

@@ -2,7 +2,7 @@
 import * as THREE from "three";
 import GUI from "lil-gui";
 
-export function setupGalaxyGUI({ camera, renderer, nebulaSystem }) {
+export function setupGalaxyGUI({ camera, renderer, nebulaSystem, voices = null }) {
   const STORAGE_KEY = "GalaxySynth_GalaxyPresets_v2";
 
   // -------- storage --------
@@ -43,6 +43,9 @@ export function setupGalaxyGUI({ camera, renderer, nebulaSystem }) {
         });
       else {
         if (saved.palette) nebulaSystem.setClusterPalette(c.id, saved.palette);
+      }
+      if (saved.toneProfile && voices?.setNebulaInstrumentProfile) {
+        voices.setNebulaInstrumentProfile(c.id, saved.toneProfile);
       }
     }
   }
@@ -100,6 +103,7 @@ export function setupGalaxyGUI({ camera, renderer, nebulaSystem }) {
     outerSize: 9.0,
     coreSize: 9.0,
     starsSize: 12.0,
+    toneProfile: "auto",
   };
 
   function activeCluster() {
@@ -145,6 +149,12 @@ export function setupGalaxyGUI({ camera, renderer, nebulaSystem }) {
     state.outerSize = p.layers.outer.size;
     state.coreSize = p.layers.core.size;
     state.starsSize = p.layers.stars.size;
+
+    if (voices?.getNebulaInstrumentName) {
+      state.toneProfile = voices.getNebulaInstrumentName(state.active) ?? "auto";
+    } else {
+      state.toneProfile = "auto";
+    }
   }
 
   function snapshot() {
@@ -218,6 +228,15 @@ export function setupGalaxyGUI({ camera, renderer, nebulaSystem }) {
     savePerGalaxy(id, snapshot());
   }
 
+  function applyToneProfileAndSave() {
+    const id = state.active;
+    if (!id) return;
+    if (voices?.setNebulaInstrumentProfile) {
+      voices.setNebulaInstrumentProfile(id, state.toneProfile);
+    }
+    savePerGalaxy(id, { ...snapshot(), toneProfile: state.toneProfile });
+  }
+
   // init
   pullStateFromActive();
 
@@ -259,6 +278,11 @@ export function setupGalaxyGUI({ camera, renderer, nebulaSystem }) {
   activeCtrl.onChange(() => {
     nebulaSystem.setActive(state.active);
     pullStateFromActive();
+    const saved = loadPerGalaxy(state.active);
+    if (saved?.toneProfile && voices?.setNebulaInstrumentProfile) {
+      state.toneProfile = saved.toneProfile;
+      voices.setNebulaInstrumentProfile(state.active, state.toneProfile);
+    }
     updateAllDisplays(gui);
   });
 
@@ -287,6 +311,9 @@ export function setupGalaxyGUI({ camera, renderer, nebulaSystem }) {
           state.active = newId;
           nebulaSystem.setActive(newId);
           pullStateFromActive();
+          if (voices?.setNebulaInstrumentProfile) {
+            state.toneProfile = voices.getNebulaInstrumentName?.(state.active) ?? "auto";
+          }
           updateAllDisplays(gui);
         },
       },
@@ -314,12 +341,24 @@ export function setupGalaxyGUI({ camera, renderer, nebulaSystem }) {
           state.active = nebulaSystem.getActiveId();
           nebulaSystem.setActive(state.active);
           pullStateFromActive();
+          const saved = loadPerGalaxy(state.active);
+          if (saved?.toneProfile && voices?.setNebulaInstrumentProfile) {
+            state.toneProfile = saved.toneProfile;
+            voices.setNebulaInstrumentProfile(state.active, state.toneProfile);
+          }
           updateAllDisplays(gui);
         },
       },
       "Remove"
     )
     .name("Remove Active");
+
+  const fTone = gui.addFolder("Tone");
+  const profileList = voices?.getAvailableNebulaProfiles?.() ?? [];
+  const toneOptions = { Auto: "auto" };
+  for (const p of profileList) toneOptions[p] = p;
+  const toneCtrl = fTone.add(state, "toneProfile", toneOptions).name("Tone Profile");
+  toneCtrl.onChange(applyToneProfileAndSave);
 
   // Shape
   const fShape = gui.addFolder("Shape (Rebuild)");
@@ -376,6 +415,11 @@ export function setupGalaxyGUI({ camera, renderer, nebulaSystem }) {
     state.active = id;
     nebulaSystem.setActive(id);
     pullStateFromActive();
+    const saved = loadPerGalaxy(state.active);
+    if (saved?.toneProfile && voices?.setNebulaInstrumentProfile) {
+      state.toneProfile = saved.toneProfile;
+      voices.setNebulaInstrumentProfile(state.active, state.toneProfile);
+    }
     updateAllDisplays(gui);
   }
 }

@@ -597,7 +597,7 @@ const nebulaSystem = createNebulaSystem({
   starTexture,
 });
 
-const galaxyGuiRef = setupGalaxyGUI({ camera, renderer, nebulaSystem });
+const galaxyGuiRef = setupGalaxyGUI({ camera, renderer, nebulaSystem, voices });
 window.__gui = galaxyGuiRef?.gui ?? null;
 const backgroundDockUI = createBackgroundDockPanel({ bg });
 
