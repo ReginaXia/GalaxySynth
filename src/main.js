@@ -2067,9 +2067,10 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     const highZone = THREE.MathUtils.clamp((flowDetailUi - 0.55) / 0.45, 0, 1);
     const detailBoost = 1.0 + largeScreenBoost * highZone * 0.45;
 
-    const scratchVel01 = THREE.MathUtils.clamp((sScratch?.velocity ?? 0) / 1.2, 0, 1);
+    const scratchVelRaw = THREE.MathUtils.clamp((sScratch?.velocity ?? 0) / 1.2, 0, 1);
     const isPlaying = !!(pointerDown && isActiveNebulaHovered);
     const interactionNow = !!(pointerDown && (isActiveNebulaHovered || musicState.activeIntent));
+    const scratchVel01 = interactionNow ? scratchVelRaw : 0.0;
 
     // Click pulse envelope: immediate rise (0.03~0.08s), slower fade (0.5~0.8s)
     bgClickPulse = Math.max(0.0, bgClickPulse - dt / 0.85);
@@ -2087,7 +2088,7 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     );
     // ~1-2s decay when no interaction
     bgInteractionE = __bgRiseFall(bgInteractionE, interactionTarget, dt, 16.0, 0.9);
-    bgLastEmitE = __bgRiseFall(bgLastEmitE, 0.0, dt, 10.0, 0.45);
+    bgLastEmitE = __bgRiseFall(bgLastEmitE, 0.0, dt, 10.0, interactionNow ? 0.45 : 1.35);
 
     // Smooth pitch/vel/theta (prefer scratch state; fallback to bgDrive)
     const targetPitch = (typeof sScratch?.pitch01 === "number") ? sScratch.pitch01 : bgDrive.pitch01;
