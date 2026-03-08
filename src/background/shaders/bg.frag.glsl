@@ -63,6 +63,9 @@ uniform float uPulse;      // 0..1
 uniform float uNoteHue;    // 0..1 (kept for compatibility)
 uniform float uNoteSeed;
 uniform vec2  uNotePos;    // 0..1
+uniform vec3  uNoteColor;  // 0..1 custom per-note tint
+uniform float uNoteColorMix; // 0..1
+uniform float uNoteColorStrict; // 0..1
 
 // Three.js built-in uniform (DO NOT redeclare!)
 // uniform vec3 cameraPosition;
@@ -180,7 +183,8 @@ void main(){
   // Large-scale slow material flow layers (richness without noisy boiling).
   float flowA = fbm(p * 0.36 + vec2(t * 0.28, -t * 0.22));
   float flowB = fbm((p + vec2(2.7, -1.9)) * 0.22 + vec2(-t * 0.20, t * 0.26));
-  float materialField = saturate(0.58 * flowA + 0.42 * flowB);
+  float flowC = fbm((p + vec2(-3.1, 1.7)) * 0.58 + vec2(t * 0.11, -t * 0.09));
+  float materialField = saturate(0.50 * flowA + 0.34 * flowB + 0.16 * flowC);
   float materialRidge = smoothstep(0.34, 0.82, materialField);
 
   vec2 w1 = vec2(fbm(p * 1.15 + vec2(t, -t)), fbm(p * 1.15 + vec2(-t, t)));
@@ -230,6 +234,11 @@ g = mix(g, micro, 0.075);
 float h = fbm(q * 3.30 + vec2(-t*0.80, t*0.72));
 g = mix(g, h, 0.10);
 
+// Medium/high-frequency anisotropic filaments for richer "liquid light" density.
+float filA = fbm(q * 4.8 + vec2(t * 0.92, -t * 0.78));
+float filB = fbm((q + vec2(6.1, -3.7)) * 6.2 + vec2(-t * 0.66, t * 0.58));
+float filament = pow(saturate(abs(filA - filB) * 1.55), 1.35);
+
 // Smooth remap (avoid near-binary masks)
 float band  = pow(saturate(f),  1.10);
 float band2 = pow(saturate(g),  1.06);
@@ -240,7 +249,8 @@ float jitter = (dither01 - 0.5) * (2.0 / 255.0);
 band  = saturate(band  + jitter);
 band2 = saturate(band2 + jitter);
 
-float palettePhase = (0.62 + t * 0.06 + (materialField - 0.5) * 0.14);
+  float musicalT = (uPitch01 * 0.88 + uTheta01 * 0.42 + t * 0.10 + energy * 0.24);
+  float palettePhase = (0.50 + t * 0.09 + (materialField - 0.5) * 0.18 + musicalT * 0.55);
 
   float sheen = (fres * (0.35 + 1.05*e) + (band2-0.5) * 0.28) * uPearl;
 
@@ -270,9 +280,11 @@ float ink = pulse * inkFall;
   float wSheen = (0.26 + 0.62*e)  * (0.38 + 0.62*band2) * uPearl * mix(0.78, 1.22, (1.0 - materialRidge) * richness);
   float wInk   = ink * (0.46 + 0.26*e);
 
-  vec3 c0 = palette4(palettePhase + sheen * 0.35 + (f - 0.5) * 0.18);
-  vec3 c1 = palette4(palettePhase + 0.21 + sheen * 0.52 + (g - 0.5) * 0.22);
+  vec3 c0 = palette4(palettePhase + sheen * 0.42 + (f - 0.5) * 0.24);
+  vec3 c1 = palette4(palettePhase + 0.28 + sheen * 0.62 + (g - 0.5) * 0.30);
   vec3 cInk = palette4(palettePhase + 0.58 + uNoteSeed * 0.07);
+  float strictK = saturate(uNoteColorStrict);
+  cInk = mix(cInk, uNoteColor, saturate(uNoteColorMix) * mix(0.42 + 0.58 * ink, 0.85, strictK));
 
   // Step 3: coexisting spectral fields (no global hue replacement).
   vec3 spectralDeepBlue = vec3(0.12, 0.22, 0.56);
@@ -319,15 +331,29 @@ float ink = pulse * inkFall;
      spectralIndigo  * wIndigo +
      spectralPearl   * wPearl) / wSum;
 
-  float spectralBlend = (0.03 + 0.16 * materialRidge) * (0.35 + 0.65 * e) * (0.35 + 0.65 * fres);
-  c0 = mix(c0, spectralCol, spectralBlend * 0.45);
-  c1 = mix(c1, spectralCol, spectralBlend * 0.65);
+  float spectralBlend = (0.05 + 0.21 * materialRidge) * (0.38 + 0.62 * e) * (0.35 + 0.65 * fres);
+  c0 = mix(c0, spectralCol, spectralBlend * 0.58);
+  c1 = mix(c1, spectralCol, spectralBlend * 0.82);
+
+  // Strict note color should influence not only emitter but also local spectral field.
+  float noteProx = exp(-d * 7.2);
+  float noteColorK = saturate(uNoteColorMix) * mix(0.42, 0.96, strictK);
+  c0 = mix(c0, mix(c0, uNoteColor, 0.70), noteProx * noteColorK * 0.36);
+  c1 = mix(c1, mix(c1, uNoteColor, 0.82), noteProx * noteColorK * 0.44);
+  spectralCol = mix(spectralCol, uNoteColor, noteProx * noteColorK * 0.30);
 
   vec3 col = uBase;
   col = mix(col, c0, wCloud);
   col = mix(col, c1, wSheen);
   col = mix(col, cInk, wInk);
-  col = mix(col, spectralCol, (0.015 + 0.075 * materialRidge) * (0.35 + 0.62 * e) * (0.30 + 0.70 * fres));
+  float noteTintMask = inkFall * mix(0.30 + 0.70 * pulse, 0.92, strictK);
+  col = mix(col, col + uNoteColor * mix(0.58, 0.95, strictK), noteTintMask * saturate(uNoteColorMix) * mix(0.52, 0.92, strictK));
+  col = mix(col, spectralCol, (0.028 + 0.105 * materialRidge) * (0.35 + 0.62 * e) * (0.30 + 0.70 * fres));
+
+  // Richer iridescent micro-structure without global overbright fog.
+  float filamentMask = filament * (0.28 + 0.72 * materialRidge) * (0.32 + 0.68 * fres);
+  vec3 filamentCol = mix(spectralCol, c1, 0.55);
+  col += filamentCol * filamentMask * (0.12 + 0.16 * e);
 
   // Nebula-local color emitters: spatial "light-up" feel near interaction points.
   vec2 e0v = (uv - uEmitPos0) * vec2(1.06, 1.0);
@@ -342,7 +368,7 @@ float ink = pulse * inkFall;
   vec3 emitCol = uEmitCol0 * e0g + uEmitCol1 * e1g + uEmitCol2 * e2g;
   float emitMask = saturate(e0g + e1g + e2g);
   float emitSheen = (0.38 + 0.62 * fres) * (0.30 + 0.70 * materialRidge);
-  col += emitCol * (0.24 + 0.52 * emitSheen);
+  col += emitCol * (0.30 + 0.62 * emitSheen + (0.22 + 0.35 * strictK) * saturate(uNoteColorMix));
   col = mix(col, col + emitCol * 0.20, emitMask * 0.22);
 
   float sp = 0.0;

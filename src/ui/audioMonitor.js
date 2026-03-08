@@ -1,6 +1,7 @@
 // src/ui/audioMonitor.js
 export function createAudioMonitorUI() {
   const root = document.createElement("div");
+  root.className = "custom-ui audio-monitor";
   root.style.position = "fixed";
   root.style.left = "12px";
   root.style.top = "12px";
@@ -52,6 +53,7 @@ export function createAudioMonitorUI() {
   }
 
   return {
+    root,
     update(audioState, perfState) {
       const rms = audioState?.rms ?? 0;
       const beat = audioState?.beatPulse ?? 0;
@@ -81,6 +83,9 @@ export function createAudioMonitorUI() {
     },
     destroy() {
       root.remove();
+    },
+    setVisible(visible) {
+      root.style.display = visible ? "" : "none";
     },
   };
 }

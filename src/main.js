@@ -24,6 +24,7 @@ import { createGalaxyAudioEngine } from "./audio/galaxyAudioEngine";
 import { createGalaxyVoices } from "./audio/galaxyVoices.js";
 
 import { createAudioMonitorUI } from "./ui/audioMonitor.js";
+import { createNoteColorPanel } from "./ui/noteColorPanel.js";
 
 import { createCameraControlSystem } from "./input/cameraControlSystem.js";
 import { musicState } from "./state/musicState.js";
@@ -39,6 +40,7 @@ import meteorFrag from "./shaders/meteor.frag.glsl?raw";
 console.log("MAIN JS LOADED");
 // --- Debug HUD (show active/hover)
 const debugHud = document.createElement("div");
+debugHud.className = "custom-ui debug-hud";
 debugHud.style.cssText = `
   position:fixed;
   top:12px;
@@ -76,6 +78,7 @@ function logIntentChange(kind, intent) {
 }
 
 const noteOverlay = document.createElement("canvas");
+noteOverlay.className = "custom-ui note-overlay";
 noteOverlay.style.cssText = `
   position: fixed;
   inset: 0;
@@ -149,7 +152,7 @@ const cameraControl = createCameraControlSystem({
 });
 
 const bg = await createDreamyBackground(scene, camera, {
-  palette: "cosmic",
+  palette: "aurora",
   baseColor: "#04050D",
 });
 
@@ -308,7 +311,10 @@ function __markPointerMoved(clientX, clientY) {
   }
 }
 
-window.addEventListener("pointerdown", () => (pointerDown = true));
+window.addEventListener("pointerdown", (e) => {
+  if (e.target?.closest?.(".custom-ui") || e.target?.closest?.(".lil-gui") || e.target?.closest?.(".dg")) return;
+  pointerDown = true;
+});
 window.addEventListener("pointerup", () => {
   pointerDown = false;
   onPointerUp(musicState);
@@ -341,6 +347,7 @@ const audio = createGalaxyAudioEngine();
 const audioEngine = audio;
 const voices = createGalaxyVoices();
 const audioUI = createAudioMonitorUI();
+const noteColorUI = createNoteColorPanel();
 const audioVoices = createGalaxyVoices();
 
 
@@ -586,7 +593,9 @@ const nebulaSystem = createNebulaSystem({
   starTexture,
 });
 
-setupGalaxyGUI({ camera, renderer, nebulaSystem });
+const galaxyGuiRef = setupGalaxyGUI({ camera, renderer, nebulaSystem });
+window.__gui = galaxyGuiRef?.gui ?? null;
+if (window.__gui) setupBackgroundGUI(window.__gui, bg);
 
 function resizeNoteOverlay() {
   const w = window.innerWidth;
@@ -712,7 +721,75 @@ console.log("meteor system", meteorSystem);
 console.log("vert len", meteorVert.length, "frag len", meteorFrag.length);
 
 
-setupMeteorGUI(meteorSystem);
+const meteorGui = setupMeteorGUI(meteorSystem);
+
+const UI_VIS_KEY = "GalaxySynth_CustomUIVisible_v1";
+function readUiVisibleState() {
+  try {
+    const raw = localStorage.getItem(UI_VIS_KEY);
+    if (raw == null) return true;
+    return raw !== "0";
+  } catch {
+    return true;
+  }
+}
+function writeUiVisibleState(visible) {
+  try {
+    localStorage.setItem(UI_VIS_KEY, visible ? "1" : "0");
+  } catch {}
+}
+
+let customUiVisible = readUiVisibleState();
+
+const uiToggleBtn = document.createElement("button");
+uiToggleBtn.className = "ui-toggle-btn";
+uiToggleBtn.style.cssText = [
+  "position:fixed",
+  "right:12px",
+  "top:12px",
+  "z-index:10000",
+  "border:0",
+  "border-radius:10px",
+  "padding:8px 10px",
+  "background:rgba(8,10,18,0.72)",
+  "backdrop-filter:blur(8px)",
+  "color:#eef2ff",
+  "font:12px/1.2 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace",
+  "cursor:pointer",
+].join(";");
+uiToggleBtn.addEventListener("pointerdown", (e) => e.stopPropagation());
+uiToggleBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  setCustomUiVisible(!customUiVisible);
+});
+document.body.appendChild(uiToggleBtn);
+
+function setCustomUiVisible(visible) {
+  customUiVisible = !!visible;
+  writeUiVisibleState(customUiVisible);
+  uiToggleBtn.textContent = `UI: ${customUiVisible ? "ON" : "OFF"} (H)`;
+
+  const list = document.querySelectorAll(".custom-ui, .lil-gui, .dg");
+  list.forEach((el) => {
+    if (el === uiToggleBtn) return;
+    el.style.display = customUiVisible ? "" : "none";
+  });
+
+  noteColorUI?.setVisible?.(customUiVisible);
+  audioUI?.setVisible?.(customUiVisible);
+  if (galaxyGuiRef?.gui?.domElement) galaxyGuiRef.gui.domElement.style.display = customUiVisible ? "" : "none";
+  if (meteorGui?.domElement) meteorGui.domElement.style.display = customUiVisible ? "" : "none";
+}
+
+window.addEventListener("keydown", (e) => {
+  const tag = String(e.target?.tagName || "").toLowerCase();
+  if (tag === "input" || tag === "textarea" || e.target?.isContentEditable) return;
+  if (e.repeat) return;
+  if ((e.key || "").toLowerCase() !== "h") return;
+  setCustomUiVisible(!customUiVisible);
+});
+
+setCustomUiVisible(customUiVisible);
 
 
 
@@ -1028,6 +1105,7 @@ const bgDrive = {
 };
 const bgLastEmitPos = new THREE.Vector2(0.5, 0.5);
 let bgLastEmitHue = 0.66;
+let bgLastEmitStep = -1;
 
 // -------------------------------------
 // Mouse move intensity (for audio trigger)
@@ -1476,16 +1554,16 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     bgTheta01 = __bgRiseFall(bgTheta01, THREE.MathUtils.clamp(targetTheta, 0, 1), dt, 14.0, 8.0);
 
     // Directly drive visible flow/brightness response (keeps click + hold responsive).
-    const flowTarget = THREE.MathUtils.clamp(0.012 + bgLeadE * 0.62 + bgClickPulseVis * 0.42, 0, 0.92);
-    const sparkleTarget = THREE.MathUtils.clamp(0.0 + bgLeadE * 0.12 + bgClickPulseVis * 0.10, 0, 0.20);
-    const satTarget = THREE.MathUtils.clamp(0.24 + bgLeadE * 0.34 + bgClickPulseVis * 0.18, 0.22, 0.66);
+    const flowTarget = THREE.MathUtils.clamp(0.016 + bgLeadE * 0.82 + bgClickPulseVis * 0.56, 0, 1.05);
+    const sparkleTarget = THREE.MathUtils.clamp(0.005 + bgLeadE * 0.16 + bgClickPulseVis * 0.15, 0, 0.28);
+    const satTarget = THREE.MathUtils.clamp(0.28 + bgLeadE * 0.46 + bgClickPulseVis * 0.24, 0.24, 0.92);
     // auto-dim to keep nebula readable
     const readabilityLimiter = interactionNow ? 0.84 : 0.92;
-    const intensityTarget = THREE.MathUtils.clamp((0.015 + bgLeadE * 0.58 + bgClickPulseVis * 0.36) * readabilityLimiter, 0.01, 0.78);
-    bg.uniforms.uFlow.value = __bgRiseFall(bg.uniforms.uFlow.value, flowTarget, dt, 10.0, 1.3);
-    bg.uniforms.uSparkle.value = __bgRiseFall(bg.uniforms.uSparkle.value, sparkleTarget, dt, 10.0, 1.4);
-    bg.uniforms.uSat.value = __bgRiseFall(bg.uniforms.uSat.value, satTarget, dt, 9.0, 2.0);
-    bg.uniforms.uIntensity.value = __bgRiseFall(bg.uniforms.uIntensity.value, intensityTarget, dt, 10.0, 1.2);
+    const intensityTarget = THREE.MathUtils.clamp((0.018 + bgLeadE * 0.64 + bgClickPulseVis * 0.42) * readabilityLimiter, 0.01, 0.84);
+    bg.uniforms.uFlow.value = __bgRiseFall(bg.uniforms.uFlow.value, flowTarget, dt, 12.0, 1.5);
+    bg.uniforms.uSparkle.value = __bgRiseFall(bg.uniforms.uSparkle.value, sparkleTarget, dt, 12.0, 1.6);
+    bg.uniforms.uSat.value = __bgRiseFall(bg.uniforms.uSat.value, satTarget, dt, 10.0, 2.2);
+    bg.uniforms.uIntensity.value = __bgRiseFall(bg.uniforms.uIntensity.value, intensityTarget, dt, 11.0, 1.4);
 
     // Pulse: when step changes while playing
     const stepNow = (typeof sScratch?.step === "number") ? sScratch.step : -1;
@@ -1497,6 +1575,7 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
       bgDrive.noteSeed = bgNoteSeed;
       bgLastEmitPos.copy(bgDrive.notePos);
       bgLastEmitHue = bgDrive.noteHue;
+      bgLastEmitStep = stepNow;
       bgLastEmitE = 1.0;
     }
     bgPulse = Math.max(0.0, bgPulse - dt / 0.70);
@@ -1505,11 +1584,37 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     if (bg && bg.setAudio) {
       const activeIntentNow = musicState.activeIntent;
       const hoverIntentNow = musicState.hoverIntent;
+      const focusIntent = activeIntentNow ?? hoverIntentNow ?? musicState.lastIntent ?? null;
       const activeHue = activeIntentNow?.theta01 ?? bgDrive.noteHue;
       const hoverHue = hoverIntentNow?.theta01 ?? activeHue;
-      const [ar, ag, ab] = hsvToRgb(activeHue, 0.66, 1.0);
-      const [hr, hg, hb] = hsvToRgb(hoverHue, 0.56, 0.95);
-      const [lr, lg, lb] = hsvToRgb(bgLastEmitHue, 0.52, 0.9);
+      const colorMix = noteColorUI?.getMix?.() ?? 0.0;
+      const strictNoteColor = noteColorUI?.isStrict?.() ? 1.0 : 0.0;
+      const activeStep = (typeof activeIntentNow?.step === "number") ? activeIntentNow.step : -1;
+      const hoverStep = (typeof hoverIntentNow?.step === "number") ? hoverIntentNow.step : -1;
+      const lastStep = (typeof bgLastEmitStep === "number") ? bgLastEmitStep : -1;
+      const [ahR, ahG, ahB] = hsvToRgb(activeHue, 0.66, 1.0);
+      const [hhR, hhG, hhB] = hsvToRgb(hoverHue, 0.56, 0.95);
+      const [lhR, lhG, lhB] = hsvToRgb(bgLastEmitHue, 0.52, 0.9);
+      const activeCustom = noteColorUI?.getColorRgb01?.(activeStep);
+      const hoverCustom = noteColorUI?.getColorRgb01?.(hoverStep);
+      const lastCustom = noteColorUI?.getColorRgb01?.(lastStep);
+      const mixColor = (base, custom) => {
+        if (!custom) return base;
+        return [
+          THREE.MathUtils.lerp(base[0], custom[0], colorMix),
+          THREE.MathUtils.lerp(base[1], custom[1], colorMix),
+          THREE.MathUtils.lerp(base[2], custom[2], colorMix),
+        ];
+      };
+      const [ar, ag, ab] = mixColor([ahR, ahG, ahB], activeCustom);
+      const [hr, hg, hb] = mixColor([hhR, hhG, hhB], hoverCustom);
+      const [lr, lg, lb] = mixColor([lhR, lhG, lhB], lastCustom);
+      const focusStep = (typeof focusIntent?.step === "number") ? focusIntent.step : -1;
+      const focusCustom = noteColorUI?.getColorRgb01?.(focusStep);
+      const noteColor = focusCustom
+        ? { r: focusCustom[0], g: focusCustom[1], b: focusCustom[2] }
+        : { r: ar, g: ag, b: ab };
+      const stableNoteHue = (focusStep >= 0) ? ((focusStep % 7) / 7) : bgNoteHue;
       const activeStrength = THREE.MathUtils.clamp(bgInteractionE * 0.95 + bgClickPulseVis * 0.25, 0, 1);
       const hoverStrength = THREE.MathUtils.clamp((hoverIntentNow ? 0.14 : 0.0) * (0.45 + 0.55 * bgInteractionE), 0, 0.22);
       const lastStrength = THREE.MathUtils.clamp(bgLastEmitE * 0.55, 0, 0.55);
@@ -1523,7 +1628,10 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
         noteSeed: bgDrive.noteSeed,
         notePos: bgDrive.notePos,
         interactionPos: bgDrive.notePos,
-        noteHue: bgNoteHue,
+        noteHue: stableNoteHue,
+        noteColor,
+        noteColorMix: THREE.MathUtils.clamp(strictNoteColor > 0.5 ? Math.max(colorMix, 0.72) : (colorMix * 0.92 + 0.08), 0, 1),
+        noteColorStrict: strictNoteColor,
         emitters: [
           { x: bgDrive.notePos.x, y: bgDrive.notePos.y, r: ar, g: ag, b: ab, s: activeStrength },
           { x: mx01, y: my01, r: hr, g: hg, b: hb, s: hoverStrength },
