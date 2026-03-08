@@ -177,7 +177,13 @@ void main(){
   float vel = saturate(uVel01);
   float ie = saturate(uInteractionE);
 
-  vec2 p = (uv - 0.5) * (1.15 + 2.35 * uScale);
+  // Use seam-free direction-domain coordinates for base flow fields.
+  // Spherical UV from atan() has a natural seam at u=0/1; this mapping avoids that fold line.
+  vec2 skyDir = vec2(
+    dir.x * 0.86 + dir.z * 0.52,
+    dir.y * 1.08 - dir.x * 0.24
+  );
+  vec2 p = skyDir * (1.15 + 2.35 * uScale);
 
   vec2 m = (uMouse - 0.5);
   p += m * (0.06 + 0.12*e);
