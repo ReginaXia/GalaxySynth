@@ -23,10 +23,11 @@ void main() {
   float cross = (crossX + crossY) * 0.5;
 
   float mask = core + halo + cross * (0.10 + 0.48 * uCross);
-  float alpha = clamp(mask * vAlpha * uOpacity, 0.0, 1.0);
+  float breathAlpha = clamp(vTwinkle, 0.75, 1.35);
+  float alpha = clamp(mask * vAlpha * uOpacity * breathAlpha, 0.0, 1.0);
   if (alpha < 0.003) discard;
 
-  vec3 col = vColor * (0.82 + 0.44 * vTwinkle);
+  vec3 col = vColor * (0.80 + 0.50 * clamp(vTwinkle, 0.7, 1.4));
   col += vec3(1.0) * (0.04 + 0.18 * uCross) * cross;
   gl_FragColor = vec4(col, alpha);
 }

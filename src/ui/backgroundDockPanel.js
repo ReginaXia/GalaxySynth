@@ -272,7 +272,7 @@ export function createBackgroundDockPanel({ bg }) {
   });
   localColorLiftRow.sync(state.localColorLift);
 
-  const starBreathRow = makeRange(body, "Star Breath", state.starBreath, (v, sync) => {
+  const starBreathRow = makeRange(body, "Star Breath Intensity", state.starBreath, (v, sync) => {
     state.starBreath = v;
     sync(v);
     saveState(state);
