@@ -262,7 +262,7 @@ inkFall = saturate(inkFall + tri * 0.02);
 float ink = pulse * inkFall;
 
   float richness = 0.35 + 0.45 * e;
-  float wCloud = (0.20 + 0.42*e2) * band * mix(0.80, 1.20, materialRidge * richness);
+  float wCloud = (0.12 + 0.30*e2) * band * mix(0.78, 1.12, materialRidge * richness);
   float wSheen = (0.26 + 0.62*e)  * (0.38 + 0.62*band2) * uPearl * mix(0.78, 1.22, (1.0 - materialRidge) * richness);
   float wInk   = ink * (0.46 + 0.26*e);
 
@@ -339,9 +339,10 @@ float ink = pulse * inkFall;
     float flicker = 0.5 + 0.5*sin(uTime*10.0 + r*6.283);
     sp = tw * flicker * (0.25 + 0.95*e) * uSparkle;
   }
-  col += sp * vec3(1.0);
+  vec3 sparkleCol = mix(c1, spectralCol, 0.62);
+  col += sp * sparkleCol;
 
-  col = applySaturation(col, 1.0 + uSat);
+  col = applySaturation(col, 1.15 + uSat * 1.25);
   col = applyContrast(col, uContrast);
 
   float bright = uIntensity * (0.52 + 1.22*e);

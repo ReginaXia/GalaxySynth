@@ -1478,11 +1478,13 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     // Directly drive visible flow/brightness response (keeps click + hold responsive).
     const flowTarget = THREE.MathUtils.clamp(0.012 + bgLeadE * 0.62 + bgClickPulseVis * 0.42, 0, 0.92);
     const sparkleTarget = THREE.MathUtils.clamp(0.0 + bgLeadE * 0.12 + bgClickPulseVis * 0.10, 0, 0.20);
+    const satTarget = THREE.MathUtils.clamp(0.30 + bgLeadE * 0.58 + bgClickPulseVis * 0.24, 0.28, 0.98);
     // auto-dim to keep nebula readable
     const readabilityLimiter = interactionNow ? 0.84 : 0.92;
     const intensityTarget = THREE.MathUtils.clamp((0.015 + bgLeadE * 0.58 + bgClickPulseVis * 0.36) * readabilityLimiter, 0.01, 0.78);
     bg.uniforms.uFlow.value = __bgRiseFall(bg.uniforms.uFlow.value, flowTarget, dt, 10.0, 1.3);
     bg.uniforms.uSparkle.value = __bgRiseFall(bg.uniforms.uSparkle.value, sparkleTarget, dt, 10.0, 1.4);
+    bg.uniforms.uSat.value = __bgRiseFall(bg.uniforms.uSat.value, satTarget, dt, 9.0, 2.0);
     bg.uniforms.uIntensity.value = __bgRiseFall(bg.uniforms.uIntensity.value, intensityTarget, dt, 10.0, 1.2);
 
     // Pulse: when step changes while playing

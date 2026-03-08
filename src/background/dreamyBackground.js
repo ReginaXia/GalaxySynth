@@ -4,10 +4,10 @@ import bgVert from "./shaders/bg.vert.glsl?raw";
 import bgFrag from "./shaders/bg.frag.glsl?raw";
 
 export const BACKGROUND_PALETTES = {
-  pearl: { name: "Pearl Shell", colors: ["#7EC8FF","#7C98FF","#B39CFF","#F0EAFF"] },
+  pearl: { name: "Pearl Shell", colors: ["#3E7BFF","#6D55FF","#27CFFF","#FF57C6"] },
   candy: { name: "Cotton Candy", colors: ["#61D9FF","#FF6BD6","#FFB86B","#B6FF8A"] },
-  aurora:{ name: "Aurora Soft",  colors: ["#63CBFF","#6E86FF","#B4A2FF","#EDE8FF"] },
-  cosmic:{ name: "Cosmic Iris",  colors: ["#59BEFF","#5D74FF","#9A7CFF","#EFEAFF"] },
+  aurora:{ name: "Aurora Soft",  colors: ["#4DBDFF","#5F72FF","#8A63FF","#F24CC4"] },
+  cosmic:{ name: "Cosmic Iris",  colors: ["#2F66FF","#5A4DFF","#1BCBFF","#FF3EB8"] },
   neo:   { name: "Neo Dream",    colors: ["#3DFFB8","#3D7BFF","#FF3DF2","#FFE83D"] },
 };
 
@@ -42,7 +42,7 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
     uDetail:    { value: opts.detail ?? 0.24 },
     uPearl:     { value: opts.pearl ?? 0.92 },
     uSparkle:   { value: opts.sparkle ?? 0.015 },
-    uSat:       { value: opts.sat ?? 0.22 },
+    uSat:       { value: opts.sat ?? 0.30 },
     uContrast:  { value: opts.contrast ?? 0.92 },
 
     uPal0: { value: hexToVec3(pal.colors[0]) },
