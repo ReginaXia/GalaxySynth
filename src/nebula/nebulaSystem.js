@@ -55,6 +55,9 @@ const nebulaFrag = `
   uniform float uHueJitter;
   uniform float uRainbowMix;
   uniform float uHueScale;
+  uniform vec3  uNoteTint;
+  uniform float uNoteTintMix;
+  uniform float uFlash;
 
   varying vec3 vBaseColor;
   varying float vTw;
@@ -125,9 +128,13 @@ const nebulaFrag = `
 
     vec3 base = mix(vec3(lum), vBaseColor, 0.35);
     vec3 col  = mix(base, palCol * (0.35 + 0.9 * lum), clamp(uColorStrength, 0.0, 2.0));
+    float tintMix = clamp(uNoteTintMix, 0.0, 1.0);
+    vec3 tint = max(uNoteTint, vec3(0.001));
+    col = mix(col, col * tint, tintMix);
 
     float glow = mix(0.85, 1.25, vTw);
     col *= glow;
+    col *= (1.0 + 0.24 * clamp(uFlash, 0.0, 1.0));
 
     col += palCol * (tex.a * 0.10);
 
@@ -169,6 +176,13 @@ export function createNebulaSystem({ scene, planeY = 0.0, starTexture }) {
 
   const clusters = [];
   let activeId = null;
+  let visualHoverId = null;
+  let visualActiveId = null;
+  let visualLastId = null;
+  let visualHoverTheta01 = null;
+  let visualActiveTheta01 = null;
+  let visualLastTheta01 = null;
+  let prevTime = 0;
 
   // 供 picking 用
   const pickables = [];
@@ -202,6 +216,12 @@ export function createNebulaSystem({ scene, planeY = 0.0, starTexture }) {
       core: null,
       armStars: null,
       influence: 0,
+      visual: {
+        accent: 0,
+        pulse: 0,
+        tintMix: 0,
+        tint: new THREE.Color(1, 1, 1),
+      },
     };
 
     buildLayers(c, starTexture || __dotTex);
@@ -273,6 +293,8 @@ export function createNebulaSystem({ scene, planeY = 0.0, starTexture }) {
   }
 
   function update(worldPoint, t) {
+    const dt = clamp((t - prevTime) || 0.016, 0.001, 0.05);
+    prevTime = t;
     const pWorld = worldPoint;
 
     for (const c of clusters) {
@@ -322,6 +344,77 @@ export function createNebulaSystem({ scene, planeY = 0.0, starTexture }) {
       c.outer.material.uniforms.uTime.value = t;
       c.core.material.uniforms.uTime.value = t;
       c.armStars.material.uniforms.uTime.value = t;
+
+      const isActive = c.id === visualActiveId;
+      const isHover = !isActive && c.id === visualHoverId;
+      const isLast = !isActive && !isHover && c.id === visualLastId;
+      const targetAccent = isActive ? 1.0 : (isHover ? 0.62 : (isLast ? 0.28 : 0.0));
+      c.visual.accent = damp(c.visual.accent, targetAccent, 9.0, dt);
+      c.visual.pulse = Math.max(0, c.visual.pulse - dt * 1.7);
+
+      let theta01 = null;
+      if (isActive) theta01 = visualActiveTheta01;
+      else if (isHover) theta01 = visualHoverTheta01;
+      else if (isLast) theta01 = visualLastTheta01;
+
+      if (typeof theta01 === "number" && Number.isFinite(theta01)) {
+        c.visual.tint.setHSL(((theta01 % 1) + 1) % 1, 0.78, 0.62);
+      } else {
+        c.visual.tint.lerp(new THREE.Color(1, 1, 1), 1 - Math.exp(-dt * 4.0));
+      }
+      const targetTintMix = isActive ? 0.62 : (isHover ? 0.36 : (isLast ? 0.18 : 0.0));
+      c.visual.tintMix = damp(c.visual.tintMix, targetTintMix, 8.0, dt);
+
+      applyClusterVisual(c, dt);
+    }
+  }
+
+  function applyClusterVisual(c) {
+    const accent = c.visual.accent;
+    const pulse = c.visual.pulse;
+    const tintMix = clamp(c.visual.tintMix + pulse * 0.30, 0, 1);
+    const flash = clamp(pulse * 0.9 + accent * 0.25, 0, 1);
+
+    const mats = [c.outer?.material, c.core?.material, c.armStars?.material];
+    for (const mat of mats) {
+      if (!mat?.uniforms) continue;
+      const baseStrength = c.preset.palette.strength ?? 1.1;
+      const baseRainbow = c.preset.palette.rainbowMix ?? 0.08;
+      const baseHueJitter = c.preset.palette.hueJitter ?? 0.30;
+
+      mat.uniforms.uColorStrength.value = clamp(baseStrength * (1.0 + accent * 0.30 + pulse * 0.35), 0.6, 2.0);
+      mat.uniforms.uRainbowMix.value = clamp(baseRainbow + accent * 0.05 + pulse * 0.08, 0.0, 0.28);
+      mat.uniforms.uHueJitter.value = clamp(baseHueJitter + accent * 0.06 + pulse * 0.10, 0.0, 0.65);
+      mat.uniforms.uNoteTint.value.copy(c.visual.tint);
+      mat.uniforms.uNoteTintMix.value = tintMix;
+      mat.uniforms.uFlash.value = flash;
+    }
+  }
+
+  function setIntentVisuals({
+    hoverId = null,
+    activeId = null,
+    lastId = null,
+    hoverTheta01 = null,
+    activeTheta01 = null,
+    lastTheta01 = null,
+  } = {}) {
+    visualHoverId = hoverId;
+    visualActiveId = activeId;
+    visualLastId = lastId;
+    visualHoverTheta01 = hoverTheta01;
+    visualActiveTheta01 = activeTheta01;
+    visualLastTheta01 = lastTheta01;
+  }
+
+  function triggerNotePulse({ galaxyId, theta01 = null, strength = 1.0 } = {}) {
+    if (!galaxyId) return;
+    const c = clusters.find((x) => x.id === galaxyId);
+    if (!c) return;
+    c.visual.pulse = Math.max(c.visual.pulse, clamp(strength, 0, 1));
+    if (typeof theta01 === "number" && Number.isFinite(theta01)) {
+      c.visual.tint.setHSL(((theta01 % 1) + 1) % 1, 0.82, 0.64);
+      c.visual.tintMix = Math.max(c.visual.tintMix, 0.45);
     }
   }
 
@@ -460,6 +553,8 @@ export function createNebulaSystem({ scene, planeY = 0.0, starTexture }) {
     setClusterTransform,
     rebuildCluster,
     setClusterPalette,
+    setIntentVisuals,
+    triggerNotePulse,
 
     update,
     planeY,
@@ -753,6 +848,9 @@ function makeNebulaPoints({
       uHueJitter: { value: palette?.hueJitter ?? 0.30 },
       uRainbowMix: { value: palette?.rainbowMix ?? 0.08 },
       uHueScale: { value: palette?.hueScale ?? 0.012 },
+      uNoteTint: { value: new THREE.Color("#ffffff") },
+      uNoteTintMix: { value: 0.0 },
+      uFlash: { value: 0.0 },
     },
     vertexShader: nebulaVert,
     fragmentShader: nebulaFrag,
@@ -850,4 +948,8 @@ function lerp(a, b, t) { return a + (b - a) * t; }
 function smoothstep(e0, e1, x) {
   const t = clamp01((x - e0) / (e1 - e0));
   return t * t * (3 - 2 * t);
+}
+
+function damp(current, target, lambda, dt) {
+  return THREE.MathUtils.damp(current, target, lambda, dt);
 }

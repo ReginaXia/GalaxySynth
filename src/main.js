@@ -1120,6 +1120,11 @@ canvas.addEventListener("pointerdown", (e) => {
     if (musicState.activeIntent?.galaxyId) {
       activeNebulaKey = musicState.activeIntent.galaxyId;
       cacheActiveDiskFromNebula(activeNebulaKey);
+      nebulaSystem.triggerNotePulse({
+        galaxyId: activeNebulaKey,
+        theta01: musicState.activeIntent.theta01,
+        strength: 0.95,
+      });
       const instrument = voices?.getNebulaInstrument?.(activeNebulaKey);
       if (instrument) {
         audio.playNebulaScratch({
@@ -1571,6 +1576,14 @@ const hasNebulaHit = !!nebulaHit;
 
   activeNebulaKey = musicState.activeIntent?.galaxyId ?? null;
   if (activeNebulaKey && !activeDiskCenterW) cacheActiveDiskFromNebula(activeNebulaKey);
+  nebulaSystem.setIntentVisuals({
+    hoverId: musicState.hoverIntent?.galaxyId ?? null,
+    activeId: musicState.activeIntent?.galaxyId ?? null,
+    lastId: musicState.lastIntent?.galaxyId ?? null,
+    hoverTheta01: musicState.hoverIntent?.theta01 ?? null,
+    activeTheta01: musicState.activeIntent?.theta01 ?? null,
+    lastTheta01: musicState.lastIntent?.theta01 ?? null,
+  });
 
 
 
@@ -1908,6 +1921,11 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     if (isPlaying && stepNow >= 0 && stepNow !== bgLastStep) {
       bgLastStep = stepNow;
       triggerBackgroundPulse(0.85);
+      nebulaSystem.triggerNotePulse({
+        galaxyId: activeNebulaKey ?? musicState.activeIntent?.galaxyId ?? null,
+        theta01: musicState.activeIntent?.theta01 ?? null,
+        strength: 0.72,
+      });
       bgNoteSeed = t;
       bgNoteHue = (stepNow % STEPS) / STEPS;
       bgDrive.noteSeed = bgNoteSeed;
