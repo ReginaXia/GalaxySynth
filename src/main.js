@@ -727,73 +727,247 @@ console.log("vert len", meteorVert.length, "frag len", meteorFrag.length);
 
 const meteorGui = setupMeteorGUI(meteorSystem);
 
-const UI_VIS_KEY = "GalaxySynth_CustomUIVisible_v1";
-function readUiVisibleState() {
+const UI_STATE_KEY = "GalaxySynth_UIState_v3";
+function readUiState() {
   try {
-    const raw = localStorage.getItem(UI_VIS_KEY);
-    if (raw == null) return true;
-    return raw !== "0";
+    const raw = localStorage.getItem(UI_STATE_KEY);
+    if (!raw) {
+      return {
+        visible: true,
+        showcase: false,
+        showPlay: true,
+        showLook: true,
+        showAudio: false,
+        showDebug: false,
+        showTransport: true,
+      };
+    }
+    const s = JSON.parse(raw);
+    return {
+      visible: s.visible !== false,
+      showcase: !!s.showcase,
+      showPlay: s.showPlay !== false,
+      showLook: s.showLook !== false,
+      showAudio: !!s.showAudio,
+      showDebug: !!s.showDebug,
+      showTransport: s.showTransport !== false,
+    };
   } catch {
-    return true;
+    return {
+      visible: true,
+      showcase: false,
+      showPlay: true,
+      showLook: true,
+      showAudio: false,
+      showDebug: false,
+      showTransport: true,
+    };
   }
 }
-function writeUiVisibleState(visible) {
+function writeUiState(s) {
   try {
-    localStorage.setItem(UI_VIS_KEY, visible ? "1" : "0");
+    localStorage.setItem(UI_STATE_KEY, JSON.stringify(s));
   } catch {}
 }
 
-let customUiVisible = readUiVisibleState();
+const uiState = readUiState();
 
-const uiToggleBtn = document.createElement("button");
-uiToggleBtn.className = "ui-toggle-btn";
-uiToggleBtn.style.cssText = [
-  "position:fixed",
-  "right:12px",
-  "top:12px",
-  "z-index:10000",
-  "border:0",
-  "border-radius:10px",
-  "padding:8px 10px",
-  "background:rgba(8,10,18,0.72)",
-  "backdrop-filter:blur(8px)",
-  "color:#eef2ff",
-  "font:12px/1.2 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace",
-  "cursor:pointer",
-].join(";");
-uiToggleBtn.addEventListener("pointerdown", (e) => e.stopPropagation());
-uiToggleBtn.addEventListener("click", (e) => {
-  e.stopPropagation();
-  setCustomUiVisible(!customUiVisible);
-});
-document.body.appendChild(uiToggleBtn);
-
-function setCustomUiVisible(visible) {
-  customUiVisible = !!visible;
-  writeUiVisibleState(customUiVisible);
-  uiToggleBtn.textContent = `UI: ${customUiVisible ? "ON" : "OFF"} (H)`;
-
-  const list = document.querySelectorAll(".custom-ui, .lil-gui, .dg");
-  list.forEach((el) => {
-    if (el === uiToggleBtn) return;
-    el.style.display = customUiVisible ? "" : "none";
-  });
-
-  noteColorUI?.setVisible?.(customUiVisible);
-  audioUI?.setVisible?.(customUiVisible);
-  if (galaxyGuiRef?.gui?.domElement) galaxyGuiRef.gui.domElement.style.display = customUiVisible ? "" : "none";
-  if (meteorGui?.domElement) meteorGui.domElement.style.display = customUiVisible ? "" : "none";
+const uiStyle = document.createElement("style");
+uiStyle.textContent = `
+.ui-shell{
+  position:fixed; right:12px; top:12px; z-index:10001;
+  width:272px; padding:10px 12px; border-radius:14px;
+  color:#eef2ff; background:linear-gradient(160deg, rgba(10,14,28,.82), rgba(20,12,34,.72));
+  border:1px solid rgba(165,196,255,.22); backdrop-filter:blur(10px);
+  font:12px/1.35 "IBM Plex Sans","Segoe UI",ui-sans-serif,sans-serif;
+  box-shadow:0 10px 30px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.03);
 }
+.ui-shell .row{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin:6px 0; }
+.ui-shell .title{ font-weight:700; letter-spacing:.4px; margin-bottom:8px; }
+.ui-shell .group-title{ margin-top:8px; font-size:11px; letter-spacing:.7px; text-transform:uppercase; opacity:.72; }
+.ui-shell .btn{
+  border:0; border-radius:8px; padding:5px 8px; cursor:pointer;
+  color:#eaf0ff; background:rgba(70,95,170,.36);
+}
+.ui-shell .btn.secondary{ background:rgba(72,56,112,.38); }
+.ui-shell .chk{ display:flex; align-items:center; gap:6px; opacity:.95; }
+.ui-shell .hint{ opacity:.72; font-size:11px; margin-top:6px; }
+.ui-shell input[type="checkbox"]{ transform:translateY(1px); }
+
+/* Unified panel look */
+.custom-ui.note-color-panel,
+.custom-ui.audio-monitor,
+.custom-ui.debug-hud,
+.custom-ui.ui-shell{
+  border:1px solid rgba(165,196,255,.20) !important;
+  border-radius:12px !important;
+  background:linear-gradient(160deg, rgba(10,14,28,.78), rgba(22,14,38,.68)) !important;
+  color:#eef2ff !important;
+  box-shadow:0 10px 30px rgba(0,0,0,.34), inset 0 0 0 1px rgba(255,255,255,.03);
+}
+.custom-ui.note-color-panel,
+.custom-ui.audio-monitor{
+  font-family:"IBM Plex Sans","Segoe UI",ui-sans-serif,sans-serif !important;
+}
+.lil-gui{
+  --background-color: rgba(12,16,30,.72) !important;
+  --title-background-color: rgba(34,26,56,.58) !important;
+  --widget-color: #8fb2ff !important;
+  --hover-color: #b3c8ff !important;
+  --text-color: #eaf0ff !important;
+  --folder-widget-color: #7e94e0 !important;
+  --number-color: #a7f2ff !important;
+  --string-color: #ffd3ef !important;
+  backdrop-filter: blur(8px);
+  border:1px solid rgba(165,196,255,.18);
+  border-radius:10px;
+}
+.lil-gui .title{ letter-spacing:.2px; }
+`;
+document.head.appendChild(uiStyle);
+
+const uiShell = document.createElement("div");
+uiShell.className = "custom-ui ui-shell";
+uiShell.addEventListener("pointerdown", (e) => e.stopPropagation());
+uiShell.innerHTML = `
+  <div class="title">Visual UI</div>
+  <div class="row">
+    <button class="btn" data-act="toggle-ui">Master: ON</button>
+    <button class="btn secondary" data-act="toggle-showcase">Showcase: OFF</button>
+  </div>
+  <div class="group-title">Panels</div>
+  <label class="chk"><input type="checkbox" data-k="play"> Play Panel</label>
+  <label class="chk"><input type="checkbox" data-k="look"> Look Panels</label>
+  <label class="chk"><input type="checkbox" data-k="audio"> Audio Monitor</label>
+  <label class="chk"><input type="checkbox" data-k="debug"> Debug HUD</label>
+  <label class="chk"><input type="checkbox" data-k="transport"> Transport UI</label>
+  <div class="hint">Hotkeys: H master hide/show, J showcase</div>
+`;
+document.body.appendChild(uiShell);
+
+const uiBtn = uiShell.querySelector('[data-act="toggle-ui"]');
+const showcaseBtn = uiShell.querySelector('[data-act="toggle-showcase"]');
+const playChk = uiShell.querySelector('input[data-k="play"]');
+const lookChk = uiShell.querySelector('input[data-k="look"]');
+const audioChk = uiShell.querySelector('input[data-k="audio"]');
+const debugChk = uiShell.querySelector('input[data-k="debug"]');
+const transportChk = uiShell.querySelector('input[data-k="transport"]');
+
+function applyUiState() {
+  uiBtn.textContent = `Master: ${uiState.visible ? "ON" : "OFF"}`;
+  showcaseBtn.textContent = `Showcase: ${uiState.showcase ? "ON" : "OFF"}`;
+  playChk.checked = !!uiState.showPlay;
+  lookChk.checked = !!uiState.showLook;
+  audioChk.checked = !!uiState.showAudio;
+  debugChk.checked = !!uiState.showDebug;
+  transportChk.checked = !!uiState.showTransport;
+
+  const showPlay = uiState.visible && uiState.showPlay;
+  const showLook = uiState.visible && uiState.showLook;
+  const showAudio = uiState.visible && uiState.showAudio;
+  const showDebug = uiState.visible && uiState.showDebug;
+  const showTransport = uiState.visible && uiState.showTransport;
+
+  // Layout normalization (avoid overlap and keep showcase clean).
+  if (noteColorUI?.root) {
+    noteColorUI.root.style.right = "12px";
+    noteColorUI.root.style.top = "236px";
+    noteColorUI.root.style.bottom = "auto";
+    noteColorUI.root.style.zIndex = "9998";
+  }
+  if (audioUI?.root) {
+    audioUI.root.style.left = "12px";
+    audioUI.root.style.top = "430px";
+    audioUI.root.style.width = "272px";
+    audioUI.root.style.zIndex = "9998";
+  }
+  if (galaxyGuiRef?.gui?.domElement) {
+    const g = galaxyGuiRef.gui.domElement.style;
+    g.position = "fixed";
+    g.left = "12px";
+    g.top = "68px";
+    g.zIndex = "9997";
+  }
+  if (meteorGui?.domElement) {
+    const m = meteorGui.domElement.style;
+    m.position = "fixed";
+    m.right = "12px";
+    m.top = "560px";
+    m.zIndex = "9997";
+  }
+
+  if (uiState.showcase) {
+    noteColorUI?.setVisible?.(uiState.visible);
+    audioUI?.setVisible?.(false);
+    debugHud.style.display = "none";
+    noteOverlay.style.display = "none";
+    if (galaxyGuiRef?.gui?.domElement) galaxyGuiRef.gui.domElement.style.display = "none";
+    if (meteorGui?.domElement) meteorGui.domElement.style.display = "none";
+    const tempoRingEl2 = document.getElementById("tempo-ring");
+    const stepRingEl2 = document.getElementById("step-ring");
+    if (tempoRingEl2) tempoRingEl2.style.display = uiState.visible ? "" : "none";
+    if (stepRingEl2) stepRingEl2.style.display = uiState.visible ? "" : "none";
+  } else {
+    noteColorUI?.setVisible?.(showPlay);
+    audioUI?.setVisible?.(showAudio);
+    debugHud.style.display = showDebug ? "" : "none";
+    noteOverlay.style.display = showDebug ? "" : "none";
+    if (galaxyGuiRef?.gui?.domElement) galaxyGuiRef.gui.domElement.style.display = showLook ? "" : "none";
+    if (meteorGui?.domElement) meteorGui.domElement.style.display = showLook ? "" : "none";
+    const tempoRingEl2 = document.getElementById("tempo-ring");
+    const stepRingEl2 = document.getElementById("step-ring");
+    if (tempoRingEl2) tempoRingEl2.style.display = showTransport ? "" : "none";
+    if (stepRingEl2) stepRingEl2.style.display = showTransport ? "" : "none";
+  }
+
+  uiShell.style.opacity = "1";
+  writeUiState(uiState);
+}
+
+uiBtn.addEventListener("click", () => {
+  uiState.visible = !uiState.visible;
+  applyUiState();
+});
+showcaseBtn.addEventListener("click", () => {
+  uiState.showcase = !uiState.showcase;
+  applyUiState();
+});
+playChk.addEventListener("change", () => {
+  uiState.showPlay = !!playChk.checked;
+  applyUiState();
+});
+lookChk.addEventListener("change", () => {
+  uiState.showLook = !!lookChk.checked;
+  applyUiState();
+});
+audioChk.addEventListener("change", () => {
+  uiState.showAudio = !!audioChk.checked;
+  applyUiState();
+});
+debugChk.addEventListener("change", () => {
+  uiState.showDebug = !!debugChk.checked;
+  applyUiState();
+});
+transportChk.addEventListener("change", () => {
+  uiState.showTransport = !!transportChk.checked;
+  applyUiState();
+});
 
 window.addEventListener("keydown", (e) => {
   const tag = String(e.target?.tagName || "").toLowerCase();
   if (tag === "input" || tag === "textarea" || e.target?.isContentEditable) return;
   if (e.repeat) return;
-  if ((e.key || "").toLowerCase() !== "h") return;
-  setCustomUiVisible(!customUiVisible);
+  const k = (e.key || "").toLowerCase();
+  if (k === "h") {
+    uiState.visible = !uiState.visible;
+    applyUiState();
+  } else if (k === "j") {
+    uiState.showcase = !uiState.showcase;
+    applyUiState();
+  }
 });
 
-setCustomUiVisible(customUiVisible);
+applyUiState();
 
 
 
