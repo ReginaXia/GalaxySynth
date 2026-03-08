@@ -185,7 +185,7 @@ void main(){
   float flowB = fbm((p + vec2(2.7, -1.9)) * 0.22 + vec2(-t * 0.20, t * 0.26));
   float flowC = fbm((p + vec2(-3.1, 1.7)) * 0.58 + vec2(t * 0.11, -t * 0.09));
   float materialField = saturate(0.50 * flowA + 0.34 * flowB + 0.16 * flowC);
-  float materialRidge = smoothstep(0.34, 0.82, materialField);
+  float materialRidge = smoothstep(0.38, 0.80, materialField);
 
   vec2 w1 = vec2(fbm(p * 1.15 + vec2(t, -t)), fbm(p * 1.15 + vec2(-t, t)));
   vec2 w2 = vec2(fbm(p * 2.00 + vec2(-t*1.2, t*0.8)), fbm(p * 2.00 + vec2(t*0.9, -t*0.9)));
@@ -237,11 +237,12 @@ g = mix(g, h, 0.10);
 // Medium/high-frequency anisotropic filaments for richer "liquid light" density.
 float filA = fbm(q * 4.8 + vec2(t * 0.92, -t * 0.78));
 float filB = fbm((q + vec2(6.1, -3.7)) * 6.2 + vec2(-t * 0.66, t * 0.58));
-float filament = pow(saturate(abs(filA - filB) * 1.55), 1.35);
+float filament = pow(saturate(abs(filA - filB) * 1.72), 1.28);
 
 // Smooth remap (avoid near-binary masks)
 float band  = pow(saturate(f),  1.10);
 float band2 = pow(saturate(g),  1.06);
+float bandEdge = smoothstep(0.52, 0.92, band2) - smoothstep(0.92, 1.0, band2);
 
 // Tiny spatial jitter to break any remaining contour edges
 float dither01 = hash12(gl_FragCoord.xy * 0.5);
@@ -276,7 +277,7 @@ inkFall = saturate(inkFall + tri * 0.02);
 float ink = pulse * inkFall;
 
   float richness = 0.35 + 0.45 * e;
-  float wCloud = (0.12 + 0.30*e2) * band * mix(0.78, 1.12, materialRidge * richness);
+  float wCloud = (0.10 + 0.24*e2) * band * mix(0.76, 1.08, materialRidge * richness);
   float wSheen = (0.26 + 0.62*e)  * (0.38 + 0.62*band2) * uPearl * mix(0.78, 1.22, (1.0 - materialRidge) * richness);
   float wInk   = ink * (0.46 + 0.26*e);
 
@@ -293,7 +294,7 @@ float ink = pulse * inkFall;
   vec3 spectralMagenta  = vec3(0.56, 0.28, 0.58);
   vec3 spectralGold     = vec3(0.64, 0.54, 0.28);
   vec3 spectralIndigo   = vec3(0.20, 0.24, 0.66);
-  vec3 spectralPearl    = vec3(0.60, 0.78, 0.86);
+  vec3 spectralPearl    = vec3(0.54, 0.68, 0.78);
 
   float fBlue    = fbm(q * 0.26 + vec2( t * 0.18, -t * 0.12));
   float fViolet  = fbm(q * 0.22 + vec2(-t * 0.15,  t * 0.19) + vec2( 3.4, -1.9));
@@ -309,10 +310,10 @@ float ink = pulse * inkFall;
   float wMagenta = smoothstep(0.56, 0.95, fMagenta);
   float wGold    = smoothstep(0.76, 0.98, fGold) * 0.22; // very subtle warm accent
   float wIndigo  = smoothstep(0.58, 0.95, fIndigo) * 0.58;
-  float wPearl   = smoothstep(0.82, 0.99, fPearl) * 0.18;
+  float wPearl   = smoothstep(0.84, 0.995, fPearl) * 0.10;
 
   // Gate spectral fields to material ridges / sheen regions to avoid foggy coverage.
-  float spectralGate = pow(saturate(materialRidge), 1.35) * (0.18 + 0.82 * pow(saturate(fres), 0.8));
+  float spectralGate = pow(saturate(materialRidge), 1.45) * (0.12 + 0.70 * pow(saturate(fres), 0.9));
   wBlue    *= spectralGate;
   wViolet  *= spectralGate;
   wCyan    *= spectralGate;
@@ -331,29 +332,45 @@ float ink = pulse * inkFall;
      spectralIndigo  * wIndigo +
      spectralPearl   * wPearl) / wSum;
 
-  float spectralBlend = (0.05 + 0.21 * materialRidge) * (0.38 + 0.62 * e) * (0.35 + 0.65 * fres);
-  c0 = mix(c0, spectralCol, spectralBlend * 0.58);
-  c1 = mix(c1, spectralCol, spectralBlend * 0.82);
+  float spectralBlend = (0.04 + 0.17 * materialRidge) * (0.38 + 0.62 * e) * (0.28 + 0.56 * fres);
+  c0 = mix(c0, spectralCol, spectralBlend * 0.52);
+  c1 = mix(c1, spectralCol, spectralBlend * 0.72);
 
   // Strict note color should influence not only emitter but also local spectral field.
   float noteProx = exp(-d * 7.2);
   float noteColorK = saturate(uNoteColorMix) * mix(0.42, 0.96, strictK);
-  c0 = mix(c0, mix(c0, uNoteColor, 0.70), noteProx * noteColorK * 0.36);
-  c1 = mix(c1, mix(c1, uNoteColor, 0.82), noteProx * noteColorK * 0.44);
-  spectralCol = mix(spectralCol, uNoteColor, noteProx * noteColorK * 0.30);
+  c0 = mix(c0, mix(c0, uNoteColor, 0.70), noteProx * noteColorK * 0.30);
+  c1 = mix(c1, mix(c1, uNoteColor, 0.82), noteProx * noteColorK * 0.38);
+  spectralCol = mix(spectralCol, uNoteColor, noteProx * noteColorK * 0.24);
 
-  vec3 col = uBase;
+  // Deep-space gradient base to avoid flat white wash.
+  float gy = smoothstep(0.08, 0.92, uv.y + (flowA - 0.5) * 0.08);
+  vec3 deepLow = vec3(0.018, 0.024, 0.052);
+  vec3 deepMid = vec3(0.040, 0.050, 0.090);
+  vec3 deepHigh = vec3(0.080, 0.058, 0.122);
+  vec3 gradBase = mix(deepLow, deepMid, gy);
+  gradBase = mix(gradBase, deepHigh, smoothstep(0.62, 1.0, gy) * 0.55);
+
+  vec3 col = mix(uBase, gradBase, 0.78);
   col = mix(col, c0, wCloud);
   col = mix(col, c1, wSheen);
   col = mix(col, cInk, wInk);
   float noteTintMask = inkFall * mix(0.30 + 0.70 * pulse, 0.92, strictK);
   col = mix(col, col + uNoteColor * mix(0.58, 0.95, strictK), noteTintMask * saturate(uNoteColorMix) * mix(0.52, 0.92, strictK));
-  col = mix(col, spectralCol, (0.028 + 0.105 * materialRidge) * (0.35 + 0.62 * e) * (0.30 + 0.70 * fres));
+  col = mix(col, spectralCol, (0.022 + 0.080 * materialRidge) * (0.35 + 0.62 * e) * (0.26 + 0.56 * fres));
 
   // Richer iridescent micro-structure without global overbright fog.
-  float filamentMask = filament * (0.28 + 0.72 * materialRidge) * (0.32 + 0.68 * fres);
+  float filamentMask = filament * (0.36 + 0.64 * materialRidge) * (0.32 + 0.68 * fres) * (0.28 + 0.72 * bandEdge);
   vec3 filamentCol = mix(spectralCol, c1, 0.55);
-  col += filamentCol * filamentMask * (0.12 + 0.16 * e);
+  col += filamentCol * filamentMask * (0.13 + 0.16 * e);
+
+  // Local "cosmic sunset" glow injection from note color (localized only).
+  vec3 warmSunset = vec3(1.00, 0.62, 0.36);
+  vec3 sunsetTint = mix(uNoteColor, warmSunset, 0.20);
+  float sunsetCore = exp(-d * 10.5) * (0.45 + 0.55 * pulse);
+  float sunsetHalo = exp(-d * 4.8) * (0.20 + 0.80 * energy);
+  float sunsetMask = (sunsetCore * 0.75 + sunsetHalo * 0.25) * saturate(uNoteColorMix);
+  col += sunsetTint * sunsetMask * mix(0.22, 0.46, strictK);
 
   // Nebula-local color emitters: spatial "light-up" feel near interaction points.
   vec2 e0v = (uv - uEmitPos0) * vec2(1.06, 1.0);
@@ -371,6 +388,10 @@ float ink = pulse * inkFall;
   col += emitCol * (0.30 + 0.62 * emitSheen + (0.22 + 0.35 * strictK) * saturate(uNoteColorMix));
   col = mix(col, col + emitCol * 0.20, emitMask * 0.22);
 
+  // Preserve dark separations so motion reads as fine flow, not full-screen wash.
+  float darkGap = (1.0 - materialRidge) * (0.45 + 0.55 * (1.0 - band));
+  col *= (1.0 - darkGap * 0.12);
+
   float sp = 0.0;
   if (uSparkle > 0.001){
     vec2 spUv = uv * (260.0 + 320.0*uScale) + vec2(t*7.0, -t*5.0);
@@ -382,14 +403,14 @@ float ink = pulse * inkFall;
   vec3 sparkleCol = mix(c1, spectralCol, 0.62);
   col += sp * sparkleCol;
 
-  vec3 satCol = applySaturation(col, 1.08 + uSat * 1.10);
+  vec3 satCol = applySaturation(col, 1.12 + uSat * 1.24);
   float satMaskRidge = pow(saturate(materialRidge), 1.1);
   float satMask = saturate(0.10 + satMaskRidge * 0.52 + energy * 0.46 + emitMask * 0.40);
   col = mix(col, satCol, satMask);
   col = applyContrast(col, uContrast);
 
-  float bright = uIntensity * (0.52 + 1.22*e);
-  bright = min(bright, 1.35); // 防止过曝导致中心出现奇怪的红形状
+  float bright = uIntensity * (0.46 + 1.02*e);
+  bright = min(bright, 1.12);
   col *= bright;
 
   // ✅ 让 Three.js 的 toneMapping / 输出色彩空间接管 gamma（避免重复 gamma 导致 banding）

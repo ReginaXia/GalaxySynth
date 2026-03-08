@@ -1559,7 +1559,7 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     const satTarget = THREE.MathUtils.clamp(0.28 + bgLeadE * 0.46 + bgClickPulseVis * 0.24, 0.24, 0.92);
     // auto-dim to keep nebula readable
     const readabilityLimiter = interactionNow ? 0.84 : 0.92;
-    const intensityTarget = THREE.MathUtils.clamp((0.018 + bgLeadE * 0.64 + bgClickPulseVis * 0.42) * readabilityLimiter, 0.01, 0.84);
+    const intensityTarget = THREE.MathUtils.clamp((0.012 + bgLeadE * 0.50 + bgClickPulseVis * 0.30) * readabilityLimiter, 0.01, 0.62);
     bg.uniforms.uFlow.value = __bgRiseFall(bg.uniforms.uFlow.value, flowTarget, dt, 12.0, 1.5);
     bg.uniforms.uSparkle.value = __bgRiseFall(bg.uniforms.uSparkle.value, sparkleTarget, dt, 12.0, 1.6);
     bg.uniforms.uSat.value = __bgRiseFall(bg.uniforms.uSat.value, satTarget, dt, 10.0, 2.2);
@@ -1630,7 +1630,7 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
         interactionPos: bgDrive.notePos,
         noteHue: stableNoteHue,
         noteColor,
-        noteColorMix: THREE.MathUtils.clamp(strictNoteColor > 0.5 ? Math.max(colorMix, 0.72) : (colorMix * 0.92 + 0.08), 0, 1),
+        noteColorMix: THREE.MathUtils.clamp(strictNoteColor > 0.5 ? Math.max(colorMix, 0.52) : (colorMix * 0.90 + 0.06), 0, 1),
         noteColorStrict: strictNoteColor,
         emitters: [
           { x: bgDrive.notePos.x, y: bgDrive.notePos.y, r: ar, g: ag, b: ab, s: activeStrength },
