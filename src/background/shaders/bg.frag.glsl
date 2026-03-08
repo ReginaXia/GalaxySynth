@@ -227,7 +227,7 @@ float jitter = (dither01 - 0.5) * (2.0 / 255.0);
 band  = saturate(band  + jitter);
 band2 = saturate(band2 + jitter);
 
-float musicalT = (uPitch01 * 0.92 + uTheta01 * 0.35 + t * 0.12 + (materialField - 0.5) * 0.12);
+float palettePhase = (0.62 + t * 0.06 + (materialField - 0.5) * 0.14);
 
   float sheen = (fres * (0.35 + 0.85*e) + (band2-0.5) * 0.25) * uPearl;
 
@@ -257,14 +257,54 @@ float ink = pulse * inkFall;
   float wSheen = (0.26 + 0.62*e)  * (0.38 + 0.62*band2) * uPearl * mix(0.78, 1.22, (1.0 - materialRidge) * richness);
   float wInk   = ink * (0.46 + 0.26*e);
 
-  vec3 c0 = palette4(musicalT + sheen * 0.45 + (f-0.5)*0.25);
-  vec3 c1 = palette4(musicalT + 0.33 + sheen * 0.75 + (g-0.5)*0.35);
-  vec3 cInk = palette4(musicalT + 0.66 + uNoteSeed*0.07);
+  vec3 c0 = palette4(palettePhase + sheen * 0.35 + (f - 0.5) * 0.18);
+  vec3 c1 = palette4(palettePhase + 0.21 + sheen * 0.52 + (g - 0.5) * 0.22);
+  vec3 cInk = palette4(palettePhase + 0.58 + uNoteSeed * 0.07);
+
+  // Step 3: coexisting spectral fields (no global hue replacement).
+  vec3 spectralDeepBlue = vec3(0.12, 0.22, 0.56);
+  vec3 spectralViolet   = vec3(0.36, 0.24, 0.62);
+  vec3 spectralCyan     = vec3(0.20, 0.56, 0.66);
+  vec3 spectralMagenta  = vec3(0.56, 0.28, 0.58);
+  vec3 spectralGold     = vec3(0.64, 0.54, 0.28);
+
+  float fBlue    = fbm(q * 0.26 + vec2( t * 0.18, -t * 0.12));
+  float fViolet  = fbm(q * 0.22 + vec2(-t * 0.15,  t * 0.19) + vec2( 3.4, -1.9));
+  float fCyan    = fbm(q * 0.30 + vec2( t * 0.21,  t * 0.07) + vec2(-2.7,  4.1));
+  float fMagenta = fbm(q * 0.24 + vec2(-t * 0.10, -t * 0.17) + vec2( 5.3,  2.2));
+  float fGold    = fbm(q * 0.18 + vec2( t * 0.09, -t * 0.06) + vec2(-4.8, -3.3));
+
+  float wBlue    = smoothstep(0.48, 0.92, fBlue);
+  float wViolet  = smoothstep(0.54, 0.94, fViolet);
+  float wCyan    = smoothstep(0.50, 0.93, fCyan);
+  float wMagenta = smoothstep(0.56, 0.95, fMagenta);
+  float wGold    = smoothstep(0.76, 0.98, fGold) * 0.22; // very subtle warm accent
+
+  // Gate spectral fields to material ridges / sheen regions to avoid foggy coverage.
+  float spectralGate = pow(saturate(materialRidge), 1.35) * (0.18 + 0.82 * pow(saturate(fres), 0.8));
+  wBlue    *= spectralGate;
+  wViolet  *= spectralGate;
+  wCyan    *= spectralGate;
+  wMagenta *= spectralGate;
+  wGold    *= spectralGate;
+
+  float wSum = max(1e-4, wBlue + wViolet + wCyan + wMagenta + wGold);
+  vec3 spectralCol =
+    (spectralDeepBlue * wBlue +
+     spectralViolet  * wViolet +
+     spectralCyan    * wCyan +
+     spectralMagenta * wMagenta +
+     spectralGold    * wGold) / wSum;
+
+  float spectralBlend = (0.02 + 0.12 * materialRidge) * (0.30 + 0.55 * e) * (0.35 + 0.65 * fres);
+  c0 = mix(c0, spectralCol, spectralBlend * 0.45);
+  c1 = mix(c1, spectralCol, spectralBlend * 0.65);
 
   vec3 col = uBase;
   col = mix(col, c0, wCloud);
   col = mix(col, c1, wSheen);
   col = mix(col, cInk, wInk);
+  col = mix(col, spectralCol, (0.01 + 0.05 * materialRidge) * (0.35 + 0.45 * e) * (0.30 + 0.70 * fres));
 
   float sp = 0.0;
   if (uSparkle > 0.001){
