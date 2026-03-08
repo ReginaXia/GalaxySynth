@@ -301,7 +301,20 @@ export function createNebulaSystem({ scene, planeY = 0.0, starTexture }) {
       c.group.rotation.y = t * c.rotSpeed;
 
       const dist = pWorld.distanceTo(c.center);
-      const infl = smoothstep(c.preset.shape.influenceOuter, c.preset.shape.influenceInner, dist);
+      // Scale influence range with nebula visual size so large nebula outer rings
+      // still receive interaction instead of only the center responding.
+      const groupScale = Math.max(
+        0.0001,
+        (Math.abs(c.group.scale.x) + Math.abs(c.group.scale.y) + Math.abs(c.group.scale.z)) / 3
+      );
+      const shapeScale = Math.max(0.45, (c.preset?.shape?.sizeScale ?? 1.0) * (c.preset?.shape?.length ?? 1.0));
+      const influenceScale = groupScale * shapeScale;
+      const influenceOuter = Math.max(
+        c.preset.shape.influenceInner + 0.001,
+        c.preset.shape.influenceOuter * influenceScale
+      );
+      const influenceInner = Math.min(c.preset.shape.influenceInner * influenceScale, influenceOuter - 0.001);
+      const infl = smoothstep(influenceOuter, influenceInner, dist);
       c.influence = infl;
 
       const inflOuter = Math.pow(infl, 1.0);
@@ -323,7 +336,7 @@ export function createNebulaSystem({ scene, planeY = 0.0, starTexture }) {
         points: c.core,
         basePositions: c.core.userData.basePositions,
         targetLocal: pLocal,
-        strength: attractionUI.outerStrength * inflCore,
+        strength: attractionUI.coreStrength * inflCore,
         swirl: 0.22 * inflCore,
         radius: attractionUI.radius,
         t: t + 13.7,
@@ -334,7 +347,7 @@ export function createNebulaSystem({ scene, planeY = 0.0, starTexture }) {
         points: c.armStars,
         basePositions: c.armStars.userData.basePositions,
         targetLocal: pLocal,
-        strength: attractionUI.outerStrength * inflOuter, // 比 outer/core 略大一点，更显眼
+        strength: attractionUI.starsStrength * inflOuter, // 比 outer/core 略大一点，更显眼
         swirl: 0.28 * inflOuter,
         radius: attractionUI.radius,
         t: t + 7.3,
