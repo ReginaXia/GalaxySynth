@@ -154,24 +154,24 @@ void main(){
   vec3 dir = normalize(vWorldPos - cameraPosition);
   vec2 uv = vec2(atan(dir.z, dir.x) / (6.2831853) + 0.5, asin(dir.y) / 3.1415926 + 0.5);
 
-  float t = uTime * (0.08 + 0.42 * uFlow);
+  float t = uTime * (0.016 + 0.16 * uFlow);
 
   float e = saturate(uLeadE);
   float e2 = e*e;
   float vel = saturate(uVel01);
 
-  vec2 p = (uv - 0.5) * (1.0 + 2.2 * uScale);
+  vec2 p = (uv - 0.5) * (0.75 + 1.35 * uScale);
 
   vec2 m = (uMouse - 0.5);
   p += m * (0.06 + 0.12*e);
 
-  vec2 w1 = vec2(fbm(p * 1.25 + vec2(t, -t)), fbm(p * 1.25 + vec2(-t, t)));
-  vec2 w2 = vec2(fbm(p * 2.30 + vec2(-t*1.4, t*0.9)), fbm(p * 2.30 + vec2(t*1.2, -t*1.1)));
-  vec2 warp = (w1 - 0.5) * (0.85 + 1.25*e) * uWarp + (w2 - 0.5) * (0.35 + 0.90*e) * uDetail;
+  vec2 w1 = vec2(fbm(p * 0.75 + vec2(t, -t)), fbm(p * 0.75 + vec2(-t, t)));
+  vec2 w2 = vec2(fbm(p * 1.30 + vec2(-t*1.2, t*0.8)), fbm(p * 1.30 + vec2(t*0.9, -t*0.9)));
+  vec2 warp = (w1 - 0.5) * (0.55 + 0.85*e) * uWarp + (w2 - 0.5) * (0.18 + 0.45*e) * uDetail;
 
   vec2 q = p + warp;
-  float f = fbm(q * 1.05 + vec2(0.0, t*0.6));
-  float g = fbm(q * 2.10 + vec2(t*0.9, 0.0));
+  float f = fbm(q * 0.70 + vec2(0.0, t*0.45));
+  float g = fbm(q * 1.25 + vec2(t*0.55, 0.0));
 
   //float band  = f;
   //float band2 = g;
@@ -185,9 +185,9 @@ void main(){
 
     // --- Soften large color "blobs" ---
 // Add a bit of high-frequency detail so the cloud masks don't form big flat regions.
-float micro = noise(q * 7.5 + vec2(t*1.7, -t*1.3));
-f = mix(f, micro, 0.12);
-g = mix(g, micro, 0.10);
+float micro = noise(q * 2.2 + vec2(t*0.35, -t*0.28));
+f = mix(f, micro, 0.035);
+g = mix(g, micro, 0.03);
 
 // Smooth remap (avoid near-binary masks)
 float band  = pow(saturate(f),  1.15);

@@ -4,10 +4,10 @@ import bgVert from "./shaders/bg.vert.glsl?raw";
 import bgFrag from "./shaders/bg.frag.glsl?raw";
 
 export const BACKGROUND_PALETTES = {
-  pearl: { name: "Pearl Shell", colors: ["#73EFFF","#86A8FF","#C9B8FF","#FF9FD2"] },
+  pearl: { name: "Pearl Shell", colors: ["#7EC8FF","#7C98FF","#B39CFF","#F0EAFF"] },
   candy: { name: "Cotton Candy", colors: ["#61D9FF","#FF6BD6","#FFB86B","#B6FF8A"] },
-  aurora:{ name: "Aurora Soft",  colors: ["#45E9FF","#6F86FF","#BDA7FF","#A7FFD9"] },
-  cosmic:{ name: "Cosmic Iris",  colors: ["#52E9FF","#6A7CFF","#A99BFF","#E2A6FF"] },
+  aurora:{ name: "Aurora Soft",  colors: ["#63CBFF","#6E86FF","#B4A2FF","#EDE8FF"] },
+  cosmic:{ name: "Cosmic Iris",  colors: ["#59BEFF","#5D74FF","#9A7CFF","#EFEAFF"] },
   neo:   { name: "Neo Dream",    colors: ["#3DFFB8","#3D7BFF","#FF3DF2","#FFE83D"] },
 };
 
@@ -19,8 +19,8 @@ function clamp01(x){ return Math.max(0, Math.min(1, x)); }
 
 export async function createDreamyBackground(scene, camera = null, opts = {}){
   const radius = opts.radius ?? 2000;
-  const base = new THREE.Color(opts.baseColor ?? "#070B18");
-  const paletteKey = opts.palette ?? "aurora";
+  const base = new THREE.Color(opts.baseColor ?? "#04050D");
+  const paletteKey = opts.palette ?? "cosmic";
   const pal = BACKGROUND_PALETTES[paletteKey] ?? BACKGROUND_PALETTES.pearl;
 
   const mainColor = new THREE.Color("#7ca0ff");
@@ -34,15 +34,15 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
     uMouse:   { value: new THREE.Vector2(0.5, 0.5) },
 
     uBase:      { value: new THREE.Vector3(base.r, base.g, base.b) },
-    uIntensity: { value: opts.intensity ?? 0.82 },
-    uFlow:      { value: opts.flow ?? 1.0 },
-    uScale:     { value: opts.scale ?? 0.9 },
-    uWarp:      { value: opts.warp ?? 0.58 },
-    uDetail:    { value: opts.detail ?? 0.42 },
+    uIntensity: { value: opts.intensity ?? 0.05 },
+    uFlow:      { value: opts.flow ?? 0.08 },
+    uScale:     { value: opts.scale ?? 0.75 },
+    uWarp:      { value: opts.warp ?? 0.44 },
+    uDetail:    { value: opts.detail ?? 0.24 },
     uPearl:     { value: opts.pearl ?? 0.92 },
-    uSparkle:   { value: opts.sparkle ?? 0.15 },
-    uSat:       { value: opts.sat ?? 0.45 },
-    uContrast:  { value: opts.contrast ?? 0.9 },
+    uSparkle:   { value: opts.sparkle ?? 0.015 },
+    uSat:       { value: opts.sat ?? 0.22 },
+    uContrast:  { value: opts.contrast ?? 0.92 },
 
     uPal0: { value: hexToVec3(pal.colors[0]) },
     uPal1: { value: hexToVec3(pal.colors[1]) },
@@ -55,7 +55,7 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
     uNotePos:  { value: new THREE.Vector2(0.5, 0.5) },
   };
 
-  uniforms.uFlow.value = 0.0;
+  uniforms.uFlow.value = 0.012;
   uniforms.uSparkle.value = 0.0;
 
   const mat = new THREE.ShaderMaterial({
@@ -150,7 +150,7 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
 export function setupBackgroundGUI(gui, bg) {
   if (!gui || !bg) return;
   const params = {
-    palette: "aurora",
+    palette: "cosmic",
     intensity: bg.uniforms.uIntensity.value,
     flow: bg.uniforms.uFlow.value,
     scale: bg.uniforms.uScale.value,

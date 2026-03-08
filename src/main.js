@@ -146,12 +146,15 @@ const cameraControl = createCameraControlSystem({
   zoomSpeed: 0.0018, // 可以从 0.0012~0.0022 调
 });
 
-const bg = await createDreamyBackground(scene, camera, { palette: 'aurora' });
+const bg = await createDreamyBackground(scene, camera, {
+  palette: "cosmic",
+  baseColor: "#04050D",
+});
 
 // 初始时禁用流动效果和亮度
-  bg.uniforms.uFlow.value = 0;
+  bg.uniforms.uFlow.value = 0.012;
   bg.uniforms.uSparkle.value = 0;
-  bg.uniforms.uIntensity.value = 0; 
+  bg.uniforms.uIntensity.value = 0.015;
 
   let isInteracting = false;
 
@@ -1442,13 +1445,14 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     const interactionNow = !!(pointerDown && (isActiveNebulaHovered || musicState.activeIntent));
 
     // Click pulse envelope: immediate rise (0.03~0.08s), slower fade (0.5~0.8s)
-    bgClickPulse = Math.max(0.0, bgClickPulse - dt / 0.65);
-    bgClickPulseVis = __bgRiseFall(bgClickPulseVis, bgClickPulse, dt, 26.0, 4.2);
+    bgClickPulse = Math.max(0.0, bgClickPulse - dt / 0.85);
+    bgClickPulseVis = __bgRiseFall(bgClickPulseVis, bgClickPulse, dt, 18.0, 1.5);
 
     // Immediate interaction drive for hold/slide, with no hover-delay dependency.
-    const baseHold = interactionNow ? 0.28 : 0.0;
-    const targetLead = THREE.MathUtils.clamp(baseHold + scratchVel01 * 0.78 + bgClickPulseVis * 0.55, 0, 1);
-    bgLeadE = __bgRiseFall(bgLeadE, targetLead, dt, 18.0, 5.0);
+    const baseHold = interactionNow ? 0.12 : 0.0;
+    const targetLead = THREE.MathUtils.clamp(baseHold + scratchVel01 * 0.62 + bgClickPulseVis * 0.42, 0, 1);
+    // slower fall to calm (~1-2s)
+    bgLeadE = __bgRiseFall(bgLeadE, targetLead, dt, 14.0, 1.1);
 
     // Smooth pitch/vel/theta (prefer scratch state; fallback to bgDrive)
     const targetPitch = (typeof sScratch?.pitch01 === "number") ? sScratch.pitch01 : bgDrive.pitch01;
@@ -1460,12 +1464,14 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     bgTheta01 = __bgRiseFall(bgTheta01, THREE.MathUtils.clamp(targetTheta, 0, 1), dt, 14.0, 8.0);
 
     // Directly drive visible flow/brightness response (keeps click + hold responsive).
-    const flowTarget = THREE.MathUtils.clamp(0.06 + bgLeadE * 0.95 + bgClickPulseVis * 0.65, 0, 1.25);
-    const sparkleTarget = THREE.MathUtils.clamp(0.015 + bgLeadE * 0.18 + bgClickPulseVis * 0.16, 0, 0.32);
-    const intensityTarget = THREE.MathUtils.clamp(0.12 + bgLeadE * 1.0 + bgClickPulseVis * 0.75, 0, 1.35);
-    bg.uniforms.uFlow.value = __bgRiseFall(bg.uniforms.uFlow.value, flowTarget, dt, 18.0, 4.8);
-    bg.uniforms.uSparkle.value = __bgRiseFall(bg.uniforms.uSparkle.value, sparkleTarget, dt, 14.0, 5.0);
-    bg.uniforms.uIntensity.value = __bgRiseFall(bg.uniforms.uIntensity.value, intensityTarget, dt, 16.0, 4.6);
+    const flowTarget = THREE.MathUtils.clamp(0.012 + bgLeadE * 0.28 + bgClickPulseVis * 0.18, 0, 0.45);
+    const sparkleTarget = THREE.MathUtils.clamp(0.0 + bgLeadE * 0.045 + bgClickPulseVis * 0.04, 0, 0.08);
+    // auto-dim to keep nebula readable
+    const readabilityLimiter = interactionNow ? 0.84 : 0.92;
+    const intensityTarget = THREE.MathUtils.clamp((0.015 + bgLeadE * 0.28 + bgClickPulseVis * 0.20) * readabilityLimiter, 0.01, 0.42);
+    bg.uniforms.uFlow.value = __bgRiseFall(bg.uniforms.uFlow.value, flowTarget, dt, 10.0, 1.3);
+    bg.uniforms.uSparkle.value = __bgRiseFall(bg.uniforms.uSparkle.value, sparkleTarget, dt, 10.0, 1.4);
+    bg.uniforms.uIntensity.value = __bgRiseFall(bg.uniforms.uIntensity.value, intensityTarget, dt, 10.0, 1.2);
 
     // Pulse: when step changes while playing
     const stepNow = (typeof sScratch?.step === "number") ? sScratch.step : -1;
