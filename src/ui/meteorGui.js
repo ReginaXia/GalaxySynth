@@ -16,6 +16,7 @@ export function setupMeteorGUI(meteorSystem) {
   // -------------------------------------------------
   const f0 = gui.addFolder("Meteors");
   f0.add(params, "enabled").name("Enable");
+  f0.add(params, "audioEnabled").name("Meteor Sound");
   f0.add(params, "spawnRate", 0.0, 2.0, 0.01).name("Spawn Rate");
   f0.add(params, "areaRadius", 2.0, 12.0, 0.1).name("Area Radius");
 
