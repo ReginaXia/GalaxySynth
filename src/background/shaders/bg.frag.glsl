@@ -175,7 +175,7 @@ void main(){
   float vel = saturate(uVel01);
   float ie = saturate(uInteractionE);
 
-  vec2 p = (uv - 0.5) * (0.95 + 1.95 * uScale);
+  vec2 p = (uv - 0.5) * (1.15 + 2.35 * uScale);
 
   vec2 m = (uMouse - 0.5);
   p += m * (0.06 + 0.12*e);
@@ -187,8 +187,8 @@ void main(){
   float materialField = saturate(0.50 * flowA + 0.34 * flowB + 0.16 * flowC);
   float materialRidge = smoothstep(0.38, 0.80, materialField);
 
-  vec2 w1 = vec2(fbm(p * 1.15 + vec2(t, -t)), fbm(p * 1.15 + vec2(-t, t)));
-  vec2 w2 = vec2(fbm(p * 2.00 + vec2(-t*1.2, t*0.8)), fbm(p * 2.00 + vec2(t*0.9, -t*0.9)));
+  vec2 w1 = vec2(fbm(p * 1.45 + vec2(t, -t)), fbm(p * 1.45 + vec2(-t, t)));
+  vec2 w2 = vec2(fbm(p * 2.55 + vec2(-t*1.2, t*0.8)), fbm(p * 2.55 + vec2(t*0.9, -t*0.9)));
   vec2 materialWarp = (vec2(flowA - 0.5, flowB - 0.5)) * (0.10 + 0.16 * uWarp) * (0.45 + 0.45 * e);
   vec2 warp = (w1 - 0.5) * (0.60 + 1.05*e) * uWarp + (w2 - 0.5) * (0.22 + 0.52*e) * uDetail + materialWarp;
 
@@ -211,8 +211,8 @@ void main(){
   flowUV += flowDir * energy * 0.22;
 
   vec2 q = flowUV + warp;
-  float f = fbm(q * 0.95 + vec2(0.0, t*0.45));
-  float g = fbm(q * 1.95 + vec2(t*0.55, 0.0));
+  float f = fbm(q * 1.20 + vec2(0.0, t*0.45));
+  float g = fbm(q * 2.35 + vec2(t*0.55, 0.0));
 
   //float band  = f;
   //float band2 = g;
@@ -226,18 +226,20 @@ void main(){
 
     // --- Soften large color "blobs" ---
 // Add a bit of high-frequency detail so the cloud masks don't form big flat regions.
-float micro = noise(q * 6.0 + vec2(t*1.10, -t*0.92));
-f = mix(f, micro, 0.090);
-g = mix(g, micro, 0.075);
+float micro = noise(q * 8.8 + vec2(t*1.10, -t*0.92));
+f = mix(f, micro, 0.120);
+g = mix(g, micro, 0.095);
 
 // A tiny high-frequency filament layer to avoid "large moving patches".
-float h = fbm(q * 3.30 + vec2(-t*0.80, t*0.72));
-g = mix(g, h, 0.10);
+float h = fbm(q * 4.20 + vec2(-t*0.80, t*0.72));
+g = mix(g, h, 0.14);
 
 // Medium/high-frequency anisotropic filaments for richer "liquid light" density.
 float filA = fbm(q * 4.8 + vec2(t * 0.92, -t * 0.78));
 float filB = fbm((q + vec2(6.1, -3.7)) * 6.2 + vec2(-t * 0.66, t * 0.58));
 float filament = pow(saturate(abs(filA - filB) * 1.72), 1.28);
+float filC = fbm((q + vec2(-4.3, 2.5)) * 8.8 + vec2(t * 0.52, -t * 0.48));
+float filamentHi = pow(saturate(abs(filC - h) * 1.95), 1.18);
 
 // Smooth remap (avoid near-binary masks)
 float band  = pow(saturate(f),  1.10);
@@ -362,7 +364,8 @@ float ink = pulse * inkFall;
   // Richer iridescent micro-structure without global overbright fog.
   float filamentMask = filament * (0.36 + 0.64 * materialRidge) * (0.32 + 0.68 * fres) * (0.28 + 0.72 * bandEdge);
   vec3 filamentCol = mix(spectralCol, c1, 0.55);
-  col += filamentCol * filamentMask * (0.13 + 0.16 * e);
+  col += filamentCol * filamentMask * (0.16 + 0.20 * e);
+  col += mix(c0, spectralCol, 0.42) * filamentHi * (0.06 + 0.10 * e) * (0.30 + 0.70 * materialRidge);
 
   // Local "cosmic sunset" glow injection from note color (localized only).
   vec3 warmSunset = vec3(1.00, 0.62, 0.36);

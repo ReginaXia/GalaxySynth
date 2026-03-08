@@ -160,6 +160,10 @@ const bg = await createDreamyBackground(scene, camera, {
   bg.uniforms.uFlow.value = 0.012;
   bg.uniforms.uSparkle.value = 0;
   bg.uniforms.uIntensity.value = 0.015;
+  // Large-display baseline: denser background texture layers.
+  bg.uniforms.uScale.value = 0.92;
+  bg.uniforms.uDetail.value = 0.44;
+  bg.uniforms.uWarp.value = 0.56;
 
   let isInteracting = false;
 
