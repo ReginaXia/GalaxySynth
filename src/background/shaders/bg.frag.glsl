@@ -172,14 +172,23 @@ void main(){
   vec2 w2 = vec2(fbm(p * 1.30 + vec2(-t*1.2, t*0.8)), fbm(p * 1.30 + vec2(t*0.9, -t*0.9)));
   vec2 warp = (w1 - 0.5) * (0.55 + 0.85*e) * uWarp + (w2 - 0.5) * (0.18 + 0.45*e) * uDetail;
 
-  // Local interaction turbulence (screen-space centered, smooth falloff).
+  // Step 2B: localized interaction energy + transport.
   vec2 dInt = uv - uInteractionPos;
   float distInt = length(dInt);
-  float flowInfluence = exp(-distInt * 4.0) * ie;
+  float localMask = 1.0 - smoothstep(0.42, 0.55, distInt); // near zero when dist > ~0.5
+  float energy = exp(-distInt * 3.0) * ie * localMask;
+  energy *= 0.98; // gentle diffusion damping
+
   vec2 swirlDir = vec2(-dInt.y, dInt.x) / max(1e-4, distInt);
-  float swirlPhase = sin(uTime * (0.35 + 0.45 * uFlow) + distInt * 16.0 + uTheta01 * 6.28318);
-  vec2 localVectorField = swirlDir * swirlPhase * 0.022 + dInt * (-0.018);
-  vec2 flowUV = p + flowInfluence * localVectorField;
+  float swirlPhase = sin(uTime * (0.35 + 0.45 * uFlow) + distInt * 14.0 + uTheta01 * 6.28318);
+
+  // Background flow direction for transport (from existing domain warp fields).
+  vec2 flowDir = normalize(vec2(w1.x - w2.y, w1.y + w2.x) + vec2(1e-4, 1e-4));
+  vec2 localVectorField = swirlDir * swirlPhase * 0.030 + dInt * (-0.020);
+
+  vec2 flowUV = p;
+  flowUV += localVectorField * energy;
+  flowUV += flowDir * energy * 0.15;
 
   vec2 q = flowUV + warp;
   float f = fbm(q * 0.70 + vec2(0.0, t*0.45));
