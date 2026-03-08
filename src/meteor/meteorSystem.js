@@ -84,7 +84,7 @@ export function createMeteorSystem({
     planeY,
 
     // audio
-    audioEnabled: true,
+    audioEnabled: false,
     audioGain: 0.7,
     audioCooldown: 0.10,
 
