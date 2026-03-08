@@ -267,13 +267,17 @@ export function createMeteorSystem({
 
   // init all dead
   for (let i = 0; i < MAX_P; i++) {
+    // Keep dead particles far away so startup never renders a center artifact.
+    pos[i * 3 + 0] = 1e9;
+    pos[i * 3 + 1] = 1e9;
+    pos[i * 3 + 2] = 1e9;
     birth[i] = -9999;
     life[i] = 0;
     seed[i] = Math.random();
     siz[i] = 0;
-    col[i * 3 + 0] = 1;
-    col[i * 3 + 1] = 0.3;
-    col[i * 3 + 2] = 0.85;
+    col[i * 3 + 0] = 0;
+    col[i * 3 + 1] = 0;
+    col[i * 3 + 2] = 0;
   }
 
   const tailGeo = new THREE.BufferGeometry();
@@ -614,6 +618,10 @@ export function createMeteorSystem({
       const a = t - birth[i];
       const L = life[i];
       if (a < 0 || a > L) {
+        // Never leave dead particles at/near origin.
+        pos[i * 3 + 0] = 1e9;
+        pos[i * 3 + 1] = 1e9;
+        pos[i * 3 + 2] = 1e9;
         siz[i] = 0.0;
         continue;
       }
