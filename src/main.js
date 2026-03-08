@@ -789,7 +789,7 @@ console.log("vert len", meteorVert.length, "frag len", meteorFrag.length);
 
 const meteorGui = setupMeteorGUI(meteorSystem);
 
-const UI_STATE_KEY = "GalaxySynth_UIState_v4";
+const UI_STATE_KEY = "GalaxySynth_UIState_v5";
 function readUiState() {
   try {
     const raw = localStorage.getItem(UI_STATE_KEY);
@@ -803,6 +803,7 @@ function readUiState() {
         showDebug: false,
         showTransport: true,
         cinematic: false,
+        harmonyLayer: true,
       };
     }
     const s = JSON.parse(raw);
@@ -815,6 +816,7 @@ function readUiState() {
       showDebug: !!s.showDebug,
       showTransport: s.showTransport !== false,
       cinematic: !!s.cinematic,
+      harmonyLayer: s.harmonyLayer !== false,
     };
   } catch {
     return {
@@ -826,6 +828,7 @@ function readUiState() {
       showDebug: false,
       showTransport: true,
       cinematic: false,
+      harmonyLayer: true,
     };
   }
 }
@@ -910,6 +913,7 @@ uiShell.innerHTML = `
   <label class="chk"><input type="checkbox" data-k="debug"> Debug HUD</label>
   <label class="chk"><input type="checkbox" data-k="transport"> Transport UI</label>
   <label class="chk"><input type="checkbox" data-k="cinematic"> Cinematic Mode</label>
+  <label class="chk"><input type="checkbox" data-k="harmony"> Harmony Layer</label>
   <div class="hint">Hotkeys: H master hide/show, J showcase</div>
 `;
 document.body.appendChild(uiShell);
@@ -1026,6 +1030,7 @@ const audioChk = uiShell.querySelector('input[data-k="audio"]');
 const debugChk = uiShell.querySelector('input[data-k="debug"]');
 const transportChk = uiShell.querySelector('input[data-k="transport"]');
 const cinematicChk = uiShell.querySelector('input[data-k="cinematic"]');
+const harmonyChk = uiShell.querySelector('input[data-k="harmony"]');
 
 function applyUiState() {
   uiBtn.textContent = `Master: ${uiState.visible ? "ON" : "OFF"}`;
@@ -1037,7 +1042,9 @@ function applyUiState() {
   debugChk.checked = !!uiState.showDebug;
   transportChk.checked = !!uiState.showTransport;
   if (cinematicChk) cinematicChk.checked = !!uiState.cinematic;
+  if (harmonyChk) harmonyChk.checked = !!uiState.harmonyLayer;
   cinematicState.enabled = !!uiState.cinematic;
+  audio?.setNebulaHarmony?.({ enabled: !!uiState.harmonyLayer });
 
   const showPlay = uiState.visible && uiState.showPlay;
   const showLook = uiState.visible && uiState.showLook;
@@ -1114,6 +1121,12 @@ const meteorCinematicBase = {
 if (cinematicChk) {
   cinematicChk.addEventListener("change", () => {
     uiState.cinematic = !!cinematicChk.checked;
+    applyUiState();
+  });
+}
+if (harmonyChk) {
+  harmonyChk.addEventListener("change", () => {
+    uiState.harmonyLayer = !!harmonyChk.checked;
     applyUiState();
   });
 }

@@ -65,6 +65,13 @@ function radialExpressionFromR01(r01) {
 export function createGalaxyAudioEngine() {
   let started = false;
   const nebulaState = new Map();
+  const harmonyState = {
+    enabled: true,
+    chance: 0.40,
+    mix: 0.24,
+    minGapSec: 0.055,
+    lastTimeByGalaxy: new Map(),
+  };
 
 // ✅ Tone v15: start time must be strictly increasing.
 // We keep a global monotonic clock as a last-resort guard (covers shared instruments across nebulae).
@@ -490,6 +497,21 @@ now = safeNow;
     // Trigger immediately (omit explicit time) to avoid Tone scheduling monotonic-time errors in rapid interactions.
     instrument.triggerAttackRelease(note, dur, now, velocity);
 
+    // Lightweight auto-harmony layer for more presentable one-click sound.
+    if (harmonyState.enabled) {
+      const lastHarmonyTime = harmonyState.lastTimeByGalaxy.get(galaxyId) ?? -Infinity;
+      const canHarmony = (now - lastHarmonyTime) >= harmonyState.minGapSec;
+      if (canHarmony && Math.random() < harmonyState.chance) {
+        const intervalPool = [7, 12, 4]; // fifth / octave / third
+        const interval = intervalPool[Math.floor(Math.random() * intervalPool.length)];
+        const harmonyNote = Tone.Frequency(note).transpose(interval).toNote();
+        const harmonyDur = Math.max(0.08, dur * (interval === 12 ? 0.78 : 0.86));
+        const harmonyVel = clamp01(velocity * harmonyState.mix * (interval === 12 ? 0.85 : 1.0));
+        instrument.triggerAttackRelease(harmonyNote, harmonyDur, now + 0.008, harmonyVel);
+        harmonyState.lastTimeByGalaxy.set(galaxyId, now);
+      }
+    }
+
         // ---- expose for HUD / visuals ----
     out.lastNote = note;
     out.lastNoteTime = now;
@@ -571,6 +593,18 @@ else step = Math.floor(clamp01(theta01) * STEPS) % STEPS;
     };
   }
 
+  function setNebulaHarmony({
+    enabled = harmonyState.enabled,
+    chance = harmonyState.chance,
+    mix = harmonyState.mix,
+    minGapSec = harmonyState.minGapSec,
+  } = {}) {
+    harmonyState.enabled = !!enabled;
+    harmonyState.chance = clamp01(chance);
+    harmonyState.mix = clamp01(mix);
+    harmonyState.minGapSec = Math.max(0.0, Math.min(0.25, Number(minGapSec) || harmonyState.minGapSec));
+  }
+
   return {
     start,
     stop,
@@ -583,6 +617,7 @@ else step = Math.floor(clamp01(theta01) * STEPS) % STEPS;
     triggerPerc,
     playNebulaScratch,
     previewNebulaNote,
+    setNebulaHarmony,
     isStarted: () => started,
   };
 
