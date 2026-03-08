@@ -1,0 +1,245 @@
+import * as THREE from "three";
+
+const STORAGE_KEY = "GalaxySynth_BackgroundDock_v1";
+
+function clamp01(x) {
+  return Math.max(0, Math.min(1, x));
+}
+
+function toHex(v3) {
+  const c = new THREE.Color(v3.x, v3.y, v3.z);
+  return `#${c.getHexString()}`;
+}
+
+function hexToV3(hex) {
+  const c = new THREE.Color(hex);
+  return new THREE.Vector3(c.r, c.g, c.b);
+}
+
+function loadState(defaults) {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return defaults;
+    const s = JSON.parse(raw);
+    return {
+      x: Number.isFinite(s.x) ? s.x : defaults.x,
+      y: Number.isFinite(s.y) ? s.y : defaults.y,
+      collapsed: !!s.collapsed,
+      harmony: clamp01(Number(s.harmony ?? defaults.harmony)),
+      notePresence: clamp01(Number(s.notePresence ?? defaults.notePresence)),
+    };
+  } catch {
+    return defaults;
+  }
+}
+
+function saveState(state) {
+  try {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        x: state.x,
+        y: state.y,
+        collapsed: !!state.collapsed,
+        harmony: clamp01(state.harmony),
+        notePresence: clamp01(state.notePresence),
+      })
+    );
+  } catch {}
+}
+
+function makeRange(root, name, init, onChange) {
+  const row = document.createElement("div");
+  row.style.cssText = "margin-top:6px;";
+  root.appendChild(row);
+
+  const top = document.createElement("div");
+  top.style.cssText = "display:flex; justify-content:space-between; font-size:11px; opacity:.9;";
+  row.appendChild(top);
+  const l = document.createElement("span");
+  l.textContent = name;
+  top.appendChild(l);
+  const r = document.createElement("span");
+  top.appendChild(r);
+
+  const input = document.createElement("input");
+  input.type = "range";
+  input.min = "0";
+  input.max = "1";
+  input.step = "0.01";
+  input.style.width = "100%";
+  row.appendChild(input);
+
+  const sync = (v) => {
+    input.value = String(v);
+    r.textContent = `${Math.round(v * 100)}%`;
+  };
+  sync(init);
+  input.addEventListener("input", () => onChange(clamp01(Number(input.value)), sync));
+  return { sync };
+}
+
+export function createBackgroundDockPanel({ bg }) {
+  const defaults = { x: window.innerWidth - 300, y: 76, collapsed: false, harmony: 0.62, notePresence: 0.64 };
+  const state = loadState(defaults);
+
+  const root = document.createElement("div");
+  root.className = "custom-ui background-dock-panel";
+  root.style.cssText = [
+    "position:fixed",
+    `left:${Math.max(8, Math.min(window.innerWidth - 292, state.x))}px`,
+    `top:${Math.max(8, Math.min(window.innerHeight - 120, state.y))}px`,
+    "width:280px",
+    "z-index:9999",
+    "padding:10px 12px",
+    "border-radius:12px",
+    "background:linear-gradient(160deg, rgba(10,14,28,.80), rgba(22,14,38,.70))",
+    "border:1px solid rgba(165,196,255,.20)",
+    "backdrop-filter:blur(10px)",
+    "color:#eef2ff",
+    "font:12px/1.35 'IBM Plex Sans','Segoe UI',ui-sans-serif,sans-serif",
+    "box-shadow:0 10px 30px rgba(0,0,0,.34), inset 0 0 0 1px rgba(255,255,255,.03)",
+    "pointer-events:auto",
+  ].join(";");
+  root.addEventListener("pointerdown", (e) => e.stopPropagation());
+
+  const head = document.createElement("div");
+  head.style.cssText = "display:flex; justify-content:space-between; align-items:center; cursor:grab; user-select:none;";
+  root.appendChild(head);
+  const title = document.createElement("div");
+  title.textContent = "Background System";
+  title.style.cssText = "font-weight:700; letter-spacing:.3px;";
+  head.appendChild(title);
+  const foldBtn = document.createElement("button");
+  foldBtn.textContent = state.collapsed ? "Expand" : "Collapse";
+  foldBtn.style.cssText = "border:0; border-radius:8px; padding:4px 8px; cursor:pointer; color:#eaf0ff; background:rgba(68,88,156,.42);";
+  head.appendChild(foldBtn);
+
+  const body = document.createElement("div");
+  body.style.display = state.collapsed ? "none" : "";
+  body.style.marginTop = "8px";
+  root.appendChild(body);
+
+  const info = document.createElement("div");
+  info.textContent = "Mother palette + note harmony";
+  info.style.cssText = "font-size:11px; opacity:.72; margin-bottom:6px;";
+  body.appendChild(info);
+
+  const colorGrid = document.createElement("div");
+  colorGrid.style.cssText = "display:grid; grid-template-columns:1fr 48px; gap:6px 8px;";
+  body.appendChild(colorGrid);
+
+  const palUniforms = [bg.uniforms.uPal0, bg.uniforms.uPal1, bg.uniforms.uPal2, bg.uniforms.uPal3];
+  for (let i = 0; i < 4; i++) {
+    const label = document.createElement("div");
+    label.textContent = `Palette ${i + 1}`;
+    label.style.opacity = ".9";
+    colorGrid.appendChild(label);
+
+    const input = document.createElement("input");
+    input.type = "color";
+    input.value = toHex(palUniforms[i].value);
+    input.style.cssText = "width:48px; height:20px; border:none; padding:0; background:transparent;";
+    input.addEventListener("input", () => {
+      const v = hexToV3(input.value);
+      palUniforms[i].value.copy(v);
+    });
+    colorGrid.appendChild(input);
+  }
+
+  const harmonyRow = makeRange(body, "Harmony", state.harmony, (v, sync) => {
+    state.harmony = v;
+    sync(v);
+    saveState(state);
+  });
+  const presenceRow = makeRange(body, "Note Presence", state.notePresence, (v, sync) => {
+    state.notePresence = v;
+    sync(v);
+    saveState(state);
+  });
+  harmonyRow.sync(state.harmony);
+  presenceRow.sync(state.notePresence);
+
+  foldBtn.addEventListener("click", () => {
+    state.collapsed = !state.collapsed;
+    body.style.display = state.collapsed ? "none" : "";
+    foldBtn.textContent = state.collapsed ? "Expand" : "Collapse";
+    saveState(state);
+  });
+
+  let dragging = false;
+  let sx = 0;
+  let sy = 0;
+  let ox = 0;
+  let oy = 0;
+
+  head.addEventListener("pointerdown", (e) => {
+    if (e.target === foldBtn) return;
+    dragging = true;
+    sx = e.clientX;
+    sy = e.clientY;
+    ox = parseFloat(root.style.left);
+    oy = parseFloat(root.style.top);
+    head.style.cursor = "grabbing";
+    try { head.setPointerCapture(e.pointerId); } catch {}
+  });
+
+  const onMove = (e) => {
+    if (!dragging) return;
+    const nx = ox + (e.clientX - sx);
+    const ny = oy + (e.clientY - sy);
+    const maxX = Math.max(8, window.innerWidth - 292);
+    const maxY = Math.max(8, window.innerHeight - 72);
+    root.style.left = `${Math.max(8, Math.min(maxX, nx))}px`;
+    root.style.top = `${Math.max(8, Math.min(maxY, ny))}px`;
+  };
+  const onUp = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    head.style.cursor = "grab";
+    try { head.releasePointerCapture(e.pointerId); } catch {}
+
+    const margin = 12;
+    let x = parseFloat(root.style.left);
+    let y = parseFloat(root.style.top);
+    const w = 292;
+    const h = root.offsetHeight || 120;
+    const distL = x - margin;
+    const distR = (window.innerWidth - w - margin) - x;
+    const distT = y - margin;
+    const distB = (window.innerHeight - h - margin) - y;
+    const minDist = Math.min(Math.abs(distL), Math.abs(distR), Math.abs(distT), Math.abs(distB));
+    if (minDist === Math.abs(distL)) x = margin;
+    else if (minDist === Math.abs(distR)) x = window.innerWidth - w - margin;
+    else if (minDist === Math.abs(distT)) y = margin;
+    else y = window.innerHeight - h - margin;
+
+    root.style.left = `${Math.max(8, x)}px`;
+    root.style.top = `${Math.max(8, y)}px`;
+    state.x = parseFloat(root.style.left);
+    state.y = parseFloat(root.style.top);
+    saveState(state);
+  };
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+
+  document.body.appendChild(root);
+
+  return {
+    root,
+    getHarmony() {
+      return state.harmony;
+    },
+    getNotePresence() {
+      return state.notePresence;
+    },
+    setVisible(v) {
+      root.style.display = v ? "" : "none";
+    },
+    destroy() {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      root.remove();
+    },
+  };
+}

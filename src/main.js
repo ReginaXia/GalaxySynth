@@ -15,7 +15,7 @@ import { playMeteorSfx } from "./audio/meteorSfx.js";
 import { createNebulaSystem } from "./nebula/nebulaSystem.js";
 import { createMeteorSystem } from "./meteor/meteorSystem.js";
 
-import { createDreamyBackground, setupBackgroundGUI } from "./background/dreamyBackground";
+import { createDreamyBackground } from "./background/dreamyBackground";
 
 import { createPerformanceState } from "./performance/performanceState";
 import { createMouseKeyboardController } from "./input/mouseKeyboardController";
@@ -25,6 +25,8 @@ import { createGalaxyVoices } from "./audio/galaxyVoices.js";
 
 import { createAudioMonitorUI } from "./ui/audioMonitor.js";
 import { createNoteColorPanel } from "./ui/noteColorPanel.js";
+import { createBackgroundDockPanel } from "./ui/backgroundDockPanel.js";
+import { createDockPanel } from "./ui/dockPanel.js";
 
 import { createCameraControlSystem } from "./input/cameraControlSystem.js";
 import { musicState } from "./state/musicState.js";
@@ -190,8 +192,6 @@ try {
 }
 
 window.__bg = bg;
-// If your existing UI exposes a gui instance on window.__gui, this will attach a small Background folder.
-if (window.__gui) setupBackgroundGUI(window.__gui, bg);
 scene.background = new THREE.Color(0x000000);
 
 
@@ -599,7 +599,7 @@ const nebulaSystem = createNebulaSystem({
 
 const galaxyGuiRef = setupGalaxyGUI({ camera, renderer, nebulaSystem });
 window.__gui = galaxyGuiRef?.gui ?? null;
-if (window.__gui) setupBackgroundGUI(window.__gui, bg);
+const backgroundDockUI = createBackgroundDockPanel({ bg });
 
 function resizeNoteOverlay() {
   const w = window.innerWidth;
@@ -845,6 +845,68 @@ uiShell.innerHTML = `
 `;
 document.body.appendChild(uiShell);
 
+const uiHubDock = createDockPanel({
+  id: "hub",
+  title: "UI Hub",
+  contentEl: uiShell,
+  x: window.innerWidth - 320,
+  y: 12,
+  width: 300,
+  minHeight: 110,
+  zIndex: 10001,
+  showHideButton: false,
+});
+const noteDock = createDockPanel({
+  id: "note",
+  title: "Performance",
+  contentEl: noteColorUI.root,
+  x: window.innerWidth - 320,
+  y: 182,
+  width: 300,
+  minHeight: 140,
+  zIndex: 9998,
+});
+const audioDock = createDockPanel({
+  id: "audio",
+  title: "Audio Monitor",
+  contentEl: audioUI.root,
+  x: 12,
+  y: 420,
+  width: 300,
+  minHeight: 120,
+  zIndex: 9998,
+});
+const debugDock = createDockPanel({
+  id: "debug",
+  title: "Debug HUD",
+  contentEl: debugHud,
+  x: window.innerWidth - 320,
+  y: 540,
+  width: 300,
+  minHeight: 90,
+  zIndex: 9998,
+});
+const galaxyDock = createDockPanel({
+  id: "galaxy",
+  title: "Galaxy System",
+  contentEl: galaxyGuiRef?.gui?.domElement,
+  x: 12,
+  y: 12,
+  width: 340,
+  minHeight: 140,
+  zIndex: 9997,
+});
+const meteorDock = createDockPanel({
+  id: "meteor",
+  title: "Meteor System",
+  contentEl: meteorGui?.domElement,
+  x: 12,
+  y: 430,
+  width: 340,
+  minHeight: 120,
+  zIndex: 9997,
+});
+
 const uiBtn = uiShell.querySelector('[data-act="toggle-ui"]');
 const showcaseBtn = uiShell.querySelector('[data-act="toggle-showcase"]');
 const playChk = uiShell.querySelector('input[data-k="play"]');
@@ -868,59 +930,33 @@ function applyUiState() {
   const showDebug = uiState.visible && uiState.showDebug;
   const showTransport = uiState.visible && uiState.showTransport;
 
-  // Layout normalization (avoid overlap and keep showcase clean).
-  if (noteColorUI?.root) {
-    noteColorUI.root.style.right = "12px";
-    noteColorUI.root.style.top = "236px";
-    noteColorUI.root.style.bottom = "auto";
-    noteColorUI.root.style.zIndex = "9998";
-  }
-  if (audioUI?.root) {
-    audioUI.root.style.left = "12px";
-    audioUI.root.style.top = "430px";
-    audioUI.root.style.width = "272px";
-    audioUI.root.style.zIndex = "9998";
-  }
-  if (galaxyGuiRef?.gui?.domElement) {
-    const g = galaxyGuiRef.gui.domElement.style;
-    g.position = "fixed";
-    g.left = "12px";
-    g.top = "68px";
-    g.zIndex = "9997";
-  }
-  if (meteorGui?.domElement) {
-    const m = meteorGui.domElement.style;
-    m.position = "fixed";
-    m.right = "12px";
-    m.top = "560px";
-    m.zIndex = "9997";
-  }
-
   if (uiState.showcase) {
-    noteColorUI?.setVisible?.(uiState.visible);
-    audioUI?.setVisible?.(false);
-    debugHud.style.display = "none";
+    noteDock?.setVisible?.(uiState.visible);
+    backgroundDockUI?.setVisible?.(false);
+    audioDock?.setVisible?.(false);
+    debugDock?.setVisible?.(false);
     noteOverlay.style.display = "none";
-    if (galaxyGuiRef?.gui?.domElement) galaxyGuiRef.gui.domElement.style.display = "none";
-    if (meteorGui?.domElement) meteorGui.domElement.style.display = "none";
+    galaxyDock?.setVisible?.(false);
+    meteorDock?.setVisible?.(false);
     const tempoRingEl2 = document.getElementById("tempo-ring");
     const stepRingEl2 = document.getElementById("step-ring");
     if (tempoRingEl2) tempoRingEl2.style.display = uiState.visible ? "" : "none";
     if (stepRingEl2) stepRingEl2.style.display = uiState.visible ? "" : "none";
   } else {
-    noteColorUI?.setVisible?.(showPlay);
-    audioUI?.setVisible?.(showAudio);
-    debugHud.style.display = showDebug ? "" : "none";
+    noteDock?.setVisible?.(showPlay);
+    backgroundDockUI?.setVisible?.(showLook);
+    audioDock?.setVisible?.(showAudio);
+    debugDock?.setVisible?.(showDebug);
     noteOverlay.style.display = showDebug ? "" : "none";
-    if (galaxyGuiRef?.gui?.domElement) galaxyGuiRef.gui.domElement.style.display = showLook ? "" : "none";
-    if (meteorGui?.domElement) meteorGui.domElement.style.display = showLook ? "" : "none";
+    galaxyDock?.setVisible?.(showLook);
+    meteorDock?.setVisible?.(showLook);
     const tempoRingEl2 = document.getElementById("tempo-ring");
     const stepRingEl2 = document.getElementById("step-ring");
     if (tempoRingEl2) tempoRingEl2.style.display = showTransport ? "" : "none";
     if (stepRingEl2) stepRingEl2.style.display = showTransport ? "" : "none";
   }
 
-  uiShell.style.opacity = "1";
+  uiHubDock?.setVisible?.(uiState.visible);
   writeUiState(uiState);
 }
 
@@ -1112,6 +1148,41 @@ function hsvToRgb(h, s, v) {
   const g = [t, v, v, q, p, p][m];
   const b = [p, p, t, v, v, q][m];
   return [r, g, b];
+}
+
+function lerp3(a, b, t) {
+  return [
+    THREE.MathUtils.lerp(a[0], b[0], t),
+    THREE.MathUtils.lerp(a[1], b[1], t),
+    THREE.MathUtils.lerp(a[2], b[2], t),
+  ];
+}
+
+function catmull4(p0, p1, p2, p3, f) {
+  const f2 = f * f;
+  const f3 = f2 * f;
+  return [
+    0.5 * ((2 * p1[0]) + (-p0[0] + p2[0]) * f + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * f2 + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * f3),
+    0.5 * ((2 * p1[1]) + (-p0[1] + p2[1]) * f + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * f2 + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * f3),
+    0.5 * ((2 * p1[2]) + (-p0[2] + p2[2]) * f + (2 * p0[2] - 5 * p1[2] + 4 * p2[2] - p3[2]) * f2 + (-p0[2] + 3 * p1[2] - 3 * p2[2] + p3[2]) * f3),
+  ];
+}
+
+function sampleBackgroundPaletteAt(t01) {
+  const t = ((t01 % 1) + 1) % 1;
+  const x = t * 4;
+  const i1 = Math.floor(x) % 4;
+  const f = x - Math.floor(x);
+  const i0 = (i1 + 3) % 4;
+  const i2 = (i1 + 1) % 4;
+  const i3 = (i1 + 2) % 4;
+  const p = [
+    [bg.uniforms.uPal0.value.x, bg.uniforms.uPal0.value.y, bg.uniforms.uPal0.value.z],
+    [bg.uniforms.uPal1.value.x, bg.uniforms.uPal1.value.y, bg.uniforms.uPal1.value.z],
+    [bg.uniforms.uPal2.value.x, bg.uniforms.uPal2.value.y, bg.uniforms.uPal2.value.z],
+    [bg.uniforms.uPal3.value.x, bg.uniforms.uPal3.value.y, bg.uniforms.uPal3.value.z],
+  ];
+  return catmull4(p[i0], p[i1], p[i2], p[i3], f);
 }
 
 
@@ -1773,6 +1844,8 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
       const hoverHue = hoverIntentNow?.theta01 ?? activeHue;
       const colorMix = noteColorUI?.getMix?.() ?? 0.0;
       const strictNoteColor = noteColorUI?.isStrict?.() ? 1.0 : 0.0;
+      const harmony = THREE.MathUtils.clamp(backgroundDockUI?.getHarmony?.() ?? 0.62, 0, 1);
+      const notePresence = THREE.MathUtils.clamp(backgroundDockUI?.getNotePresence?.() ?? 0.64, 0, 1);
       const activeStep = (typeof activeIntentNow?.step === "number") ? activeIntentNow.step : -1;
       const hoverStep = (typeof hoverIntentNow?.step === "number") ? hoverIntentNow.step : -1;
       const lastStep = (typeof bgLastEmitStep === "number") ? bgLastEmitStep : -1;
@@ -1782,27 +1855,26 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
       const activeCustom = noteColorUI?.getColorRgb01?.(activeStep);
       const hoverCustom = noteColorUI?.getColorRgb01?.(hoverStep);
       const lastCustom = noteColorUI?.getColorRgb01?.(lastStep);
-      const mixColor = (base, custom) => {
-        if (!custom) return base;
-        return [
-          THREE.MathUtils.lerp(base[0], custom[0], colorMix),
-          THREE.MathUtils.lerp(base[1], custom[1], colorMix),
-          THREE.MathUtils.lerp(base[2], custom[2], colorMix),
-        ];
+      const resolveTone = (baseRgb, customRgb, step, thetaFallback) => {
+        const manual = customRgb ? lerp3(baseRgb, customRgb, colorMix) : baseRgb;
+        const derived = sampleBackgroundPaletteAt((step >= 0 ? (step % 7) / 7 : thetaFallback));
+        return lerp3(manual, derived, harmony);
       };
-      const [ar, ag, ab] = mixColor([ahR, ahG, ahB], activeCustom);
-      const [hr, hg, hb] = mixColor([hhR, hhG, hhB], hoverCustom);
-      const [lr, lg, lb] = mixColor([lhR, lhG, lhB], lastCustom);
+      const [ar, ag, ab] = resolveTone([ahR, ahG, ahB], activeCustom, activeStep, activeHue);
+      const [hr, hg, hb] = resolveTone([hhR, hhG, hhB], hoverCustom, hoverStep, hoverHue);
+      const [lr, lg, lb] = resolveTone([lhR, lhG, lhB], lastCustom, lastStep, bgLastEmitHue);
       const focusStep = (typeof focusIntent?.step === "number") ? focusIntent.step : -1;
       const focusCustom = noteColorUI?.getColorRgb01?.(focusStep);
-      const noteColor = focusCustom
-        ? { r: focusCustom[0], g: focusCustom[1], b: focusCustom[2] }
-        : { r: ar, g: ag, b: ab };
+      const focusHue = (typeof focusIntent?.theta01 === "number") ? focusIntent.theta01 : activeHue;
+      const focusBase = hsvToRgb(focusHue, 0.62, 1.0);
+      const focusRgb = resolveTone(focusBase, focusCustom, focusStep, focusHue);
+      const noteColor = { r: focusRgb[0], g: focusRgb[1], b: focusRgb[2] };
       const stableNoteHue = (focusStep >= 0) ? ((focusStep % 7) / 7) : bgNoteHue;
       const glowGain = 0.56 + 0.58 * glowUi;
-      const activeStrength = THREE.MathUtils.clamp((bgInteractionE * 0.95 + bgClickPulseVis * 0.25) * glowGain, 0, 1);
-      const hoverStrength = THREE.MathUtils.clamp((hoverIntentNow ? 0.14 : 0.0) * (0.45 + 0.55 * bgInteractionE) * glowGain, 0, 0.22);
-      const lastStrength = THREE.MathUtils.clamp(bgLastEmitE * 0.55 * glowGain, 0, 0.55);
+      const presenceGain = 0.35 + 0.95 * notePresence;
+      const activeStrength = THREE.MathUtils.clamp((bgInteractionE * 0.95 + bgClickPulseVis * 0.25) * glowGain * presenceGain, 0, 1);
+      const hoverStrength = THREE.MathUtils.clamp((hoverIntentNow ? 0.14 : 0.0) * (0.45 + 0.55 * bgInteractionE) * glowGain * presenceGain, 0, 0.24);
+      const lastStrength = THREE.MathUtils.clamp(bgLastEmitE * 0.55 * glowGain * presenceGain, 0, 0.58);
       const wrap01 = (v) => ((v % 1) + 1) % 1;
       const sat1 = {
         x: wrap01(bgDrive.notePos.x + 0.14 * Math.cos((bgTheta01 + 0.08) * Math.PI * 2)),
@@ -1812,8 +1884,8 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
         x: wrap01(bgDrive.notePos.x - 0.18 * Math.cos((bgTheta01 + 0.33) * Math.PI * 2)),
         y: wrap01(bgDrive.notePos.y - 0.10 * Math.sin((bgTheta01 + 0.33) * Math.PI * 2)),
       };
-      const [s1r, s1g, s1b] = mixColor([hr, hg, hb], activeCustom ?? hoverCustom);
-      const [s2r, s2g, s2b] = mixColor([lr, lg, lb], activeCustom ?? lastCustom);
+      const [s1r, s1g, s1b] = resolveTone([hr, hg, hb], activeCustom ?? hoverCustom, activeStep >= 0 ? activeStep : hoverStep, hoverHue);
+      const [s2r, s2g, s2b] = resolveTone([lr, lg, lb], activeCustom ?? lastCustom, activeStep >= 0 ? activeStep : lastStep, bgLastEmitHue);
       const satelliteStrength = THREE.MathUtils.clamp(activeStrength * 0.36 + hoverStrength * 0.35 + lastStrength * 0.28, 0, 0.42);
       bg.setAudio({
         leadE: bgLeadE,
@@ -1827,7 +1899,7 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
         interactionPos: bgDrive.notePos,
         noteHue: stableNoteHue,
         noteColor,
-        noteColorMix: THREE.MathUtils.clamp(strictNoteColor > 0.5 ? Math.max(colorMix, 0.52) : (colorMix * 0.90 + 0.06), 0, 1),
+        noteColorMix: THREE.MathUtils.clamp((strictNoteColor > 0.5 ? Math.max(colorMix, 0.52) : (colorMix * 0.90 + 0.06)) * (0.35 + 0.90 * notePresence), 0, 1),
         noteColorStrict: strictNoteColor,
         richness: richnessUi,
         dream: dreamUi,
