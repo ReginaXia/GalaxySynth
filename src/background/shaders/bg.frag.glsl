@@ -172,7 +172,7 @@ void main(){
   float vel = saturate(uVel01);
   float ie = saturate(uInteractionE);
 
-  vec2 p = (uv - 0.5) * (0.75 + 1.35 * uScale);
+  vec2 p = (uv - 0.5) * (0.95 + 1.95 * uScale);
 
   vec2 m = (uMouse - 0.5);
   p += m * (0.06 + 0.12*e);
@@ -183,8 +183,8 @@ void main(){
   float materialField = saturate(0.58 * flowA + 0.42 * flowB);
   float materialRidge = smoothstep(0.34, 0.82, materialField);
 
-  vec2 w1 = vec2(fbm(p * 0.75 + vec2(t, -t)), fbm(p * 0.75 + vec2(-t, t)));
-  vec2 w2 = vec2(fbm(p * 1.30 + vec2(-t*1.2, t*0.8)), fbm(p * 1.30 + vec2(t*0.9, -t*0.9)));
+  vec2 w1 = vec2(fbm(p * 1.15 + vec2(t, -t)), fbm(p * 1.15 + vec2(-t, t)));
+  vec2 w2 = vec2(fbm(p * 2.00 + vec2(-t*1.2, t*0.8)), fbm(p * 2.00 + vec2(t*0.9, -t*0.9)));
   vec2 materialWarp = (vec2(flowA - 0.5, flowB - 0.5)) * (0.10 + 0.16 * uWarp) * (0.45 + 0.45 * e);
   vec2 warp = (w1 - 0.5) * (0.60 + 1.05*e) * uWarp + (w2 - 0.5) * (0.22 + 0.52*e) * uDetail + materialWarp;
 
@@ -207,8 +207,8 @@ void main(){
   flowUV += flowDir * energy * 0.22;
 
   vec2 q = flowUV + warp;
-  float f = fbm(q * 0.70 + vec2(0.0, t*0.45));
-  float g = fbm(q * 1.25 + vec2(t*0.55, 0.0));
+  float f = fbm(q * 0.95 + vec2(0.0, t*0.45));
+  float g = fbm(q * 1.95 + vec2(t*0.55, 0.0));
 
   //float band  = f;
   //float band2 = g;
@@ -222,13 +222,17 @@ void main(){
 
     // --- Soften large color "blobs" ---
 // Add a bit of high-frequency detail so the cloud masks don't form big flat regions.
-float micro = noise(q * 2.2 + vec2(t*0.35, -t*0.28));
-f = mix(f, micro, 0.035);
-g = mix(g, micro, 0.03);
+float micro = noise(q * 6.0 + vec2(t*1.10, -t*0.92));
+f = mix(f, micro, 0.090);
+g = mix(g, micro, 0.075);
+
+// A tiny high-frequency filament layer to avoid "large moving patches".
+float h = fbm(q * 3.30 + vec2(-t*0.80, t*0.72));
+g = mix(g, h, 0.10);
 
 // Smooth remap (avoid near-binary masks)
-float band  = pow(saturate(f),  1.15);
-float band2 = pow(saturate(g),  1.12);
+float band  = pow(saturate(f),  1.10);
+float band2 = pow(saturate(g),  1.06);
 
 // Tiny spatial jitter to break any remaining contour edges
 float dither01 = hash12(gl_FragCoord.xy * 0.5);
@@ -276,18 +280,24 @@ float ink = pulse * inkFall;
   vec3 spectralCyan     = vec3(0.20, 0.56, 0.66);
   vec3 spectralMagenta  = vec3(0.56, 0.28, 0.58);
   vec3 spectralGold     = vec3(0.64, 0.54, 0.28);
+  vec3 spectralIndigo   = vec3(0.20, 0.24, 0.66);
+  vec3 spectralPearl    = vec3(0.60, 0.78, 0.86);
 
   float fBlue    = fbm(q * 0.26 + vec2( t * 0.18, -t * 0.12));
   float fViolet  = fbm(q * 0.22 + vec2(-t * 0.15,  t * 0.19) + vec2( 3.4, -1.9));
   float fCyan    = fbm(q * 0.30 + vec2( t * 0.21,  t * 0.07) + vec2(-2.7,  4.1));
   float fMagenta = fbm(q * 0.24 + vec2(-t * 0.10, -t * 0.17) + vec2( 5.3,  2.2));
   float fGold    = fbm(q * 0.18 + vec2( t * 0.09, -t * 0.06) + vec2(-4.8, -3.3));
+  float fIndigo  = fbm(q * 0.20 + vec2(-t * 0.12,  t * 0.09) + vec2( 1.9,  5.6));
+  float fPearl   = fbm(q * 0.16 + vec2( t * 0.05, -t * 0.04) + vec2(-6.2,  1.1));
 
   float wBlue    = smoothstep(0.48, 0.92, fBlue);
   float wViolet  = smoothstep(0.54, 0.94, fViolet);
   float wCyan    = smoothstep(0.50, 0.93, fCyan);
   float wMagenta = smoothstep(0.56, 0.95, fMagenta);
   float wGold    = smoothstep(0.76, 0.98, fGold) * 0.22; // very subtle warm accent
+  float wIndigo  = smoothstep(0.58, 0.95, fIndigo) * 0.58;
+  float wPearl   = smoothstep(0.82, 0.99, fPearl) * 0.18;
 
   // Gate spectral fields to material ridges / sheen regions to avoid foggy coverage.
   float spectralGate = pow(saturate(materialRidge), 1.35) * (0.18 + 0.82 * pow(saturate(fres), 0.8));
@@ -296,14 +306,18 @@ float ink = pulse * inkFall;
   wCyan    *= spectralGate;
   wMagenta *= spectralGate;
   wGold    *= spectralGate;
+  wIndigo  *= spectralGate;
+  wPearl   *= spectralGate;
 
-  float wSum = max(1e-4, wBlue + wViolet + wCyan + wMagenta + wGold);
+  float wSum = max(1e-4, wBlue + wViolet + wCyan + wMagenta + wGold + wIndigo + wPearl);
   vec3 spectralCol =
     (spectralDeepBlue * wBlue +
      spectralViolet  * wViolet +
      spectralCyan    * wCyan +
      spectralMagenta * wMagenta +
-     spectralGold    * wGold) / wSum;
+     spectralGold    * wGold +
+     spectralIndigo  * wIndigo +
+     spectralPearl   * wPearl) / wSum;
 
   float spectralBlend = (0.03 + 0.16 * materialRidge) * (0.35 + 0.65 * e) * (0.35 + 0.65 * fres);
   c0 = mix(c0, spectralCol, spectralBlend * 0.45);
@@ -342,7 +356,10 @@ float ink = pulse * inkFall;
   vec3 sparkleCol = mix(c1, spectralCol, 0.62);
   col += sp * sparkleCol;
 
-  col = applySaturation(col, 1.15 + uSat * 1.25);
+  vec3 satCol = applySaturation(col, 1.08 + uSat * 1.10);
+  float satMaskRidge = pow(saturate(materialRidge), 1.1);
+  float satMask = saturate(0.10 + satMaskRidge * 0.52 + energy * 0.46 + emitMask * 0.40);
+  col = mix(col, satCol, satMask);
   col = applyContrast(col, uContrast);
 
   float bright = uIntensity * (0.52 + 1.22*e);
