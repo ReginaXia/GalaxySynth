@@ -558,6 +558,20 @@ const bgMood = {
   energy: 0.0,
 };
 
+const cinematicState = {
+  phase: 0,          // 0..1 in full cycle
+  energy: 0,         // 0..1 envelope used as global scene macro
+  pulseBoost: 1.0,   // note pulse multiplier
+  enabled: false,
+  wasEnabled: false,
+  prevMeteor: null,
+};
+
+function smoothPulse01(x) {
+  const t = THREE.MathUtils.clamp(x, 0, 1);
+  return Math.sin(t * Math.PI);
+}
+
 
 
 // -------------------------------------
@@ -727,7 +741,7 @@ console.log("vert len", meteorVert.length, "frag len", meteorFrag.length);
 
 const meteorGui = setupMeteorGUI(meteorSystem);
 
-const UI_STATE_KEY = "GalaxySynth_UIState_v3";
+const UI_STATE_KEY = "GalaxySynth_UIState_v4";
 function readUiState() {
   try {
     const raw = localStorage.getItem(UI_STATE_KEY);
@@ -740,6 +754,7 @@ function readUiState() {
         showAudio: false,
         showDebug: false,
         showTransport: true,
+        cinematic: false,
       };
     }
     const s = JSON.parse(raw);
@@ -751,6 +766,7 @@ function readUiState() {
       showAudio: !!s.showAudio,
       showDebug: !!s.showDebug,
       showTransport: s.showTransport !== false,
+      cinematic: !!s.cinematic,
     };
   } catch {
     return {
@@ -761,6 +777,7 @@ function readUiState() {
       showAudio: false,
       showDebug: false,
       showTransport: true,
+      cinematic: false,
     };
   }
 }
@@ -835,12 +852,16 @@ uiShell.innerHTML = `
     <button class="btn" data-act="toggle-ui">Master: ON</button>
     <button class="btn secondary" data-act="toggle-showcase">Showcase: OFF</button>
   </div>
+  <div class="row">
+    <button class="btn secondary" data-act="toggle-cinematic">Cinematic: OFF</button>
+  </div>
   <div class="group-title">Panels</div>
   <label class="chk"><input type="checkbox" data-k="play"> Play Panel</label>
   <label class="chk"><input type="checkbox" data-k="look"> Look Panels</label>
   <label class="chk"><input type="checkbox" data-k="audio"> Audio Monitor</label>
   <label class="chk"><input type="checkbox" data-k="debug"> Debug HUD</label>
   <label class="chk"><input type="checkbox" data-k="transport"> Transport UI</label>
+  <label class="chk"><input type="checkbox" data-k="cinematic"> Cinematic Mode</label>
   <div class="hint">Hotkeys: H master hide/show, J showcase</div>
 `;
 document.body.appendChild(uiShell);
@@ -950,20 +971,25 @@ const meteorDock = createDockPanel({
 
 const uiBtn = uiShell.querySelector('[data-act="toggle-ui"]');
 const showcaseBtn = uiShell.querySelector('[data-act="toggle-showcase"]');
+const cinematicBtn = uiShell.querySelector('[data-act="toggle-cinematic"]');
 const playChk = uiShell.querySelector('input[data-k="play"]');
 const lookChk = uiShell.querySelector('input[data-k="look"]');
 const audioChk = uiShell.querySelector('input[data-k="audio"]');
 const debugChk = uiShell.querySelector('input[data-k="debug"]');
 const transportChk = uiShell.querySelector('input[data-k="transport"]');
+const cinematicChk = uiShell.querySelector('input[data-k="cinematic"]');
 
 function applyUiState() {
   uiBtn.textContent = `Master: ${uiState.visible ? "ON" : "OFF"}`;
   showcaseBtn.textContent = `Showcase: ${uiState.showcase ? "ON" : "OFF"}`;
+  cinematicBtn.textContent = `Cinematic: ${uiState.cinematic ? "ON" : "OFF"}`;
   playChk.checked = !!uiState.showPlay;
   lookChk.checked = !!uiState.showLook;
   audioChk.checked = !!uiState.showAudio;
   debugChk.checked = !!uiState.showDebug;
   transportChk.checked = !!uiState.showTransport;
+  if (cinematicChk) cinematicChk.checked = !!uiState.cinematic;
+  cinematicState.enabled = !!uiState.cinematic;
 
   const showPlay = uiState.visible && uiState.showPlay;
   const showLook = uiState.visible && uiState.showLook;
@@ -1007,6 +1033,10 @@ showcaseBtn.addEventListener("click", () => {
   uiState.showcase = !uiState.showcase;
   applyUiState();
 });
+cinematicBtn.addEventListener("click", () => {
+  uiState.cinematic = !uiState.cinematic;
+  applyUiState();
+});
 playChk.addEventListener("change", () => {
   uiState.showPlay = !!playChk.checked;
   applyUiState();
@@ -1027,6 +1057,18 @@ transportChk.addEventListener("change", () => {
   uiState.showTransport = !!transportChk.checked;
   applyUiState();
 });
+const meteorCinematicBase = {
+  spawnRate: meteorSystem?.params?.spawnRate ?? 0.35,
+  meteorRomance: meteorSystem?.params?.meteorRomance ?? 0.62,
+  meteorTail: meteorSystem?.params?.meteorTail ?? 0.64,
+  audioGain: meteorSystem?.params?.audioGain ?? 0.7,
+};
+if (cinematicChk) {
+  cinematicChk.addEventListener("change", () => {
+    uiState.cinematic = !!cinematicChk.checked;
+    applyUiState();
+  });
+}
 
 window.addEventListener("keydown", (e) => {
   const tag = String(e.target?.tagName || "").toLowerCase();
@@ -1038,6 +1080,9 @@ window.addEventListener("keydown", (e) => {
     applyUiState();
   } else if (k === "j") {
     uiState.showcase = !uiState.showcase;
+    applyUiState();
+  } else if (k === "k") {
+    uiState.cinematic = !uiState.cinematic;
     applyUiState();
   }
 });
@@ -1661,6 +1706,34 @@ const hasNebulaHit = !!nebulaHit;
 
   nebulaSystem.update(disturb, t);
 
+  // Cinematic mode: gentle scene-level meteor modulation.
+  if (meteorSystem?.params) {
+    if (cinematicState.enabled && !cinematicState.wasEnabled) {
+      cinematicState.prevMeteor = {
+        spawnRate: meteorSystem.params.spawnRate,
+        meteorRomance: meteorSystem.params.meteorRomance,
+        meteorTail: meteorSystem.params.meteorTail,
+        audioGain: meteorSystem.params.audioGain,
+      };
+      cinematicState.wasEnabled = true;
+    } else if (!cinematicState.enabled && cinematicState.wasEnabled) {
+      const prev = cinematicState.prevMeteor ?? meteorCinematicBase;
+      meteorSystem.params.spawnRate = prev.spawnRate;
+      meteorSystem.params.meteorRomance = prev.meteorRomance;
+      meteorSystem.params.meteorTail = prev.meteorTail;
+      meteorSystem.params.audioGain = prev.audioGain;
+      cinematicState.prevMeteor = null;
+      cinematicState.wasEnabled = false;
+    }
+  }
+  if (cinematicState.enabled && meteorSystem?.params) {
+    const ce = cinematicState.energy;
+    meteorSystem.params.spawnRate = THREE.MathUtils.lerp(0.22, 0.58, ce);
+    meteorSystem.params.meteorRomance = THREE.MathUtils.lerp(0.52, 0.88, ce);
+    meteorSystem.params.meteorTail = THREE.MathUtils.lerp(0.54, 0.92, ce);
+    meteorSystem.params.audioGain = THREE.MathUtils.lerp(0.52, 0.86, ce);
+  }
+
   meteorSystem.update(t);
 
   // -----------------------------
@@ -1850,11 +1923,31 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     }
   }
 
+  // Cinematic macro cycle: Calm -> Lift -> Bloom -> Calm
+  // This only modulates global visual/audio mood; interaction logic remains unchanged.
+  if (cinematicState.enabled) {
+    const cycleSec = 44.0;
+    const cycleT = (t % cycleSec) / cycleSec;
+    cinematicState.phase = cycleT;
+
+    const calm = 1.0 - smoothPulse01(THREE.MathUtils.clamp(cycleT / 0.32, 0, 1));
+    const lift = smoothPulse01(THREE.MathUtils.clamp((cycleT - 0.18) / 0.34, 0, 1));
+    const bloomPhase = smoothPulse01(THREE.MathUtils.clamp((cycleT - 0.52) / 0.28, 0, 1));
+    const settle = 1.0 - smoothPulse01(THREE.MathUtils.clamp((cycleT - 0.80) / 0.20, 0, 1));
+    const target = THREE.MathUtils.clamp(0.10 + lift * 0.34 + bloomPhase * 0.56 + calm * 0.06, 0, 1);
+    cinematicState.energy = __bgRiseFall(cinematicState.energy, target * settle + target * (1 - settle) * 0.72, dt, 0.9, 0.55);
+    cinematicState.pulseBoost = 1.0 + cinematicState.energy * 0.42;
+  } else {
+    cinematicState.phase = 0;
+    cinematicState.energy = __bgRiseFall(cinematicState.energy, 0, dt, 1.2, 0.9);
+    cinematicState.pulseBoost = 1.0;
+  }
+
   
   // 7) Bloom：只跟随 lead 能量（慢），并且整体更低
   // 这样“弹奏有光”但不会糊掉星云
   const glowUiBloom = THREE.MathUtils.clamp(noteColorUI?.getGlow?.() ?? 0.56, 0, 1);
-  bloomPass.strength += ((0.03 + bgMood.energy * 0.06) * (0.55 + glowUiBloom * 0.75) - bloomPass.strength) * (1 - Math.exp(-dt * 1.4));
+  bloomPass.strength += ((0.03 + bgMood.energy * 0.06 + cinematicState.energy * 0.022) * (0.55 + glowUiBloom * 0.75) - bloomPass.strength) * (1 - Math.exp(-dt * 1.4));
   bloomPass.threshold = 0.88;   // 更柔和：避免只有极亮点被硬阈值抽出来
   bloomPass.radius = 0.25;      // 让中心星光更柔，不容易出现硬形状
 
@@ -1907,7 +2000,8 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     bgTheta01 = __bgRiseFall(bgTheta01, THREE.MathUtils.clamp(targetTheta, 0, 1), dt, 14.0, 8.0);
 
     // Directly drive visible flow/brightness response (keeps click + hold responsive).
-    const flowTarget = THREE.MathUtils.clamp((0.020 + bgLeadE * 0.90 + bgClickPulseVis * 0.62) * (0.80 + 0.35 * glowUi) * (0.92 + 0.22 * richnessUi), 0, 1.12);
+    const cinematicGain = cinematicState.enabled ? (1.0 + cinematicState.energy * 0.42) : 1.0;
+    const flowTarget = THREE.MathUtils.clamp((0.020 + bgLeadE * 0.90 + bgClickPulseVis * 0.62) * (0.80 + 0.35 * glowUi) * (0.92 + 0.22 * richnessUi) * cinematicGain, 0, 1.20);
     const sparkleTarget = THREE.MathUtils.clamp(0.003 + richnessUi * 0.010, 0.001, 0.018);
     const satTargetRaw = 0.24 + bgLeadE * 0.44 + bgClickPulseVis * 0.22 + dreamUi * 0.10;
     const satTarget = THREE.MathUtils.clamp(
@@ -1921,9 +2015,9 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     const darkInteractionLift = THREE.MathUtils.lerp(0.0, 0.36, darkSpaceUi) * (0.55 * bgInteractionE + 0.45 * bgClickPulseVis);
     const darkGain = THREE.MathUtils.clamp(darkCalmDim + darkInteractionLift, 0.28, 1.0);
     const intensityTarget = THREE.MathUtils.clamp(
-      (0.010 + bgLeadE * 0.42 + bgClickPulseVis * 0.22) * readabilityLimiter * (0.64 + 0.56 * glowUi) * darkGain,
+      (0.010 + bgLeadE * 0.42 + bgClickPulseVis * 0.22 + cinematicState.energy * 0.08) * readabilityLimiter * (0.64 + 0.56 * glowUi) * darkGain,
       0.006,
-      0.56
+      0.62
     );
     bg.uniforms.uFlow.value = __bgRiseFall(bg.uniforms.uFlow.value, flowTarget, dt, 12.0, 1.5);
     bg.uniforms.uSparkle.value = __bgRiseFall(bg.uniforms.uSparkle.value, sparkleTarget, dt, 6.0, 2.6);
@@ -1937,12 +2031,12 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     );
     bg.uniforms.uContrast.value = __bgRiseFall(bg.uniforms.uContrast.value, contrastTarget, dt, 7.0, 3.0);
     const detailTarget = THREE.MathUtils.clamp(
-      THREE.MathUtils.lerp(0.24, 1.02, detailCurve) * (0.94 + 0.24 * bgInteractionE) * detailBoost,
+      THREE.MathUtils.lerp(0.24, 1.02, detailCurve) * (0.94 + 0.24 * bgInteractionE + cinematicState.energy * 0.10) * detailBoost,
       0.14,
       1.25
     );
     const warpTarget = THREE.MathUtils.clamp(
-      THREE.MathUtils.lerp(0.40, 0.96, detailCurve) * (0.92 + 0.18 * bgInteractionE) * (1.0 + largeScreenBoost * highZone * 0.28),
+      THREE.MathUtils.lerp(0.40, 0.96, detailCurve) * (0.92 + 0.18 * bgInteractionE + cinematicState.energy * 0.16) * (1.0 + largeScreenBoost * highZone * 0.28),
       0.25,
       1.08
     );
@@ -1963,7 +2057,7 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
       nebulaSystem.triggerNotePulse({
         galaxyId: activeNebulaKey ?? musicState.activeIntent?.galaxyId ?? null,
         theta01: musicState.activeIntent?.theta01 ?? null,
-        strength: 0.72,
+        strength: THREE.MathUtils.clamp(0.72 * cinematicState.pulseBoost, 0, 1),
       });
       bgNoteSeed = t;
       bgNoteHue = (stepNow % STEPS) / STEPS;
