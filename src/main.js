@@ -214,6 +214,24 @@ function applyOrbitCamera() {
   camera.lookAt(orbitTarget);
 }
 
+const cameraFocus = {
+  active: false,
+  elapsed: 0,
+  duration: 0.36,
+  startPos: new THREE.Vector3(),
+  endPos: new THREE.Vector3(),
+  startTarget: new THREE.Vector3(),
+  endTarget: new THREE.Vector3(),
+};
+
+function syncLegacyOrbitFromCamera(targetWorld) {
+  orbitTarget.copy(targetWorld);
+  const off = camera.position.clone().sub(orbitTarget);
+  orbitRadius = Math.max(1e-4, off.length());
+  orbitYaw = Math.atan2(off.x, off.z);
+  orbitPitch = Math.asin(THREE.MathUtils.clamp(off.y / orbitRadius, -1, 1));
+}
+
 
 // -------------------------------------
 // Texture
@@ -610,6 +628,36 @@ const nebulaSystem = createNebulaSystem({
   planeY: 0.0,
   starTexture,
 });
+
+function focusCameraToGalaxy(galaxyId) {
+  if (!galaxyId) return;
+  const c = nebulaSystem.getCluster?.(galaxyId);
+  if (!c?.group) return;
+
+  const center = c.group.localToWorld(new THREE.Vector3(0, 0, 0));
+  const sizeScale = c?.preset?.shape?.sizeScale ?? 1.0;
+  const lengthScale = c?.preset?.shape?.length ?? 1.0;
+  const groupScale = c?.group?.scale?.x ?? 1.0;
+  const nebulaRadius = Math.max(0.8, 1.9 * sizeScale * lengthScale * groupScale);
+  const desiredDist = THREE.MathUtils.clamp(nebulaRadius * 3.1, 3.8, 13.5);
+
+  const currentTarget = cameraControl?.getTarget?.() ?? orbitTarget.clone();
+  const viewDir = camera.position.clone().sub(currentTarget);
+  if (viewDir.lengthSq() < 1e-6) viewDir.set(0, 0.55, 1.0);
+  viewDir.normalize();
+
+  const endPos = center.clone()
+    .addScaledVector(viewDir, desiredDist)
+    .add(new THREE.Vector3(0, nebulaRadius * 0.15, 0));
+
+  cameraFocus.startPos.copy(camera.position);
+  cameraFocus.endPos.copy(endPos);
+  cameraFocus.startTarget.copy(currentTarget);
+  cameraFocus.endTarget.copy(center);
+  cameraFocus.elapsed = 0;
+  cameraFocus.duration = 0.36;
+  cameraFocus.active = true;
+}
 
 const galaxyGuiRef = setupGalaxyGUI({ camera, renderer, nebulaSystem, voices });
 window.__gui = galaxyGuiRef?.gui ?? null;
@@ -1084,6 +1132,13 @@ window.addEventListener("keydown", (e) => {
   } else if (k === "k") {
     uiState.cinematic = !uiState.cinematic;
     applyUiState();
+  } else if (k === "f") {
+    const focusGalaxyId =
+      musicState.activeIntent?.galaxyId ??
+      musicState.hoverIntent?.galaxyId ??
+      activeNebulaKey ??
+      nebulaSystem.getActiveId?.();
+    focusCameraToGalaxy(focusGalaxyId);
   }
 });
 
@@ -1534,6 +1589,21 @@ function tick() {
   // dt 用于输入平滑/音频平滑
   const dt = Math.min(0.05, clock.getDelta());
   cameraControl?.update?.(dt);
+  if (cameraFocus.active) {
+    cameraFocus.elapsed += dt;
+    const a = THREE.MathUtils.clamp(cameraFocus.elapsed / Math.max(1e-4, cameraFocus.duration), 0, 1);
+    const s = a * a * (3 - 2 * a); // smoothstep
+    const targetNow = new THREE.Vector3().lerpVectors(cameraFocus.startTarget, cameraFocus.endTarget, s);
+    camera.position.lerpVectors(cameraFocus.startPos, cameraFocus.endPos, s);
+    cameraControl?.setTarget?.(targetNow);
+    camera.lookAt(targetNow);
+
+    if (a >= 1) {
+      cameraFocus.active = false;
+      syncLegacyOrbitFromCamera(targetNow);
+      cameraControl?.syncOrbitFromCamera?.();
+    }
+  }
   const t = clock.getElapsedTime();
 
   // 更新背景效果
