@@ -98,6 +98,7 @@ let bgPulse = 0.0;     // 0..1 (note trigger)
 let bgClickPulse = 0.0; // click-triggered ripple source
 let bgClickPulseVis = 0.0; // attack-shaped pulse
 let bgInteractionE = 0.0; // local turbulence envelope
+let bgLastEmitE = 0.0;
 let bgLastStep = -1;
 let bgNoteHue = 0.86;
 let bgNoteSeed = 0.0;
@@ -1025,6 +1026,8 @@ const bgDrive = {
   noteHue: 0.0,
   noteSeed: 0.123,
 };
+const bgLastEmitPos = new THREE.Vector2(0.5, 0.5);
+let bgLastEmitHue = 0.66;
 
 // -------------------------------------
 // Mouse move intensity (for audio trigger)
@@ -1461,6 +1464,7 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     );
     // ~1-2s decay when no interaction
     bgInteractionE = __bgRiseFall(bgInteractionE, interactionTarget, dt, 16.0, 0.9);
+    bgLastEmitE = __bgRiseFall(bgLastEmitE, 0.0, dt, 10.0, 0.75);
 
     // Smooth pitch/vel/theta (prefer scratch state; fallback to bgDrive)
     const targetPitch = (typeof sScratch?.pitch01 === "number") ? sScratch.pitch01 : bgDrive.pitch01;
@@ -1489,11 +1493,24 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
       bgNoteSeed = t;
       bgNoteHue = (stepNow % STEPS) / STEPS;
       bgDrive.noteSeed = bgNoteSeed;
+      bgLastEmitPos.copy(bgDrive.notePos);
+      bgLastEmitHue = bgDrive.noteHue;
+      bgLastEmitE = 1.0;
     }
     bgPulse = Math.max(0.0, bgPulse - dt / 0.70);
 
     // Feed shader uniforms (new dreamyBackground API)
     if (bg && bg.setAudio) {
+      const activeIntentNow = musicState.activeIntent;
+      const hoverIntentNow = musicState.hoverIntent;
+      const activeHue = activeIntentNow?.theta01 ?? bgDrive.noteHue;
+      const hoverHue = hoverIntentNow?.theta01 ?? activeHue;
+      const [ar, ag, ab] = hsvToRgb(activeHue, 0.66, 1.0);
+      const [hr, hg, hb] = hsvToRgb(hoverHue, 0.56, 0.95);
+      const [lr, lg, lb] = hsvToRgb(bgLastEmitHue, 0.52, 0.9);
+      const activeStrength = THREE.MathUtils.clamp(bgInteractionE * 0.95 + bgClickPulseVis * 0.25, 0, 1);
+      const hoverStrength = THREE.MathUtils.clamp((hoverIntentNow ? 0.14 : 0.0) * (0.45 + 0.55 * bgInteractionE), 0, 0.22);
+      const lastStrength = THREE.MathUtils.clamp(bgLastEmitE * 0.55, 0, 0.55);
       bg.setAudio({
         leadE: bgLeadE,
         interactionE: bgInteractionE,
@@ -1505,6 +1522,11 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
         notePos: bgDrive.notePos,
         interactionPos: bgDrive.notePos,
         noteHue: bgNoteHue,
+        emitters: [
+          { x: bgDrive.notePos.x, y: bgDrive.notePos.y, r: ar, g: ag, b: ab, s: activeStrength },
+          { x: mx01, y: my01, r: hr, g: hg, b: hb, s: hoverStrength },
+          { x: bgLastEmitPos.x, y: bgLastEmitPos.y, r: lr, g: lg, b: lb, s: lastStrength },
+        ],
       });
 
     // ✅ 背景音频驱动的衰减：防止一直“锁死”在某个颜色/亮度

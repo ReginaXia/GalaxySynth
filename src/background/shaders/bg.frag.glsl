@@ -30,6 +30,15 @@ uniform float uVel01;    // 0..1 velocity
 uniform float uTheta01;  // 0..1 (angle around disk)
 uniform vec2  uMouse;    // 0..1
 uniform vec2  uInteractionPos; // 0..1 interaction anchor
+uniform vec2  uEmitPos0;
+uniform vec2  uEmitPos1;
+uniform vec2  uEmitPos2;
+uniform vec3  uEmitCol0;
+uniform vec3  uEmitCol1;
+uniform vec3  uEmitCol2;
+uniform float uEmitStr0;
+uniform float uEmitStr1;
+uniform float uEmitStr2;
 
 // Base + look
 uniform vec3  uBase;         // base dark (#131527)
@@ -305,6 +314,22 @@ float ink = pulse * inkFall;
   col = mix(col, c1, wSheen);
   col = mix(col, cInk, wInk);
   col = mix(col, spectralCol, (0.015 + 0.075 * materialRidge) * (0.35 + 0.62 * e) * (0.30 + 0.70 * fres));
+
+  // Nebula-local color emitters: spatial "light-up" feel near interaction points.
+  vec2 e0v = (uv - uEmitPos0) * vec2(1.06, 1.0);
+  vec2 e1v = (uv - uEmitPos1) * vec2(1.06, 1.0);
+  vec2 e2v = (uv - uEmitPos2) * vec2(1.06, 1.0);
+  float e0d = length(e0v);
+  float e1d = length(e1v);
+  float e2d = length(e2v);
+  float e0g = (exp(-e0d * 18.0) * 0.52 + exp(-e0d * 6.6) * 0.48) * uEmitStr0;
+  float e1g = (exp(-e1d * 18.0) * 0.52 + exp(-e1d * 6.6) * 0.48) * uEmitStr1;
+  float e2g = (exp(-e2d * 18.0) * 0.52 + exp(-e2d * 6.6) * 0.48) * uEmitStr2;
+  vec3 emitCol = uEmitCol0 * e0g + uEmitCol1 * e1g + uEmitCol2 * e2g;
+  float emitMask = saturate(e0g + e1g + e2g);
+  float emitSheen = (0.38 + 0.62 * fres) * (0.30 + 0.70 * materialRidge);
+  col += emitCol * (0.24 + 0.52 * emitSheen);
+  col = mix(col, col + emitCol * 0.20, emitMask * 0.22);
 
   float sp = 0.0;
   if (uSparkle > 0.001){

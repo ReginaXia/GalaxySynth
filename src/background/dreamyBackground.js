@@ -55,6 +55,15 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
     uNoteSeed: { value: 0 },
     uNotePos:  { value: new THREE.Vector2(0.5, 0.5) },
     uInteractionPos: { value: new THREE.Vector2(0.5, 0.5) },
+    uEmitPos0: { value: new THREE.Vector2(0.5, 0.5) },
+    uEmitPos1: { value: new THREE.Vector2(0.5, 0.5) },
+    uEmitPos2: { value: new THREE.Vector2(0.5, 0.5) },
+    uEmitCol0: { value: new THREE.Vector3(0.0, 0.0, 0.0) },
+    uEmitCol1: { value: new THREE.Vector3(0.0, 0.0, 0.0) },
+    uEmitCol2: { value: new THREE.Vector3(0.0, 0.0, 0.0) },
+    uEmitStr0: { value: 0.0 },
+    uEmitStr1: { value: 0.0 },
+    uEmitStr2: { value: 0.0 },
   };
 
   uniforms.uFlow.value = 0.012;
@@ -126,6 +135,7 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
       notePos = null,
       interactionPos = null,
       noteHue = 0,
+      emitters = null,
     } = {}) {
       uniforms.uLeadE.value   = clamp01(leadE);
       uniforms.uInteractionE.value = clamp01(interactionE);
@@ -140,6 +150,20 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
       }
       if (interactionPos && typeof interactionPos.x === "number"){
         uniforms.uInteractionPos.value.set(clamp01(interactionPos.x), clamp01(interactionPos.y));
+      }
+      if (Array.isArray(emitters)) {
+        const e0 = emitters[0] ?? {};
+        const e1 = emitters[1] ?? {};
+        const e2 = emitters[2] ?? {};
+        uniforms.uEmitPos0.value.set(clamp01(e0.x ?? 0.5), clamp01(e0.y ?? 0.5));
+        uniforms.uEmitPos1.value.set(clamp01(e1.x ?? 0.5), clamp01(e1.y ?? 0.5));
+        uniforms.uEmitPos2.value.set(clamp01(e2.x ?? 0.5), clamp01(e2.y ?? 0.5));
+        uniforms.uEmitCol0.value.set(clamp01(e0.r ?? 0), clamp01(e0.g ?? 0), clamp01(e0.b ?? 0));
+        uniforms.uEmitCol1.value.set(clamp01(e1.r ?? 0), clamp01(e1.g ?? 0), clamp01(e1.b ?? 0));
+        uniforms.uEmitCol2.value.set(clamp01(e2.r ?? 0), clamp01(e2.g ?? 0), clamp01(e2.b ?? 0));
+        uniforms.uEmitStr0.value = clamp01(e0.s ?? 0);
+        uniforms.uEmitStr1.value = clamp01(e1.s ?? 0);
+        uniforms.uEmitStr2.value = clamp01(e2.s ?? 0);
       }
     },
 
