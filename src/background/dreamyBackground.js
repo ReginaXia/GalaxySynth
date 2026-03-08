@@ -49,10 +49,6 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
     uPal2: { value: hexToVec3(pal.colors[2]) },
     uPal3: { value: hexToVec3(pal.colors[3]) },
 
-    uPulse:    { value: 0 },
-    uNoteHue:  { value: 0 },
-    uNoteSeed: { value: 0 },
-    uNotePos:  { value: new THREE.Vector2(0.5, 0.5) },
   };
 
   uniforms.uFlow.value = 0.0;
@@ -118,21 +114,11 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
       pitch01 = uniforms.uPitch01.value,
       vel01 = uniforms.uVel01.value,
       theta01 = uniforms.uTheta01.value,
-      pulse = 0,
-      noteSeed = 0,
-      notePos = null,
-      noteHue = 0,
     } = {}) {
       uniforms.uLeadE.value   = clamp01(leadE);
       uniforms.uPitch01.value = clamp01(pitch01);
       uniforms.uVel01.value   = clamp01(vel01);
       uniforms.uTheta01.value = clamp01(theta01);
-      uniforms.uPulse.value   = clamp01(pulse);
-      uniforms.uNoteSeed.value = noteSeed ?? 0;
-      uniforms.uNoteHue.value  = noteHue ?? 0;
-      if (notePos && typeof notePos.x === "number"){
-        uniforms.uNotePos.value.set(clamp01(notePos.x), clamp01(notePos.y));
-      }
     },
 
     setMouse01(x,y){ uniforms.uMouse.value.set(clamp01(x), clamp01(y)); },

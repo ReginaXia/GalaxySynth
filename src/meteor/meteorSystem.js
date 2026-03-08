@@ -431,12 +431,6 @@ export function createMeteorSystem({
     }
   }
 
-  // initial burst
-  for (let i = 0; i < Math.min(6, maxMeteors); i++) {
-    spawnMeteor(i, 0);
-    meteors[i].birth = -rand(0, 1.2);
-  }
-
   function emitTail(worldPos, dir, meteorHue, now, dt) {
     const emitPerSec = THREE.MathUtils.lerp(60, 260, (params.strandCount - 4) / 12);
     const emitN = Math.max(1, Math.floor(emitPerSec * dt));

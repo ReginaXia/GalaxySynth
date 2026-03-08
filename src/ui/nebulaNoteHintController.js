@@ -401,9 +401,10 @@ st.smoothTheta01 = usingSample ? theta01 : smoothWrap01(st.smoothTheta01, theta0
     if (typeof info.step === "number") st.lastStep = info.step;
     st.lastInfo = info;
 
-    // Cursor label position: use mouse world when available; otherwise keep center-ish
-    const worldForLabel = getMouseWorldOnPlane(lastClientX, lastClientY) ?? cluster.center;
-    updateCursorLabel(worldForLabel, info);
+    // Avoid center fallback artifacts: only place cursor label with a real world point.
+    const worldForLabel = truthIntent?.hitWorld ?? getMouseWorldOnPlane(lastClientX, lastClientY);
+    if (worldForLabel) updateCursorLabel(worldForLabel, info);
+    else cursorLabel.visible = false;
     updateBandHints(cluster, info, r01);
   }
 

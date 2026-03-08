@@ -47,12 +47,6 @@ uniform vec3 uPal1;
 uniform vec3 uPal2;
 uniform vec3 uPal3;
 
-// Note "injection" (optional kick)
-uniform float uPulse;      // 0..1
-uniform float uNoteHue;    // 0..1 (kept for compatibility)
-uniform float uNoteSeed;
-uniform vec2  uNotePos;    // 0..1
-
 // Three.js built-in uniform (DO NOT redeclare!)
 // uniform vec3 cameraPosition;
 
@@ -203,39 +197,15 @@ float musicalT = (uPitch01 * 0.92 + uTheta01 * 0.35 + t * 0.12);
 
   float sheen = (fres * (0.35 + 0.85*e) + (band2-0.5) * 0.25) * uPearl;
 
-  float pulse = saturate(uPulse) * (0.2 + 0.8*vel);
-
-// Note injection distance in "sky UV" space
-vec2 noteVec = (uv - uNotePos) * vec2(1.2, 1.0);
-float d = length(noteVec);
-
-// Domain-dither the injection edge to kill contour banding during big color jumps.
-// Use *very* small spatial jitter + slight temporal drift (so it doesn't look like a static pattern).
-float nA = hash12(gl_FragCoord.xy + uTime * 60.0);
-float nB = hash12(gl_FragCoord.xy * 0.71 + 17.0 + uTime * 37.0);
-float tri = (nA + nB) - 1.0; // -1..1 triangular noise
-d += tri * 0.0035;           // 0.002~0.006 (bigger = stronger anti-banding)
-
-// Exponential falloff (soft blob)
-float inkFall = exp(-d * (6.0 + 10.0*e));
-
-// Edge micro-jitter in mask space (prevents visible rings after toneMapping/bloom)
-inkFall = saturate(inkFall + tri * 0.02);
-
-float ink = pulse * inkFall;
-
   float wCloud = (0.20 + 0.42*e2) * band;
   float wSheen = (0.26 + 0.62*e)  * (0.38 + 0.62*band2) * uPearl;
-  float wInk   = ink * (0.46 + 0.26*e);
 
   vec3 c0 = palette4(musicalT + sheen * 0.45 + (f-0.5)*0.25);
   vec3 c1 = palette4(musicalT + 0.33 + sheen * 0.75 + (g-0.5)*0.35);
-  vec3 cInk = palette4(musicalT + 0.66 + uNoteSeed*0.07);
 
   vec3 col = uBase;
   col = mix(col, c0, wCloud);
   col = mix(col, c1, wSheen);
-  col = mix(col, cInk, wInk);
 
   float sp = 0.0;
   if (uSparkle > 0.001){

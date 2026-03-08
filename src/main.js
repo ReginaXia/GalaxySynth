@@ -29,10 +29,7 @@ import { createCameraControlSystem } from "./input/cameraControlSystem.js";
 import { musicState } from "./state/musicState.js";
 import { resolveNoteIntent } from "./interaction/resolveNoteIntent.js";
 import { onPointerMove, onPointerDown, onPointerMovePressed, onPointerUp } from "./interaction/intentStateMachine.js";
-import { NOTE_STEPS, stepToBoundaryTheta01, stepToCenterTheta01 } from "./music/noteMapping.js";
 
-import starsVert from "./shaders/stars.vert.glsl?raw";
-import starsFrag from "./shaders/stars.frag.glsl?raw";
 import meteorVert from "./shaders/meteor.vert.glsl?raw";
 import meteorFrag from "./shaders/meteor.frag.glsl?raw";
 
@@ -65,7 +62,6 @@ debugHud.textContent = "HUD ready";
 document.body.appendChild(debugHud);
 
 const DEBUG_INTENT = true;
-const DEBUG_NOTE_OVERLAY = true;
 const __lastIntentLog = { hover: null, active: null, last: null };
 function logIntentChange(kind, intent) {
   if (!DEBUG_INTENT) return;
@@ -74,16 +70,6 @@ function logIntentChange(kind, intent) {
   __lastIntentLog[kind] = next;
   console.log(`[intent] ${kind}:`, next ?? "-");
 }
-
-const noteOverlay = document.createElement("canvas");
-noteOverlay.style.cssText = `
-  position: fixed;
-  inset: 0;
-  z-index: 9998;
-  pointer-events: none;
-`;
-document.body.appendChild(noteOverlay);
-const noteOverlayCtx = noteOverlay.getContext("2d");
 
 
 (async function main(){
@@ -94,12 +80,9 @@ let bgLeadE = 0.0;     // 0..1 presence
 let bgPitch01 = 0.5;   // 0..1
 let bgVel01 = 0.0;     // 0..1
 let bgTheta01 = 0.0;   // 0..1
-let bgPulse = 0.0;     // 0..1 (note trigger)
 let bgClickPulse = 0.0; // click-triggered ripple source
 let bgClickPulseVis = 0.0; // attack-shaped pulse
 let bgLastStep = -1;
-let bgNoteHue = 0.86;
-let bgNoteSeed = 0.0;
 
 // -------------------------------------
 
@@ -127,12 +110,6 @@ function __bgRiseFall(current, target, dt, rise = 16.0, fall = 4.0) {
 // Scene / Camera
 // -------------------------------------
 const scene = new THREE.Scene();
-
-const testSphere = new THREE.Mesh(
-  new THREE.SphereGeometry(1, 32, 32),
-  new THREE.MeshBasicMaterial({ color: 0xff0000 })
-);
-scene.add(testSphere);
 
 
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.05, 2000);
@@ -239,7 +216,6 @@ let lastInteractionTime = 0;
 function triggerBackgroundPulse(strength = 1.0) {
   const s = THREE.MathUtils.clamp(strength, 0, 1);
   bgClickPulse = Math.max(bgClickPulse, s);
-  bgPulse = Math.max(bgPulse, 0.75 * s);
 }
 
 
@@ -263,6 +239,8 @@ let noteHint = null;
 window.addEventListener("pointermove", (e) => {
   __markPointerMoved(e.clientX, e.clientY);
   noteHint?.setPointerClientXY?.(e.clientX, e.clientY);
+  mouse01.x = e.clientX / window.innerWidth;
+  mouse01.y = 1.0 - e.clientY / window.innerHeight;
   pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
   pointer.y = -((e.clientY / window.innerHeight) * 2 - 1);
 });
@@ -548,18 +526,6 @@ const bgMood = {
 // Brackground
 // -------------------------------------
 
-// ✅ background audio uniforms handle
-const bgU = bg.uniforms;
-
-// ✅ background “note paint” state
-// let bgPulse = 0.0;
-let bgSeed = 0.123;
-let lastMidiSeen = -999;
-let lastTheta01 = 0.0;
-let lastVel01 = 0.0;
-let lastPitch01 = 0.5;
-
-
 // -------------------------------------
 // Brackground mouse
 // -------------------------------------
@@ -582,69 +548,6 @@ const nebulaSystem = createNebulaSystem({
 });
 
 setupGalaxyGUI({ camera, renderer, nebulaSystem });
-
-function resizeNoteOverlay() {
-  const w = window.innerWidth;
-  const h = window.innerHeight;
-  noteOverlay.width = w;
-  noteOverlay.height = h;
-}
-
-function worldToOverlayXY(v3) {
-  const p = v3.clone().project(camera);
-  return {
-    x: (p.x * 0.5 + 0.5) * noteOverlay.width,
-    y: (1 - (p.y * 0.5 + 0.5)) * noteOverlay.height,
-  };
-}
-
-function drawNoteAlignmentOverlay(intent) {
-  if (!DEBUG_NOTE_OVERLAY || !noteOverlayCtx) return;
-  const ctx = noteOverlayCtx;
-  ctx.clearRect(0, 0, noteOverlay.width, noteOverlay.height);
-
-  if (!intent?.galaxyId) return;
-  const cluster = nebulaSystem.getCluster?.(intent.galaxyId);
-  if (!cluster?.group) return;
-
-  const sizeScale = cluster?.preset?.shape?.sizeScale ?? 1.0;
-  const radius = Math.max(1e-4, 1.9 * sizeScale);
-
-  const centerW = cluster.group.localToWorld(new THREE.Vector3(0, 0, 0));
-  const center2 = worldToOverlayXY(centerW);
-
-  ctx.strokeStyle = "rgba(120,200,255,0.65)";
-  ctx.lineWidth = 1;
-
-  for (let i = 0; i < NOTE_STEPS; i++) {
-    const a = stepToBoundaryTheta01(i, NOTE_STEPS) * Math.PI * 2;
-    const p = cluster.group.localToWorld(new THREE.Vector3(Math.cos(a) * radius, 0, Math.sin(a) * radius));
-    const p2 = worldToOverlayXY(p);
-    ctx.beginPath();
-    ctx.moveTo(center2.x, center2.y);
-    ctx.lineTo(p2.x, p2.y);
-    ctx.stroke();
-  }
-
-  for (let i = 0; i < NOTE_STEPS; i++) {
-    const a = stepToCenterTheta01(i, NOTE_STEPS) * Math.PI * 2;
-    const p = cluster.group.localToWorld(new THREE.Vector3(Math.cos(a) * radius, 0, Math.sin(a) * radius));
-    const p2 = worldToOverlayXY(p);
-    ctx.fillStyle = (i === intent.step) ? "rgba(255,255,120,0.95)" : "rgba(255,255,255,0.7)";
-    ctx.beginPath();
-    ctx.arc(p2.x, p2.y, i === intent.step ? 4 : 2.5, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  if (intent.hitWorld) {
-    const hit2 = worldToOverlayXY(intent.hitWorld);
-    ctx.fillStyle = "rgba(255,80,80,0.95)";
-    ctx.beginPath();
-    ctx.arc(hit2.x, hit2.y, 4.5, 0, Math.PI * 2);
-    ctx.fill();
-  }
-}
-resizeNoteOverlay();
 
 function cacheActiveDiskFromNebula(galaxyId) {
   if (!galaxyId) {
@@ -769,6 +672,9 @@ canvas.addEventListener("pointerdown", (e) => {
   if (e.button === 0) {
     const pick = pickNebulaAtEvent(e);
     const ndc = getPointerNDCFromEvent(e);
+    pointer.copy(ndc);
+    mouse01.x = e.clientX / window.innerWidth;
+    mouse01.y = 1.0 - e.clientY / window.innerHeight;
     const hoverAtDown = resolveNoteIntent({
       galaxyId: pick?.galaxyId ?? null,
       nebulaSystem,
@@ -933,93 +839,12 @@ canvas.addEventListener(
 
 // -------------------------------------
 
-// -------------------------------------
-// Helpers (moved up for hoist safety)
-// -------------------------------------
-function makeStars({ count, radius, thickness }) {
-  const geo = new THREE.BufferGeometry();
-  const positions = new Float32Array(count * 3);
-  const colors = new Float32Array(count * 3);
-  const sizes = new Float32Array(count);
-  const seeds = new Float32Array(count);
-
-  for (let i = 0; i < count; i++) {
-    const idx3 = i * 3;
-
-    const r = Math.pow(Math.random(), 0.45) * radius;
-    const angle = Math.random() * Math.PI * 2;
-
-    const armT = r / radius;
-    const swirl = armT * 2.4;
-    const a = angle + swirl;
-
-    const y = (Math.random() - 0.5) * thickness * (1.0 - armT * 0.7);
-    const nx = (Math.random() - 0.5) * 0.25;
-    const nz = (Math.random() - 0.5) * 0.25;
-
-    const x = Math.cos(a) * r + nx;
-    const z = Math.sin(a) * r + nz;
-
-    positions[idx3 + 0] = x;
-    positions[idx3 + 1] = y;
-    positions[idx3 + 2] = z;
-
-    const t = Math.min(1, r / radius);
-    const cA = new THREE.Color("#ff72d8");
-    const cB = new THREE.Color("#b9a7ff");
-    const cC = new THREE.Color("#7fe7ff");
-    const c = new THREE.Color();
-    if (t < 0.5) c.copy(cA).lerp(cB, t / 0.5);
-    else c.copy(cB).lerp(cC, (t - 0.5) / 0.5);
-    c.lerp(new THREE.Color("#ffffff"), (1.0 - t) * 0.18);
-
-    colors[idx3 + 0] = c.r;
-    colors[idx3 + 1] = c.g;
-    colors[idx3 + 2] = c.b;
-
-    sizes[i] = 0.18 + Math.pow(Math.random(), 2.2) * 1.2;
-    seeds[i] = Math.random() * 1000.0;
-  }
-
-  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-  geo.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
-  geo.setAttribute("aSeed", new THREE.BufferAttribute(seeds, 1));
-
-  const mat = new THREE.ShaderMaterial({
-    transparent: true,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    vertexColors: true,
-    uniforms: {
-      uTime: { value: 0 },
-      uPointer: { value: new THREE.Vector2(0, 0) },
-      uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) },
-    },
-    vertexShader: starsVert,
-    fragmentShader: starsFrag,
-  });
-
-  const points = new THREE.Points(geo, mat);
-  points.frustumCulled = false;
-  return points;
-}
-
-// Stars
-// -------------------------------------
-const stars = makeStars({ count: 65000, radius: 7.0, thickness: 1.6 });
-scene.add(stars);
-
 // --- background drive state (avoid undefined vars / keep things stable)
 const bgDrive = {
   leadE: 0,
   pitch01: 0,
   vel01: 0,
   theta01: 0,
-  pulse: 0,
-  notePos: new THREE.Vector2(0.5, 0.5),
-  noteHue: 0.0,
-  noteSeed: 0.123,
 };
 
 // -------------------------------------
@@ -1212,10 +1037,6 @@ const hasNebulaHit = !!nebulaHit;
 
   
 
-  // --- stars
-  stars.material.uniforms.uTime.value = t;
-  stars.material.uniforms.uPointer.value.copy(pointer);
-
   // --- nebula & meteor
   const disturbPoint = (nebulaHit?.point ? nebulaHit.point : hitPoint);
 
@@ -1266,7 +1087,6 @@ const hasNebulaHit = !!nebulaHit;
   const activeInst = activeIntent?.galaxyId ? voices.getNebulaInstrumentName(activeIntent.galaxyId) : "-";
 
   const truthIntent = activeIntent ?? hoverIntent ?? lastIntent;
-  drawNoteAlignmentOverlay(truthIntent);
   const noteStr = truthIntent?.noteName ?? "-";
   const midiStr = (typeof truthIntent?.midi === "number") ? truthIntent.midi : "-";
   const stepStr = truthIntent ? `${(truthIntent.step ?? 0) + 1}/7` : "-";
@@ -1352,16 +1172,6 @@ bgDrive.leadE = Math.max(bgDrive.leadE, Math.max(localVel01, radialExpress * 0.8
 bgDrive.pitch01 = localPitch01;
 bgDrive.vel01 = Math.max(localVel01, radialExpress * 0.75);
 bgDrive.theta01 = theta01;
-
-
-    // ✅ 给背景一个“随音符变化的色相驱动”（避免一直停留在同一主色）
-    // 这里用 theta + pitch 的混合做一个稳定又有变化的 hue（0..1）
-    bgDrive.noteHue = (theta01 + bgDrive.pitch01 * 0.65) % 1.0;
-// trigger a short "ink injection" pulse
-bgDrive.pulse = 1.0;
-bgDrive.noteSeed = (Math.random() * 0.999) + 0.001;
-bgDrive.notePos.set(mouse01.x, mouse01.y);
-
 
 
       const instrument = voices?.getNebulaInstrument?.(activeNebulaKey);
@@ -1472,11 +1282,7 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     if (isPlaying && stepNow >= 0 && stepNow !== bgLastStep) {
       bgLastStep = stepNow;
       triggerBackgroundPulse(0.85);
-      bgNoteSeed = t;
-      bgNoteHue = (stepNow % STEPS) / STEPS;
-      bgDrive.noteSeed = bgNoteSeed;
     }
-    bgPulse = Math.max(0.0, bgPulse - dt / 0.70);
 
     // Feed shader uniforms (new dreamyBackground API)
     if (bg && bg.setAudio) {
@@ -1485,16 +1291,11 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
         pitch01: bgPitch01,
         vel01: bgVel01,
         theta01: bgTheta01,
-        pulse: bgPulse,
-        noteSeed: bgDrive.noteSeed,
-        notePos: bgDrive.notePos,
-        noteHue: bgNoteHue,
       });
 
     // ✅ 背景音频驱动的衰减：防止一直“锁死”在某个颜色/亮度
     // dt: 这一帧的秒数（如果你这里没有 dt，就用 1/60 近似）
     const _dtBg = (typeof dt === "number" && isFinite(dt)) ? dt : (1 / 60);
-    bgDrive.pulse = Math.max(0, bgDrive.pulse - _dtBg * 2.8);
     bgDrive.leadE = Math.max(0, bgDrive.leadE - _dtBg * 1.6);
     }
   }
@@ -1519,7 +1320,6 @@ tick();
 window.addEventListener("resize", () => {
   const w = window.innerWidth;
   const h = window.innerHeight;
-  resizeNoteOverlay();
   renderer.setSize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();

@@ -17,7 +17,7 @@ void main(){
 
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   float size = aSize * uBaseSize * uPixelRatio * (1.0 / max(0.6, -mv.z));
-  gl_PointSize = size;
+  gl_PointSize = clamp(size, 1.0, 28.0);
 
   gl_Position = projectionMatrix * mv;
 }
