@@ -19,6 +19,10 @@ function hexToV3(hex) {
   const c = new THREE.Color(hex);
   return new THREE.Vector3(c.r, c.g, c.b);
 }
+function hexToRgb01(hex) {
+  const c = new THREE.Color(hex);
+  return [c.r, c.g, c.b];
+}
 
 function loadState(defaults) {
   try {
@@ -51,6 +55,16 @@ function loadState(defaults) {
           )
         )
       ),
+      starColorGlow: clampRange(
+        Number.isFinite(Number(s.starColorGlow))
+          ? (Number(s.starColorGlow) <= 1 ? Number(s.starColorGlow) * 2.0 : Number(s.starColorGlow))
+          : defaults.starColorGlow,
+        0,
+        30
+      ),
+      starGlowColorA: typeof s.starGlowColorA === "string" ? s.starGlowColorA : defaults.starGlowColorA,
+      starGlowColorB: typeof s.starGlowColorB === "string" ? s.starGlowColorB : defaults.starGlowColorB,
+      starGlowColorC: typeof s.starGlowColorC === "string" ? s.starGlowColorC : defaults.starGlowColorC,
       starSize: clampRange(
         Number.isFinite(Number(s.starSize))
           ? (Number(s.starSize) <= 1 ? (4 + Number(s.starSize) * 20) : Number(s.starSize))
@@ -77,6 +91,10 @@ function saveState(state) {
         darkSpace: clamp01(state.darkSpace),
         localColorLift: clamp01(state.localColorLift),
         starBreath: clamp01(state.starBreath),
+        starColorGlow: clampRange(state.starColorGlow, 0, 30),
+        starGlowColorA: state.starGlowColorA,
+        starGlowColorB: state.starGlowColorB,
+        starGlowColorC: state.starGlowColorC,
         starSize: clampRange(state.starSize, 2, 28),
       })
     );
@@ -114,7 +132,7 @@ function makeRange(root, name, init, onChange) {
   return { sync };
 }
 
-function makeNumber(root, name, init, min, max, step, onChange) {
+function makeNumber(root, name, init, min, max, step, onChange, unit = "px") {
   const row = document.createElement("div");
   row.style.cssText = "margin-top:6px;";
   root.appendChild(row);
@@ -138,7 +156,7 @@ function makeNumber(root, name, init, min, max, step, onChange) {
 
   const sync = (v) => {
     input.value = String(v);
-    r.textContent = `${Number(v).toFixed(step >= 1 ? 0 : 1)} px`;
+    r.textContent = `${Number(v).toFixed(step >= 1 ? 0 : 1)} ${unit}`;
   };
   sync(init);
   input.addEventListener("input", () => onChange(clampRange(Number(input.value), min, max), sync));
@@ -155,6 +173,10 @@ export function createBackgroundDockPanel({ bg }) {
     darkSpace: 0.70,
     localColorLift: 0.62,
     starBreath: 0.60,
+    starColorGlow: 1.8,
+    starGlowColorA: "#9fd6ff",
+    starGlowColorB: "#c7b2ff",
+    starGlowColorC: "#ffc8ef",
     starSize: 16,
   };
   const state = loadState(defaults);
@@ -285,6 +307,36 @@ export function createBackgroundDockPanel({ bg }) {
   });
   starBreathRow.sync(state.starBreath);
 
+  const starColorGlowRow = makeNumber(body, "Star Color Glow", state.starColorGlow, 0, 30, 0.1, (v, sync) => {
+    state.starColorGlow = clampRange(v, 0, 30);
+    sync(v);
+    saveState(state);
+  }, "x");
+  starColorGlowRow.sync(state.starColorGlow);
+
+  const starGlowColorGrid = document.createElement("div");
+  starGlowColorGrid.style.cssText = "display:grid; grid-template-columns:1fr 48px; gap:6px 8px; margin-top:6px;";
+  body.appendChild(starGlowColorGrid);
+  const addStarGlowColorInput = (labelText, key) => {
+    const label = document.createElement("div");
+    label.textContent = labelText;
+    label.style.opacity = ".9";
+    starGlowColorGrid.appendChild(label);
+
+    const input = document.createElement("input");
+    input.type = "color";
+    input.value = state[key];
+    input.style.cssText = "width:48px; height:20px; border:none; padding:0; background:transparent;";
+    input.addEventListener("input", () => {
+      state[key] = input.value;
+      saveState(state);
+    });
+    starGlowColorGrid.appendChild(input);
+  };
+  addStarGlowColorInput("Glow Color A", "starGlowColorA");
+  addStarGlowColorInput("Glow Color B", "starGlowColorB");
+  addStarGlowColorInput("Glow Color C", "starGlowColorC");
+
   const starSizeRow = makeNumber(body, "Star Size", state.starSize, 2, 28, 0.5, (v, sync) => {
     state.starSize = clampRange(v, 2, 28);
     sync(v);
@@ -373,6 +425,18 @@ export function createBackgroundDockPanel({ bg }) {
     },
     getStarBreath() {
       return state.starBreath;
+    },
+    getStarColorGlow() {
+      return state.starColorGlow;
+    },
+    getStarGlowColorA01() {
+      return hexToRgb01(state.starGlowColorA);
+    },
+    getStarGlowColorB01() {
+      return hexToRgb01(state.starGlowColorB);
+    },
+    getStarGlowColorC01() {
+      return hexToRgb01(state.starGlowColorC);
     },
     getStarSize() {
       return state.starSize;

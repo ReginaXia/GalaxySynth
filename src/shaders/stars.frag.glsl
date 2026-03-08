@@ -9,6 +9,10 @@ varying float vSizeNorm;
 uniform float uOpacity;
 uniform float uSoftness;
 uniform float uCross;
+uniform float uColorGlow;
+uniform vec3 uGlowColorA;
+uniform vec3 uGlowColorB;
+uniform vec3 uGlowColorC;
 
 void main() {
   vec2 p = gl_PointCoord - 0.5;
@@ -30,7 +34,25 @@ void main() {
   float alpha = clamp(mask * vAlpha * uOpacity * breathAlpha, 0.0, 1.0);
   if (alpha < 0.003) discard;
 
-  vec3 col = vColor * (0.76 + 0.58 * clamp(twShaped, 0.65, 1.72));
-  col += vec3(1.0) * (0.04 + 0.18 * uCross) * cross;
+  vec3 col = vColor * (0.70 + 0.44 * clamp(twShaped, 0.65, 1.72));
+  // Pastel color glow on halo only: keeps star core white and clean.
+  float cgRaw = max(uColorGlow, 0.0);
+  float cg = clamp(cgRaw, 0.0, 1.0);
+  float hdrGlow = 1.0 + max(0.0, cgRaw - 1.0) * 2.4;
+  float k = clamp(vCrossSeed, 0.0, 1.0);
+  vec3 tint = (k < 0.5)
+    ? mix(uGlowColorA, uGlowColorB, k * 2.0)
+    : mix(uGlowColorB, uGlowColorC, (k - 0.5) * 2.0);
+  tint = clamp(tint, 0.0, 1.0);
+  float haloOnly = clamp(halo, 0.0, 1.0) * (1.0 - clamp(core * 1.45, 0.0, 1.0));
+  float colorGlowGain = (0.18 + 1.20 * cg) * clamp(twShaped, 0.78, 1.38) * hdrGlow;
+  col += tint * haloOnly * colorGlowGain;
+  // Cross glint follows tint when color glow is high (avoids whitening).
+  vec3 crossCol = mix(vec3(1.0), tint, 0.35 + 0.60 * cg);
+  col += crossCol * (0.02 + 0.10 * (1.0 - cg) + 0.10 * cg) * cross * (0.92 + 0.18 * hdrGlow);
+
+  // Gentle highlight compression keeps hue visible under additive blending.
+  float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
+  col = col / (1.0 + lum * (0.18 + 0.26 * cg));
   gl_FragColor = vec4(col, alpha);
 }
