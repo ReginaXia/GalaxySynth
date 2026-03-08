@@ -168,9 +168,16 @@ void main(){
   vec2 m = (uMouse - 0.5);
   p += m * (0.06 + 0.12*e);
 
+  // Large-scale slow material flow layers (richness without noisy boiling).
+  float flowA = fbm(p * 0.36 + vec2(t * 0.28, -t * 0.22));
+  float flowB = fbm((p + vec2(2.7, -1.9)) * 0.22 + vec2(-t * 0.20, t * 0.26));
+  float materialField = saturate(0.58 * flowA + 0.42 * flowB);
+  float materialRidge = smoothstep(0.34, 0.82, materialField);
+
   vec2 w1 = vec2(fbm(p * 0.75 + vec2(t, -t)), fbm(p * 0.75 + vec2(-t, t)));
   vec2 w2 = vec2(fbm(p * 1.30 + vec2(-t*1.2, t*0.8)), fbm(p * 1.30 + vec2(t*0.9, -t*0.9)));
-  vec2 warp = (w1 - 0.5) * (0.55 + 0.85*e) * uWarp + (w2 - 0.5) * (0.18 + 0.45*e) * uDetail;
+  vec2 materialWarp = (vec2(flowA - 0.5, flowB - 0.5)) * (0.10 + 0.14 * uWarp) * (0.45 + 0.35 * e);
+  vec2 warp = (w1 - 0.5) * (0.55 + 0.85*e) * uWarp + (w2 - 0.5) * (0.18 + 0.45*e) * uDetail + materialWarp;
 
   // Step 2B: localized interaction energy + transport.
   vec2 dInt = uv - uInteractionPos;
@@ -220,7 +227,7 @@ float jitter = (dither01 - 0.5) * (2.0 / 255.0);
 band  = saturate(band  + jitter);
 band2 = saturate(band2 + jitter);
 
-float musicalT = (uPitch01 * 0.92 + uTheta01 * 0.35 + t * 0.12);
+float musicalT = (uPitch01 * 0.92 + uTheta01 * 0.35 + t * 0.12 + (materialField - 0.5) * 0.12);
 
   float sheen = (fres * (0.35 + 0.85*e) + (band2-0.5) * 0.25) * uPearl;
 
@@ -245,8 +252,9 @@ inkFall = saturate(inkFall + tri * 0.02);
 
 float ink = pulse * inkFall;
 
-  float wCloud = (0.20 + 0.42*e2) * band;
-  float wSheen = (0.26 + 0.62*e)  * (0.38 + 0.62*band2) * uPearl;
+  float richness = 0.35 + 0.45 * e;
+  float wCloud = (0.20 + 0.42*e2) * band * mix(0.80, 1.20, materialRidge * richness);
+  float wSheen = (0.26 + 0.62*e)  * (0.38 + 0.62*band2) * uPearl * mix(0.78, 1.22, (1.0 - materialRidge) * richness);
   float wInk   = ink * (0.46 + 0.26*e);
 
   vec3 c0 = palette4(musicalT + sheen * 0.45 + (f-0.5)*0.25);
