@@ -6,6 +6,7 @@ varying vec3 vColor;
 varying float vTwinkle;
 varying float vAlpha;
 varying float vCrossSeed;
+varying float vSizeNorm;
 
 uniform float uTime;
 uniform float uPixelRatio;
@@ -17,10 +18,11 @@ void main() {
   vColor = color;
   vAlpha = aAlpha;
   vCrossSeed = fract(aSeed * 1.6180339);
+  vSizeNorm = clamp((aSize - 0.70) / 3.0, 0.0, 1.0);
 
   // Breath intensity is driven by uBreath only (0..1).
-  float tw = 0.5 + 0.5 * sin(uTime * (0.95 + 1.55 * uBreath) + aSeed * 13.37);
-  float amp = mix(0.05, 0.40, clamp(uBreath, 0.0, 1.0));
+  float tw = 0.5 + 0.5 * sin(uTime * (1.10 + 1.95 * uBreath) + aSeed * 13.37);
+  float amp = mix(0.08, 0.62, clamp(uBreath, 0.0, 1.0));
   vTwinkle = 1.0 + (tw * 2.0 - 1.0) * amp;
 
   vec4 mv = modelViewMatrix * vec4(position, 1.0);

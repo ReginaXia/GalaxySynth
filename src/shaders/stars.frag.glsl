@@ -4,6 +4,7 @@ varying vec3 vColor;
 varying float vTwinkle;
 varying float vAlpha;
 varying float vCrossSeed;
+varying float vSizeNorm;
 
 uniform float uOpacity;
 uniform float uSoftness;
@@ -23,11 +24,13 @@ void main() {
   float cross = (crossX + crossY) * 0.5;
 
   float mask = core + halo + cross * (0.10 + 0.48 * uCross);
-  float breathAlpha = clamp(vTwinkle, 0.75, 1.35);
+  float bigStarBoost = mix(0.55, 1.25, smoothstep(0.20, 0.95, vSizeNorm));
+  float twShaped = mix(1.0 + (vTwinkle - 1.0) * 0.55, vTwinkle * 1.10, smoothstep(0.25, 1.0, vSizeNorm));
+  float breathAlpha = clamp(1.0 + (twShaped - 1.0) * bigStarBoost, 0.66, 1.72);
   float alpha = clamp(mask * vAlpha * uOpacity * breathAlpha, 0.0, 1.0);
   if (alpha < 0.003) discard;
 
-  vec3 col = vColor * (0.80 + 0.50 * clamp(vTwinkle, 0.7, 1.4));
+  vec3 col = vColor * (0.76 + 0.58 * clamp(twShaped, 0.65, 1.72));
   col += vec3(1.0) * (0.04 + 0.18 * uCross) * cross;
   gl_FragColor = vec4(col, alpha);
 }
