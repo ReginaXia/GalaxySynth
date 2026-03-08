@@ -87,6 +87,11 @@ export function createMeteorSystem({
     audioEnabled: true,
     audioGain: 0.7,
     audioCooldown: 0.10,
+
+    // romance/chime/tail macros
+    meteorRomance: 0.62,
+    meteorChime: 0.58,
+    meteorTail: 0.64,
   };
 
   // -------------------------
@@ -101,6 +106,10 @@ export function createMeteorSystem({
     life: 1,
     seed: Math.random(),
     hue: 0.9,
+    side: new THREE.Vector3(1, 0, 0),
+    curvePhase: 0,
+    curveAmp: 0,
+    curveFreq: 1.0,
     head: null,   // mesh
     ribbon: null, // mesh
   }));
@@ -377,6 +386,7 @@ export function createMeteorSystem({
     m.alive = true;
     m.start.set(sx, sy, sz);
     m.dir.set(dx, 0, dz).normalize();
+    m.side.set(m.dir.z, 0, -m.dir.x).normalize();
     m.speed = speed;
     m.birth = now;
     m.life = lifeT;
@@ -408,6 +418,9 @@ export function createMeteorSystem({
     // ribbon flow variation (per meteor)
     m._ribbonHueRange = lerp(0.06, 0.24, lerp(0.2, 1.0, V) * Math.random());
     m._ribbonHueSpeed = lerp(0.35, 1.35, lerp(0.2, 1.0, V) * Math.random());
+    m.curvePhase = Math.random() * Math.PI * 2.0;
+    m.curveFreq = lerp(0.85, 1.55, Math.random());
+    m.curveAmp = lerp(0.04, 0.22, Math.random()) * lerp(0.25, 1.0, params.meteorRomance);
 
 
     m.head.visible = true;
@@ -427,7 +440,15 @@ export function createMeteorSystem({
     // audio
     if (params.audioEnabled && onSpawn && now - lastSpawnT > params.audioCooldown) {
       lastSpawnT = now;
-      onSpawn({ hue: m.hue, gain: params.audioGain, speed, life: lifeT });
+      onSpawn({
+        hue: m.hue,
+        gain: params.audioGain,
+        speed,
+        life: lifeT,
+        romance: params.meteorRomance,
+        chime: params.meteorChime,
+        tail: params.meteorTail,
+      });
     }
   }
 
@@ -441,7 +462,11 @@ export function createMeteorSystem({
     const emitPerSec = THREE.MathUtils.lerp(60, 260, (params.strandCount - 4) / 12);
     const emitN = Math.max(1, Math.floor(emitPerSec * dt));
 
-    const tailLife = THREE.MathUtils.clamp(params.tailLength * 0.22, 0.18, 1.4);
+    const tailLife = THREE.MathUtils.clamp(
+      params.tailLength * 0.22 * lerp(0.9, 1.9, params.meteorTail),
+      0.20,
+      2.2
+    );
 
     for (let n = 0; n < emitN; n++) {
       const i = (pCursor++) % MAX_P;
@@ -476,13 +501,14 @@ export function createMeteorSystem({
       birth[i] = now;
       life[i] = tailLife * THREE.MathUtils.lerp(0.75, 1.25, Math.random());
 
-      const base = params.tailSize;
+      const base = params.tailSize * lerp(0.95, 1.40, params.meteorTail);
       siz[i] = base * THREE.MathUtils.lerp(0.7, 1.25, Math.random());
 
       const [r, g, b] = hsv2rgb(meteorHue, 0.65, 1.0);
-      col[i * 3 + 0] = r * params.tailGlow;
-      col[i * 3 + 1] = g * params.tailGlow;
-      col[i * 3 + 2] = b * params.tailGlow;
+      const glowMul = params.tailGlow * lerp(0.95, 1.35, params.meteorRomance);
+      col[i * 3 + 0] = r * glowMul;
+      col[i * 3 + 1] = g * glowMul;
+      col[i * 3 + 2] = b * glowMul;
 
       seed[i] = Math.random();
     }
@@ -497,8 +523,8 @@ export function createMeteorSystem({
     // Sync uniforms from params (so GUI can change live)
     const U = ribbon.material.uniforms;
     U.uTime.value = t;
-    U.uAlpha.value = params.ribbonAlpha;
-    U.uGlow.value = params.ribbonGlow;
+    U.uAlpha.value = params.ribbonAlpha * lerp(0.95, 1.18, params.meteorRomance);
+    U.uGlow.value = params.ribbonGlow * lerp(0.95, 1.28, params.meteorRomance);
     U.uHueSpeed.value = params.ribbonHueSpeed;
     U.uHueRange.value = params.ribbonHueRange;
     U.uSoftEdge.value = params.ribbonSoftEdge;
@@ -590,9 +616,15 @@ export function createMeteorSystem({
       }
 
       // head position
+      const u = THREE.MathUtils.clamp(age / Math.max(1e-5, m.life), 0, 1);
+      const speedBreath = 0.92 + 0.12 * Math.sin(u * Math.PI);
+      const curve = Math.sin(u * Math.PI * m.curveFreq + m.curvePhase) * m.curveAmp * (1.0 - u * 0.55);
+      const yFloat = Math.sin(u * Math.PI * 2.0 + m.curvePhase) * (0.04 + 0.05 * params.meteorRomance);
       const headPos = new THREE.Vector3()
         .copy(m.start)
-        .addScaledVector(m.dir, m.speed * age);
+        .addScaledVector(m.dir, m.speed * age * speedBreath)
+        .addScaledVector(m.side, curve)
+        .add(new THREE.Vector3(0, yFloat, 0));
 
       m.head.position.copy(headPos);
       m.head.scale.setScalar(params.headSize);
@@ -600,7 +632,7 @@ export function createMeteorSystem({
       // head brightness
       const [hr, hg, hb] = hsv2rgb(m.hue, 0.75, 1.0);
       const headCol = new THREE.Color(hr, hg, hb);
-      headCol.multiplyScalar(params.headGlow * (m._headGlowMul ?? 1.0));
+      headCol.multiplyScalar(params.headGlow * (m._headGlowMul ?? 1.0) * lerp(0.92, 1.22, params.meteorRomance));
       m.head.material.color.copy(headCol);
       m.head.scale.setScalar(params.headSize * (m._headSizeMul ?? 1.0));
 
@@ -613,8 +645,8 @@ export function createMeteorSystem({
     }
 
     // update particles (cpu)
-    const drag = params.tailDrag;
-    const wob = params.tailWobble;
+    const drag = params.tailDrag * lerp(1.10, 0.86, params.meteorTail);
+    const wob = params.tailWobble * lerp(0.90, 1.45, params.meteorRomance);
 
     for (let i = 0; i < MAX_P; i++) {
       const a = t - birth[i];
