@@ -38,9 +38,19 @@ function loadState(defaults) {
       flowDetail: clamp01(Number(s.flowDetail ?? defaults.flowDetail)),
       darkSpace: clamp01(Number(s.darkSpace ?? defaults.darkSpace)),
       localColorLift: clamp01(Number(s.localColorLift ?? defaults.localColorLift)),
-      starBreath: clamp01(Number(s.starBreath ?? defaults.starBreath)),
-      starBling: clamp01(Number(s.starBling ?? defaults.starBling)),
-      starSoftness: clamp01(Number(s.starSoftness ?? defaults.starSoftness)),
+      starBreath: clamp01(
+        Number(
+          s.starBreath ??
+          (
+            Number.isFinite(Number(s.starBling)) || Number.isFinite(Number(s.starSoftness))
+              ? Math.max(
+                  Number.isFinite(Number(s.starBling)) ? Number(s.starBling) : 0,
+                  Number.isFinite(Number(s.starSoftness)) ? Number(s.starSoftness) : 0
+                )
+              : defaults.starBreath
+          )
+        )
+      ),
       starSize: clampRange(
         Number.isFinite(Number(s.starSize))
           ? (Number(s.starSize) <= 1 ? (4 + Number(s.starSize) * 20) : Number(s.starSize))
@@ -67,8 +77,6 @@ function saveState(state) {
         darkSpace: clamp01(state.darkSpace),
         localColorLift: clamp01(state.localColorLift),
         starBreath: clamp01(state.starBreath),
-        starBling: clamp01(state.starBling),
-        starSoftness: clamp01(state.starSoftness),
         starSize: clampRange(state.starSize, 2, 28),
       })
     );
@@ -147,8 +155,6 @@ export function createBackgroundDockPanel({ bg }) {
     darkSpace: 0.70,
     localColorLift: 0.62,
     starBreath: 0.60,
-    starBling: 0.58,
-    starSoftness: 0.76,
     starSize: 16,
   };
   const state = loadState(defaults);
@@ -279,20 +285,6 @@ export function createBackgroundDockPanel({ bg }) {
   });
   starBreathRow.sync(state.starBreath);
 
-  const starBlingRow = makeRange(body, "Star Bling", state.starBling, (v, sync) => {
-    state.starBling = v;
-    sync(v);
-    saveState(state);
-  });
-  starBlingRow.sync(state.starBling);
-
-  const starSoftnessRow = makeRange(body, "Star Softness", state.starSoftness, (v, sync) => {
-    state.starSoftness = v;
-    sync(v);
-    saveState(state);
-  });
-  starSoftnessRow.sync(state.starSoftness);
-
   const starSizeRow = makeNumber(body, "Star Size", state.starSize, 2, 28, 0.5, (v, sync) => {
     state.starSize = clampRange(v, 2, 28);
     sync(v);
@@ -381,12 +373,6 @@ export function createBackgroundDockPanel({ bg }) {
     },
     getStarBreath() {
       return state.starBreath;
-    },
-    getStarBling() {
-      return state.starBling;
-    },
-    getStarSoftness() {
-      return state.starSoftness;
     },
     getStarSize() {
       return state.starSize;

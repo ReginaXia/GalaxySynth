@@ -1617,14 +1617,14 @@ const hasNebulaHit = !!nebulaHit;
   stars.rotation.y += dt * 0.018;
   stars.rotation.x = Math.sin(t * 0.03) * 0.03;
   const starBreathUi = THREE.MathUtils.clamp(backgroundDockUI?.getStarBreath?.() ?? 0.60, 0, 1);
-  const starBlingUi = THREE.MathUtils.clamp(backgroundDockUI?.getStarBling?.() ?? 0.58, 0, 1);
-  const starSoftnessUi = THREE.MathUtils.clamp(backgroundDockUI?.getStarSoftness?.() ?? 0.76, 0, 1);
   const starSizeUi = THREE.MathUtils.clamp(backgroundDockUI?.getStarSize?.() ?? 16, 2, 28);
+  const derivedBling = THREE.MathUtils.lerp(0.0, 0.10, starBreathUi);
+  const derivedSoftness = THREE.MathUtils.lerp(0.0, 0.12, starBreathUi);
   stars.material.uniforms.uBreath.value = starBreathUi;
-  stars.material.uniforms.uBling.value = starBlingUi;
-  stars.material.uniforms.uSoftness.value = starSoftnessUi;
-  stars.material.uniforms.uCross.value = THREE.MathUtils.lerp(0.22, 0.82, starBlingUi);
-  stars.material.uniforms.uOpacity.value = THREE.MathUtils.lerp(0.44, 0.86, starBlingUi);
+  stars.material.uniforms.uBling.value = derivedBling;
+  stars.material.uniforms.uSoftness.value = derivedSoftness;
+  stars.material.uniforms.uCross.value = THREE.MathUtils.lerp(0.10, 0.24, starBreathUi);
+  stars.material.uniforms.uOpacity.value = THREE.MathUtils.lerp(0.58, 0.92, starBreathUi);
   stars.material.uniforms.uBaseSize.value = getStarBaseSize(starSizeUi);
 
   // --- nebula & meteor
