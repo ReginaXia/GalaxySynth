@@ -295,7 +295,8 @@ float ink = pulse * inkFall;
   vec3 c1 = palette4(palettePhase + 0.28 + sheen * 0.62 + (g - 0.5) * 0.30);
   vec3 cInk = palette4(palettePhase + 0.58 + uNoteSeed * 0.07);
   float strictK = saturate(uNoteColorStrict);
-  cInk = mix(cInk, uNoteColor, saturate(uNoteColorMix) * mix(0.42 + 0.58 * ink, 0.85, strictK));
+  float noteImpact = saturate(uNoteColorMix);
+  cInk = mix(cInk, uNoteColor, noteImpact * (0.42 + 0.58 * ink));
 
   // Step 3: coexisting spectral fields (no global hue replacement).
   vec3 spectralDeepBlue = vec3(0.12, 0.22, 0.56);
@@ -348,7 +349,7 @@ float ink = pulse * inkFall;
 
   // Strict note color should influence not only emitter but also local spectral field.
   float noteProx = exp(-d * 7.2);
-  float noteColorK = saturate(uNoteColorMix) * mix(0.42, 0.96, strictK);
+  float noteColorK = noteImpact * (0.48 + 0.46 * noteImpact);
   c0 = mix(c0, mix(c0, uNoteColor, 0.70), noteProx * noteColorK * 0.30);
   c1 = mix(c1, mix(c1, uNoteColor, 0.82), noteProx * noteColorK * 0.38);
   spectralCol = mix(spectralCol, uNoteColor, noteProx * noteColorK * 0.24);
@@ -365,9 +366,20 @@ float ink = pulse * inkFall;
   col = mix(col, c0, wCloud);
   col = mix(col, c1, wSheen);
   col = mix(col, cInk, wInk);
-  float noteTintMask = inkFall * mix(0.30 + 0.70 * pulse, 0.92, strictK);
-  col = mix(col, col + uNoteColor * mix(0.58, 0.95, strictK), noteTintMask * saturate(uNoteColorMix) * mix(0.52, 0.92, strictK));
+  float noteTintMask = inkFall * (0.30 + 0.70 * pulse);
+  col = mix(col, col + uNoteColor * 0.82, noteTintMask * noteImpact * 0.78);
   col = mix(col, spectralCol, (0.022 + 0.080 * materialRidge) * (0.35 + 0.62 * e) * (0.26 + 0.56 * fres));
+
+  // Stronger local note color presence: liquid injection + halo ring.
+  float liquidInjection = pow(noteProx, 1.10) * (0.30 + 0.70 * energy) * (0.28 + 0.72 * bandEdge);
+  vec3 liquidCol = mix(uNoteColor, spectralCol, 0.22);
+  col += liquidCol * liquidInjection * noteImpact * 0.40;
+
+  float haloInner = exp(-d * 16.0);
+  float haloOuter = exp(-d * 3.2);
+  float haloRing = max(0.0, haloOuter - haloInner);
+  vec3 haloCol = mix(uNoteColor, vec3(1.00, 0.72, 0.46), 0.12);
+  col += haloCol * haloRing * (0.22 + 0.55 * pulse + 0.22 * energy) * noteImpact * 0.96;
 
   // Richer iridescent micro-structure without global overbright fog.
   float filamentMask = filament * (0.36 + 0.64 * materialRidge) * (0.32 + 0.68 * fres) * (0.28 + 0.72 * bandEdge);
@@ -376,6 +388,8 @@ float ink = pulse * inkFall;
   col += mix(c0, spectralCol, 0.42) * filamentHi * (0.03 + 0.13 * rich) * (0.30 + 0.70 * materialRidge);
   vec3 veinCol = mix(c0, spectralCol, 0.68);
   col += veinCol * vein * (0.03 + 0.11 * rich) * (0.60 + 0.40 * e) * (0.26 + 0.74 * materialRidge);
+  float contour = smoothstep(0.40, 0.78, band2) - smoothstep(0.78, 0.96, band2);
+  col += mix(c0, c1, 0.50) * contour * (0.05 + 0.14 * rich) * (0.55 + 0.45 * e);
 
   // Local "cosmic sunset" glow injection from note color (localized only).
   vec3 warmSunset = vec3(1.00, 0.62, 0.36);
@@ -383,7 +397,7 @@ float ink = pulse * inkFall;
   float sunsetCore = exp(-d * 10.5) * (0.45 + 0.55 * pulse);
   float sunsetHalo = exp(-d * 4.8) * (0.20 + 0.80 * energy);
   float sunsetMask = (sunsetCore * 0.75 + sunsetHalo * 0.25) * saturate(uNoteColorMix);
-  col += sunsetTint * sunsetMask * mix(0.22, 0.46, strictK);
+  col += sunsetTint * sunsetMask * 0.28;
 
   // Nebula-local color emitters: spatial "light-up" feel near interaction points.
   vec2 e0v = (uv - uEmitPos0) * vec2(1.06, 1.0);
@@ -398,7 +412,7 @@ float ink = pulse * inkFall;
   vec3 emitCol = uEmitCol0 * e0g + uEmitCol1 * e1g + uEmitCol2 * e2g;
   float emitMask = saturate(e0g + e1g + e2g);
   float emitSheen = (0.38 + 0.62 * fres) * (0.30 + 0.70 * materialRidge);
-  col += emitCol * (0.30 + 0.62 * emitSheen + (0.22 + 0.35 * strictK) * saturate(uNoteColorMix));
+  col += emitCol * (0.30 + 0.62 * emitSheen + 0.46 * noteImpact);
   col = mix(col, col + emitCol * mix(0.14, 0.26, dreamy), emitMask * mix(0.18, 0.30, dreamy));
 
   // Deep pockets with subtle chroma breathing to avoid flatness on large displays.
@@ -408,7 +422,7 @@ float ink = pulse * inkFall;
 
   // Preserve dark separations so motion reads as fine flow, not full-screen wash.
   float darkGap = (1.0 - materialRidge) * (0.45 + 0.55 * (1.0 - band));
-  col *= (1.0 - darkGap * 0.12);
+  col *= (1.0 - darkGap * 0.18);
 
   float sp = 0.0;
   if (uSparkle > 0.001){
@@ -424,7 +438,7 @@ float ink = pulse * inkFall;
   // Dreamy soft glow only around edges/highlight structures (keeps color coordinated).
   float dreamMask = (0.25 + 0.75 * fres) * (0.35 + 0.65 * materialRidge);
   vec3 dreamCol = mix(spectralCol, vec3(0.62, 0.56, 0.78), 0.18);
-  col = mix(col, col + dreamCol * 0.20, dreamy * dreamMask * (0.22 + 0.22 * e));
+  col = mix(col, col + dreamCol * 0.12, dreamy * dreamMask * (0.14 + 0.16 * e));
 
   vec3 satCol = applySaturation(col, 1.12 + uSat * 1.24);
   float satMaskRidge = pow(saturate(materialRidge), 1.1);

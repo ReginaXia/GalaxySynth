@@ -12,7 +12,6 @@ const DEFAULT_COLORS = [
 ];
 const DEFAULTS = {
   mix: 0.52,
-  strict: false,
   pearl: 0.62,
   glow: 0.56,
   richness: 0.58,
@@ -40,7 +39,6 @@ function loadState() {
     return {
       colors: p.colors.slice(0, 7),
       mix: clamp01(Number(p.mix ?? DEFAULTS.mix)),
-      strict: !!p.strict,
       pearl: clamp01(Number(p.pearl ?? DEFAULTS.pearl)),
       glow: clamp01(Number(p.glow ?? DEFAULTS.glow)),
       richness: clamp01(Number(p.richness ?? DEFAULTS.richness)),
@@ -58,7 +56,6 @@ function saveState(state) {
       JSON.stringify({
         colors: state.colors,
         mix: clamp01(state.mix),
-        strict: !!state.strict,
         pearl: clamp01(state.pearl),
         glow: clamp01(state.glow),
         richness: clamp01(state.richness),
@@ -107,7 +104,6 @@ export function createNoteColorPanel() {
   const state = {
     colors: saved?.colors ?? [...DEFAULT_COLORS],
     mix: saved?.mix ?? DEFAULTS.mix,
-    strict: saved?.strict ?? DEFAULTS.strict,
     pearl: saved?.pearl ?? DEFAULTS.pearl,
     glow: saved?.glow ?? DEFAULTS.glow,
     richness: saved?.richness ?? DEFAULTS.richness,
@@ -161,47 +157,17 @@ export function createNoteColorPanel() {
     colorInputs.push(input);
   }
 
-  makeRangeRow(root, "Note Color Mix", state.mix, (v, sync) => {
-    state.mix = v;
-    sync(v);
-    saveState(state);
-  });
+  const hint = document.createElement("div");
+  hint.textContent = "Note color strength is driven by Color Blend";
+  hint.style.cssText = "margin-top:8px; font-size:11px; opacity:.72;";
+  root.appendChild(hint);
 
-  const strictWrap = document.createElement("label");
-  strictWrap.style.cssText = "display:flex; align-items:center; gap:6px; margin-top:8px; opacity:0.95;";
-  const strictInput = document.createElement("input");
-  strictInput.type = "checkbox";
-  strictInput.checked = !!state.strict;
-  strictInput.addEventListener("change", () => {
-    state.strict = !!strictInput.checked;
-    saveState(state);
-  });
-  const strictText = document.createElement("span");
-  strictText.textContent = "Strict Note Color";
-  strictWrap.appendChild(strictInput);
-  strictWrap.appendChild(strictText);
-  root.appendChild(strictWrap);
-
-  const pearlRow = makeRangeRow(root, "Pearl", state.pearl, (v, sync) => {
-    state.pearl = v;
-    sync(v);
-    saveState(state);
-  });
-  const glowRow = makeRangeRow(root, "Glow", state.glow, (v, sync) => {
-    state.glow = v;
-    sync(v);
-    saveState(state);
-  });
-  const richnessRow = makeRangeRow(root, "Richness", state.richness, (v, sync) => {
-    state.richness = v;
-    sync(v);
-    saveState(state);
-  });
-  const dreamRow = makeRangeRow(root, "Dream", state.dream, (v, sync) => {
-    state.dream = v;
-    sync(v);
-    saveState(state);
-  });
+  // Keep these as internal defaults for stable look tuning.
+  // They are intentionally not exposed as sliders in the minimal UI.
+  state.pearl = DEFAULTS.pearl;
+  state.glow = DEFAULTS.glow;
+  state.richness = DEFAULTS.richness;
+  state.dream = DEFAULTS.dream;
 
   const actions = document.createElement("div");
   actions.style.cssText = "display:flex; gap:8px; margin-top:9px;";
@@ -217,16 +183,10 @@ export function createNoteColorPanel() {
       colorInputs[i].value = state.colors[i];
     }
     state.mix = DEFAULTS.mix;
-    state.strict = DEFAULTS.strict;
     state.pearl = DEFAULTS.pearl;
     state.glow = DEFAULTS.glow;
     state.richness = DEFAULTS.richness;
     state.dream = DEFAULTS.dream;
-    strictInput.checked = !!state.strict;
-    pearlRow.sync(state.pearl);
-    glowRow.sync(state.glow);
-    richnessRow.sync(state.richness);
-    dreamRow.sync(state.dream);
     saveState(state);
   });
   actions.appendChild(resetBtn);
@@ -237,9 +197,6 @@ export function createNoteColorPanel() {
     root,
     getMix() {
       return state.mix;
-    },
-    isStrict() {
-      return state.strict;
     },
     getPearl() {
       return state.pearl;

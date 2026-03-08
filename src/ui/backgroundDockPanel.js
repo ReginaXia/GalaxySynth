@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { BACKGROUND_PALETTES } from "../background/dreamyBackground";
 
 const STORAGE_KEY = "GalaxySynth_BackgroundDock_v1";
 
@@ -25,8 +26,15 @@ function loadState(defaults) {
       x: Number.isFinite(s.x) ? s.x : defaults.x,
       y: Number.isFinite(s.y) ? s.y : defaults.y,
       collapsed: !!s.collapsed,
-      harmony: clamp01(Number(s.harmony ?? defaults.harmony)),
-      notePresence: clamp01(Number(s.notePresence ?? defaults.notePresence)),
+      colorBlend: clamp01(
+        Number(
+          s.colorBlend ??
+          (Number.isFinite(s.notePresence) ? s.notePresence : defaults.colorBlend)
+        )
+      ),
+      flowDetail: clamp01(Number(s.flowDetail ?? defaults.flowDetail)),
+      darkSpace: clamp01(Number(s.darkSpace ?? defaults.darkSpace)),
+      localColorLift: clamp01(Number(s.localColorLift ?? defaults.localColorLift)),
     };
   } catch {
     return defaults;
@@ -41,8 +49,10 @@ function saveState(state) {
         x: state.x,
         y: state.y,
         collapsed: !!state.collapsed,
-        harmony: clamp01(state.harmony),
-        notePresence: clamp01(state.notePresence),
+        colorBlend: clamp01(state.colorBlend),
+        flowDetail: clamp01(state.flowDetail),
+        darkSpace: clamp01(state.darkSpace),
+        localColorLift: clamp01(state.localColorLift),
       })
     );
   } catch {}
@@ -80,7 +90,15 @@ function makeRange(root, name, init, onChange) {
 }
 
 export function createBackgroundDockPanel({ bg }) {
-  const defaults = { x: window.innerWidth - 300, y: 76, collapsed: false, harmony: 0.62, notePresence: 0.64 };
+  const defaults = {
+    x: window.innerWidth - 300,
+    y: 76,
+    collapsed: false,
+    colorBlend: 0.72,
+    flowDetail: 0.62,
+    darkSpace: 0.70,
+    localColorLift: 0.62,
+  };
   const state = loadState(defaults);
 
   const root = document.createElement("div");
@@ -121,9 +139,36 @@ export function createBackgroundDockPanel({ bg }) {
   root.appendChild(body);
 
   const info = document.createElement("div");
-  info.textContent = "Mother palette + note harmony";
+  info.textContent = "Tune depth, texture, and local note color injection";
   info.style.cssText = "font-size:11px; opacity:.72; margin-bottom:6px;";
   body.appendChild(info);
+
+  const presetWrap = document.createElement("div");
+  presetWrap.style.cssText = "display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;";
+  body.appendChild(presetWrap);
+
+  const makePresetBtn = (name, key, colorBlend) => {
+    const btn = document.createElement("button");
+    btn.textContent = name;
+    btn.style.cssText = "border:0; border-radius:7px; padding:4px 7px; cursor:pointer; color:#eaf0ff; background:rgba(68,88,156,.38); font:11px/1.1 'IBM Plex Sans','Segoe UI',ui-sans-serif,sans-serif;";
+    btn.addEventListener("click", () => {
+      const colors = BACKGROUND_PALETTES[key]?.colors;
+      if (colors?.length >= 4) {
+        bg.uniforms.uPal0.value.copy(hexToV3(colors[0]));
+        bg.uniforms.uPal1.value.copy(hexToV3(colors[1]));
+        bg.uniforms.uPal2.value.copy(hexToV3(colors[2]));
+        bg.uniforms.uPal3.value.copy(hexToV3(colors[3]));
+      }
+      state.colorBlend = colorBlend;
+      blendRow.sync(state.colorBlend);
+      saveState(state);
+    });
+    presetWrap.appendChild(btn);
+  };
+  makePresetBtn("Aurora", "aurora", 0.66);
+  makePresetBtn("Cosmic", "cosmic", 0.58);
+  makePresetBtn("Sunset", "candy", 0.82);
+  makePresetBtn("Pearl", "pearl", 0.48);
 
   const colorGrid = document.createElement("div");
   colorGrid.style.cssText = "display:grid; grid-template-columns:1fr 48px; gap:6px 8px;";
@@ -147,18 +192,33 @@ export function createBackgroundDockPanel({ bg }) {
     colorGrid.appendChild(input);
   }
 
-  const harmonyRow = makeRange(body, "Harmony", state.harmony, (v, sync) => {
-    state.harmony = v;
+  const blendRow = makeRange(body, "Color Blend", state.colorBlend, (v, sync) => {
+    state.colorBlend = v;
     sync(v);
     saveState(state);
   });
-  const presenceRow = makeRange(body, "Note Presence", state.notePresence, (v, sync) => {
-    state.notePresence = v;
+  blendRow.sync(state.colorBlend);
+
+  const flowDetailRow = makeRange(body, "Flow Detail", state.flowDetail, (v, sync) => {
+    state.flowDetail = v;
     sync(v);
     saveState(state);
   });
-  harmonyRow.sync(state.harmony);
-  presenceRow.sync(state.notePresence);
+  flowDetailRow.sync(state.flowDetail);
+
+  const darkSpaceRow = makeRange(body, "Dark Space", state.darkSpace, (v, sync) => {
+    state.darkSpace = v;
+    sync(v);
+    saveState(state);
+  });
+  darkSpaceRow.sync(state.darkSpace);
+
+  const localColorLiftRow = makeRange(body, "Local Color Lift", state.localColorLift, (v, sync) => {
+    state.localColorLift = v;
+    sync(v);
+    saveState(state);
+  });
+  localColorLiftRow.sync(state.localColorLift);
 
   foldBtn.addEventListener("click", () => {
     state.collapsed = !state.collapsed;
@@ -227,11 +287,17 @@ export function createBackgroundDockPanel({ bg }) {
 
   return {
     root,
-    getHarmony() {
-      return state.harmony;
+    getColorBlend() {
+      return state.colorBlend;
     },
-    getNotePresence() {
-      return state.notePresence;
+    getFlowDetail() {
+      return state.flowDetail;
+    },
+    getDarkSpace() {
+      return state.darkSpace;
+    },
+    getLocalColorLift() {
+      return state.localColorLift;
     },
     setVisible(v) {
       root.style.display = v ? "" : "none";

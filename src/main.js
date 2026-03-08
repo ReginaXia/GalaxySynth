@@ -736,7 +736,7 @@ function readUiState() {
         visible: true,
         showcase: false,
         showPlay: true,
-        showLook: true,
+        showLook: false,
         showAudio: false,
         showDebug: false,
         showTransport: true,
@@ -757,7 +757,7 @@ function readUiState() {
       visible: true,
       showcase: false,
       showPlay: true,
-      showLook: true,
+      showLook: false,
       showAudio: false,
       showDebug: false,
       showTransport: true,
@@ -856,14 +856,55 @@ const uiHubDock = createDockPanel({
   zIndex: 10001,
   showHideButton: false,
 });
-const noteDock = createDockPanel({
-  id: "note",
-  title: "Performance",
-  contentEl: noteColorUI.root,
+const colorSystemContent = document.createElement("div");
+colorSystemContent.className = "custom-ui color-system-content";
+colorSystemContent.style.cssText = "display:grid; gap:10px;";
+for (const panelEl of [backgroundDockUI.root, noteColorUI.root]) {
+  panelEl.style.position = "static";
+  panelEl.style.left = "";
+  panelEl.style.right = "";
+  panelEl.style.top = "";
+  panelEl.style.bottom = "";
+  panelEl.style.width = "100%";
+  panelEl.style.padding = "8px 10px";
+  panelEl.style.borderRadius = "10px";
+  panelEl.style.background = "rgba(16,20,34,0.48)";
+  panelEl.style.border = "1px solid rgba(165,196,255,.12)";
+  panelEl.style.boxShadow = "none";
+  panelEl.style.backdropFilter = "none";
+  panelEl.style.margin = "0";
+  colorSystemContent.appendChild(panelEl);
+}
+// Compact section styling inside a single Color System dock.
+const bgHead = backgroundDockUI.root.firstElementChild;
+const bgBody = bgHead?.nextElementSibling;
+if (bgHead && bgBody) {
+  bgHead.style.display = "none";
+  bgBody.style.display = "";
+  bgBody.style.marginTop = "0";
+}
+const noteTitle = noteColorUI.root.firstElementChild;
+if (noteTitle) {
+  noteTitle.style.display = "none";
+}
+const colorSections = [
+  { el: backgroundDockUI.root, label: "Background Tone" },
+  { el: noteColorUI.root, label: "Note Response" },
+];
+for (const sec of colorSections) {
+  const chip = document.createElement("div");
+  chip.textContent = sec.label;
+  chip.style.cssText = "font:600 11px/1.2 'IBM Plex Sans','Segoe UI',ui-sans-serif,sans-serif; letter-spacing:.3px; opacity:.82; margin-bottom:6px;";
+  sec.el.insertBefore(chip, sec.el.firstChild);
+}
+const colorDock = createDockPanel({
+  id: "color",
+  title: "Color System",
+  contentEl: colorSystemContent,
   x: window.innerWidth - 320,
   y: 182,
   width: 300,
-  minHeight: 140,
+  minHeight: 180,
   zIndex: 9998,
 });
 const audioDock = createDockPanel({
@@ -931,8 +972,7 @@ function applyUiState() {
   const showTransport = uiState.visible && uiState.showTransport;
 
   if (uiState.showcase) {
-    noteDock?.setVisible?.(uiState.visible);
-    backgroundDockUI?.setVisible?.(false);
+    colorDock?.setVisible?.(uiState.visible);
     audioDock?.setVisible?.(false);
     debugDock?.setVisible?.(false);
     noteOverlay.style.display = "none";
@@ -943,8 +983,7 @@ function applyUiState() {
     if (tempoRingEl2) tempoRingEl2.style.display = uiState.visible ? "" : "none";
     if (stepRingEl2) stepRingEl2.style.display = uiState.visible ? "" : "none";
   } else {
-    noteDock?.setVisible?.(showPlay);
-    backgroundDockUI?.setVisible?.(showLook);
+    colorDock?.setVisible?.(showPlay || showLook);
     audioDock?.setVisible?.(showAudio);
     debugDock?.setVisible?.(showDebug);
     noteOverlay.style.display = showDebug ? "" : "none";
@@ -1775,6 +1814,14 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     const glowUi = THREE.MathUtils.clamp(noteColorUI?.getGlow?.() ?? 0.56, 0, 1);
     const richnessUi = THREE.MathUtils.clamp(noteColorUI?.getRichness?.() ?? 0.58, 0, 1);
     const dreamUi = THREE.MathUtils.clamp(noteColorUI?.getDream?.() ?? 0.52, 0, 1);
+    const flowDetailUi = THREE.MathUtils.clamp(backgroundDockUI?.getFlowDetail?.() ?? 0.62, 0, 1);
+    const darkSpaceUi = THREE.MathUtils.clamp(backgroundDockUI?.getDarkSpace?.() ?? 0.70, 0, 1);
+    const localColorLiftUi = THREE.MathUtils.clamp(backgroundDockUI?.getLocalColorLift?.() ?? 0.62, 0, 1);
+    const screenMax = Math.max(window.innerWidth, window.innerHeight);
+    const largeScreenBoost = THREE.MathUtils.clamp((screenMax - 1600) / 1800, 0, 1);
+    const detailCurve = Math.pow(flowDetailUi, 0.82);
+    const highZone = THREE.MathUtils.clamp((flowDetailUi - 0.55) / 0.45, 0, 1);
+    const detailBoost = 1.0 + largeScreenBoost * highZone * 0.45;
 
     const scratchVel01 = THREE.MathUtils.clamp((sScratch?.velocity ?? 0) / 1.2, 0, 1);
     const isPlaying = !!(pointerDown && isActiveNebulaHovered);
@@ -1796,7 +1843,7 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     );
     // ~1-2s decay when no interaction
     bgInteractionE = __bgRiseFall(bgInteractionE, interactionTarget, dt, 16.0, 0.9);
-    bgLastEmitE = __bgRiseFall(bgLastEmitE, 0.0, dt, 10.0, 0.75);
+    bgLastEmitE = __bgRiseFall(bgLastEmitE, 0.0, dt, 10.0, 0.45);
 
     // Smooth pitch/vel/theta (prefer scratch state; fallback to bgDrive)
     const targetPitch = (typeof sScratch?.pitch01 === "number") ? sScratch.pitch01 : bgDrive.pitch01;
@@ -1810,15 +1857,51 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     // Directly drive visible flow/brightness response (keeps click + hold responsive).
     const flowTarget = THREE.MathUtils.clamp((0.020 + bgLeadE * 0.90 + bgClickPulseVis * 0.62) * (0.80 + 0.35 * glowUi) * (0.92 + 0.22 * richnessUi), 0, 1.12);
     const sparkleTarget = THREE.MathUtils.clamp((0.005 + bgLeadE * 0.16 + bgClickPulseVis * 0.15) * (0.62 + 0.52 * glowUi), 0, 0.28);
-    const satTarget = THREE.MathUtils.clamp(0.26 + bgLeadE * 0.46 + bgClickPulseVis * 0.24 + dreamUi * 0.10, 0.22, 0.96);
+    const satTargetRaw = 0.24 + bgLeadE * 0.44 + bgClickPulseVis * 0.22 + dreamUi * 0.10;
+    const satTarget = THREE.MathUtils.clamp(
+      satTargetRaw * (1.0 - 0.24 * darkSpaceUi),
+      0.16,
+      THREE.MathUtils.lerp(0.96, 0.80, darkSpaceUi)
+    );
     // auto-dim to keep nebula readable
     const readabilityLimiter = interactionNow ? 0.84 : 0.92;
-    const intensityTarget = THREE.MathUtils.clamp((0.010 + bgLeadE * 0.42 + bgClickPulseVis * 0.22) * readabilityLimiter * (0.64 + 0.56 * glowUi), 0.01, 0.56);
+    const darkCalmDim = THREE.MathUtils.lerp(1.0, 0.46, darkSpaceUi);
+    const darkInteractionLift = THREE.MathUtils.lerp(0.0, 0.36, darkSpaceUi) * (0.55 * bgInteractionE + 0.45 * bgClickPulseVis);
+    const darkGain = THREE.MathUtils.clamp(darkCalmDim + darkInteractionLift, 0.28, 1.0);
+    const intensityTarget = THREE.MathUtils.clamp(
+      (0.010 + bgLeadE * 0.42 + bgClickPulseVis * 0.22) * readabilityLimiter * (0.64 + 0.56 * glowUi) * darkGain,
+      0.006,
+      0.56
+    );
     bg.uniforms.uFlow.value = __bgRiseFall(bg.uniforms.uFlow.value, flowTarget, dt, 12.0, 1.5);
     bg.uniforms.uSparkle.value = __bgRiseFall(bg.uniforms.uSparkle.value, sparkleTarget * (0.86 + 0.28 * richnessUi), dt, 12.0, 1.6);
     bg.uniforms.uSat.value = __bgRiseFall(bg.uniforms.uSat.value, satTarget, dt, 10.0, 2.2);
     bg.uniforms.uPearl.value = __bgRiseFall(bg.uniforms.uPearl.value, 0.28 + pearlUi * 1.02, dt, 8.0, 4.0);
     bg.uniforms.uIntensity.value = __bgRiseFall(bg.uniforms.uIntensity.value, intensityTarget, dt, 11.0, 1.4);
+    const contrastTarget = THREE.MathUtils.clamp(
+      THREE.MathUtils.lerp(0.96, 1.24, darkSpaceUi) + localColorLiftUi * 0.03,
+      0.9,
+      1.3
+    );
+    bg.uniforms.uContrast.value = __bgRiseFall(bg.uniforms.uContrast.value, contrastTarget, dt, 7.0, 3.0);
+    const detailTarget = THREE.MathUtils.clamp(
+      THREE.MathUtils.lerp(0.24, 1.02, detailCurve) * (0.94 + 0.24 * bgInteractionE) * detailBoost,
+      0.14,
+      1.25
+    );
+    const warpTarget = THREE.MathUtils.clamp(
+      THREE.MathUtils.lerp(0.40, 0.96, detailCurve) * (0.92 + 0.18 * bgInteractionE) * (1.0 + largeScreenBoost * highZone * 0.28),
+      0.25,
+      1.08
+    );
+    const scaleTarget = THREE.MathUtils.clamp(
+      THREE.MathUtils.lerp(0.80, 1.24, detailCurve),
+      0.7,
+      1.35
+    );
+    bg.uniforms.uDetail.value = __bgRiseFall(bg.uniforms.uDetail.value, detailTarget, dt, 7.0, 2.4);
+    bg.uniforms.uWarp.value = __bgRiseFall(bg.uniforms.uWarp.value, warpTarget, dt, 7.5, 2.5);
+    bg.uniforms.uScale.value = __bgRiseFall(bg.uniforms.uScale.value, scaleTarget, dt, 5.8, 2.0);
 
     // Pulse: when step changes while playing
     const stepNow = (typeof sScratch?.step === "number") ? sScratch.step : -1;
@@ -1842,10 +1925,10 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
       const focusIntent = activeIntentNow ?? hoverIntentNow ?? musicState.lastIntent ?? null;
       const activeHue = activeIntentNow?.theta01 ?? bgDrive.noteHue;
       const hoverHue = hoverIntentNow?.theta01 ?? activeHue;
-      const colorMix = noteColorUI?.getMix?.() ?? 0.0;
-      const strictNoteColor = noteColorUI?.isStrict?.() ? 1.0 : 0.0;
-      const harmony = THREE.MathUtils.clamp(backgroundDockUI?.getHarmony?.() ?? 0.62, 0, 1);
-      const notePresence = THREE.MathUtils.clamp(backgroundDockUI?.getNotePresence?.() ?? 0.64, 0, 1);
+      const colorBlend = THREE.MathUtils.clamp(backgroundDockUI?.getColorBlend?.() ?? 0.72, 0, 1);
+      const notePresence = THREE.MathUtils.lerp(0.35, 1.0, colorBlend);
+      const harmony = THREE.MathUtils.lerp(0.70, 0.10, colorBlend);
+      const colorMix = THREE.MathUtils.clamp(0.22 + 0.62 * notePresence, 0, 1);
       const activeStep = (typeof activeIntentNow?.step === "number") ? activeIntentNow.step : -1;
       const hoverStep = (typeof hoverIntentNow?.step === "number") ? hoverIntentNow.step : -1;
       const lastStep = (typeof bgLastEmitStep === "number") ? bgLastEmitStep : -1;
@@ -1858,7 +1941,9 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
       const resolveTone = (baseRgb, customRgb, step, thetaFallback) => {
         const manual = customRgb ? lerp3(baseRgb, customRgb, colorMix) : baseRgb;
         const derived = sampleBackgroundPaletteAt((step >= 0 ? (step % 7) / 7 : thetaFallback));
-        return lerp3(manual, derived, harmony);
+        const harmonyBlend = 0.08 + 0.42 * harmony; // keep note color identifiable
+        const fused = lerp3(manual, derived, harmonyBlend);
+        return lerp3(derived, fused, 0.45 + 0.55 * notePresence);
       };
       const [ar, ag, ab] = resolveTone([ahR, ahG, ahB], activeCustom, activeStep, activeHue);
       const [hr, hg, hb] = resolveTone([hhR, hhG, hhB], hoverCustom, hoverStep, hoverHue);
@@ -1868,25 +1953,44 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
       const focusHue = (typeof focusIntent?.theta01 === "number") ? focusIntent.theta01 : activeHue;
       const focusBase = hsvToRgb(focusHue, 0.62, 1.0);
       const focusRgb = resolveTone(focusBase, focusCustom, focusStep, focusHue);
-      const noteColor = { r: focusRgb[0], g: focusRgb[1], b: focusRgb[2] };
+      const focusRaw = focusCustom ?? focusBase;
+      const focusVisible = lerp3(
+        focusRgb,
+        focusRaw,
+        THREE.MathUtils.clamp(0.35 + 0.58 * notePresence, 0, 1)
+      );
+      const noteColor = { r: focusVisible[0], g: focusVisible[1], b: focusVisible[2] };
       const stableNoteHue = (focusStep >= 0) ? ((focusStep % 7) / 7) : bgNoteHue;
       const glowGain = 0.56 + 0.58 * glowUi;
       const presenceGain = 0.35 + 0.95 * notePresence;
-      const activeStrength = THREE.MathUtils.clamp((bgInteractionE * 0.95 + bgClickPulseVis * 0.25) * glowGain * presenceGain, 0, 1);
-      const hoverStrength = THREE.MathUtils.clamp((hoverIntentNow ? 0.14 : 0.0) * (0.45 + 0.55 * bgInteractionE) * glowGain * presenceGain, 0, 0.24);
-      const lastStrength = THREE.MathUtils.clamp(bgLastEmitE * 0.55 * glowGain * presenceGain, 0, 0.58);
+      const localLift = THREE.MathUtils.lerp(0.72, 1.50, localColorLiftUi);
+      const activeStrength = THREE.MathUtils.clamp((bgInteractionE * 0.95 + bgClickPulseVis * 0.25) * glowGain * presenceGain * localLift, 0, 1);
+      const hoverStrength = THREE.MathUtils.clamp((hoverIntentNow ? 0.14 : 0.0) * (0.45 + 0.55 * bgInteractionE) * glowGain * presenceGain * (0.88 + 0.40 * localColorLiftUi), 0, 0.42);
+      const lastStrength = THREE.MathUtils.clamp(bgLastEmitE * 0.62 * glowGain * presenceGain * (0.92 + 0.46 * localColorLiftUi), 0, 0.86);
       const wrap01 = (v) => ((v % 1) + 1) % 1;
+      const blendTrail = {
+        x: THREE.MathUtils.lerp(bgDrive.notePos.x, bgLastEmitPos.x, 0.58),
+        y: THREE.MathUtils.lerp(bgDrive.notePos.y, bgLastEmitPos.y, 0.58),
+      };
       const sat1 = {
-        x: wrap01(bgDrive.notePos.x + 0.14 * Math.cos((bgTheta01 + 0.08) * Math.PI * 2)),
-        y: wrap01(bgDrive.notePos.y + 0.12 * Math.sin((bgTheta01 + 0.08) * Math.PI * 2)),
+        x: wrap01(blendTrail.x + 0.16 * Math.cos((bgTheta01 + 0.08) * Math.PI * 2)),
+        y: wrap01(blendTrail.y + 0.14 * Math.sin((bgTheta01 + 0.08) * Math.PI * 2)),
       };
       const sat2 = {
-        x: wrap01(bgDrive.notePos.x - 0.18 * Math.cos((bgTheta01 + 0.33) * Math.PI * 2)),
-        y: wrap01(bgDrive.notePos.y - 0.10 * Math.sin((bgTheta01 + 0.33) * Math.PI * 2)),
+        x: wrap01(bgLastEmitPos.x - 0.20 * Math.cos((bgTheta01 + 0.33) * Math.PI * 2)),
+        y: wrap01(bgLastEmitPos.y - 0.12 * Math.sin((bgTheta01 + 0.33) * Math.PI * 2)),
       };
       const [s1r, s1g, s1b] = resolveTone([hr, hg, hb], activeCustom ?? hoverCustom, activeStep >= 0 ? activeStep : hoverStep, hoverHue);
       const [s2r, s2g, s2b] = resolveTone([lr, lg, lb], activeCustom ?? lastCustom, activeStep >= 0 ? activeStep : lastStep, bgLastEmitHue);
-      const satelliteStrength = THREE.MathUtils.clamp(activeStrength * 0.36 + hoverStrength * 0.35 + lastStrength * 0.28, 0, 0.42);
+      const satelliteStrength = THREE.MathUtils.clamp(activeStrength * 0.44 + hoverStrength * 0.40 + lastStrength * 0.42, 0, 0.78);
+      const noteColorMixFinal = THREE.MathUtils.clamp(
+        Math.max(
+          (colorMix * 0.90 + 0.06) * (0.55 + 1.15 * notePresence) * (0.86 + 0.26 * localColorLiftUi),
+          0.22 + 0.58 * notePresence
+        ),
+        0,
+        1
+      );
       bg.setAudio({
         leadE: bgLeadE,
         interactionE: bgInteractionE,
@@ -1899,8 +2003,8 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
         interactionPos: bgDrive.notePos,
         noteHue: stableNoteHue,
         noteColor,
-        noteColorMix: THREE.MathUtils.clamp((strictNoteColor > 0.5 ? Math.max(colorMix, 0.52) : (colorMix * 0.90 + 0.06)) * (0.35 + 0.90 * notePresence), 0, 1),
-        noteColorStrict: strictNoteColor,
+        noteColorMix: noteColorMixFinal,
+        noteColorStrict: 0,
         richness: richnessUi,
         dream: dreamUi,
         emitters: [
