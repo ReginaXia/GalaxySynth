@@ -362,7 +362,7 @@ export function createNebulaSystem({ scene, planeY = 0.0, starTexture }) {
       } else {
         c.visual.tint.lerp(new THREE.Color(1, 1, 1), 1 - Math.exp(-dt * 4.0));
       }
-      const targetTintMix = isActive ? 0.62 : (isHover ? 0.36 : (isLast ? 0.18 : 0.0));
+      const targetTintMix = isActive ? 0.74 : (isHover ? 0.46 : (isLast ? 0.24 : 0.0));
       c.visual.tintMix = damp(c.visual.tintMix, targetTintMix, 8.0, dt);
 
       applyClusterVisual(c, dt);
@@ -372,8 +372,8 @@ export function createNebulaSystem({ scene, planeY = 0.0, starTexture }) {
   function applyClusterVisual(c) {
     const accent = c.visual.accent;
     const pulse = c.visual.pulse;
-    const tintMix = clamp(c.visual.tintMix + pulse * 0.30, 0, 1);
-    const flash = clamp(pulse * 0.9 + accent * 0.25, 0, 1);
+    const tintMix = clamp(c.visual.tintMix + pulse * 0.36, 0, 1);
+    const flash = clamp(pulse * 0.52 + accent * 0.12, 0, 1);
 
     const mats = [c.outer?.material, c.core?.material, c.armStars?.material];
     for (const mat of mats) {
@@ -382,7 +382,7 @@ export function createNebulaSystem({ scene, planeY = 0.0, starTexture }) {
       const baseRainbow = c.preset.palette.rainbowMix ?? 0.08;
       const baseHueJitter = c.preset.palette.hueJitter ?? 0.30;
 
-      mat.uniforms.uColorStrength.value = clamp(baseStrength * (1.0 + accent * 0.30 + pulse * 0.35), 0.6, 2.0);
+      mat.uniforms.uColorStrength.value = clamp(baseStrength * (1.0 + accent * 0.36 + pulse * 0.22), 0.6, 2.0);
       mat.uniforms.uRainbowMix.value = clamp(baseRainbow + accent * 0.05 + pulse * 0.08, 0.0, 0.28);
       mat.uniforms.uHueJitter.value = clamp(baseHueJitter + accent * 0.06 + pulse * 0.10, 0.0, 0.65);
       mat.uniforms.uNoteTint.value.copy(c.visual.tint);
@@ -414,7 +414,7 @@ export function createNebulaSystem({ scene, planeY = 0.0, starTexture }) {
     c.visual.pulse = Math.max(c.visual.pulse, clamp(strength, 0, 1));
     if (typeof theta01 === "number" && Number.isFinite(theta01)) {
       c.visual.tint.setHSL(((theta01 % 1) + 1) % 1, 0.82, 0.64);
-      c.visual.tintMix = Math.max(c.visual.tintMix, 0.45);
+      c.visual.tintMix = Math.max(c.visual.tintMix, 0.56);
     }
   }
 
