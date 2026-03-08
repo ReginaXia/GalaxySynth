@@ -28,6 +28,7 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
   const uniforms = {
     uTime: { value: 0 },
     uLeadE:   { value: 0 },
+    uInteractionE: { value: 0 },
     uPitch01: { value: 0.5 },
     uVel01:   { value: 0.0 },
     uTheta01: { value: 0.0 },
@@ -53,6 +54,7 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
     uNoteHue:  { value: 0 },
     uNoteSeed: { value: 0 },
     uNotePos:  { value: new THREE.Vector2(0.5, 0.5) },
+    uInteractionPos: { value: new THREE.Vector2(0.5, 0.5) },
   };
 
   uniforms.uFlow.value = 0.012;
@@ -115,15 +117,18 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
 
     setAudio({
       leadE = uniforms.uLeadE.value,
+      interactionE = uniforms.uInteractionE.value,
       pitch01 = uniforms.uPitch01.value,
       vel01 = uniforms.uVel01.value,
       theta01 = uniforms.uTheta01.value,
       pulse = 0,
       noteSeed = 0,
       notePos = null,
+      interactionPos = null,
       noteHue = 0,
     } = {}) {
       uniforms.uLeadE.value   = clamp01(leadE);
+      uniforms.uInteractionE.value = clamp01(interactionE);
       uniforms.uPitch01.value = clamp01(pitch01);
       uniforms.uVel01.value   = clamp01(vel01);
       uniforms.uTheta01.value = clamp01(theta01);
@@ -132,6 +137,9 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
       uniforms.uNoteHue.value  = noteHue ?? 0;
       if (notePos && typeof notePos.x === "number"){
         uniforms.uNotePos.value.set(clamp01(notePos.x), clamp01(notePos.y));
+      }
+      if (interactionPos && typeof interactionPos.x === "number"){
+        uniforms.uInteractionPos.value.set(clamp01(interactionPos.x), clamp01(interactionPos.y));
       }
     },
 

@@ -97,6 +97,7 @@ let bgTheta01 = 0.0;   // 0..1
 let bgPulse = 0.0;     // 0..1 (note trigger)
 let bgClickPulse = 0.0; // click-triggered ripple source
 let bgClickPulseVis = 0.0; // attack-shaped pulse
+let bgInteractionE = 0.0; // local turbulence envelope
 let bgLastStep = -1;
 let bgNoteHue = 0.86;
 let bgNoteSeed = 0.0;
@@ -1453,6 +1454,13 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     const targetLead = THREE.MathUtils.clamp(baseHold + scratchVel01 * 0.62 + bgClickPulseVis * 0.42, 0, 1);
     // slower fall to calm (~1-2s)
     bgLeadE = __bgRiseFall(bgLeadE, targetLead, dt, 14.0, 1.1);
+    const interactionTarget = THREE.MathUtils.clamp(
+      (interactionNow ? 0.9 : 0.0) + scratchVel01 * 0.35 + bgClickPulseVis * 0.25,
+      0,
+      1
+    );
+    // ~1-2s decay when no interaction
+    bgInteractionE = __bgRiseFall(bgInteractionE, interactionTarget, dt, 16.0, 0.9);
 
     // Smooth pitch/vel/theta (prefer scratch state; fallback to bgDrive)
     const targetPitch = (typeof sScratch?.pitch01 === "number") ? sScratch.pitch01 : bgDrive.pitch01;
@@ -1488,12 +1496,14 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     if (bg && bg.setAudio) {
       bg.setAudio({
         leadE: bgLeadE,
+        interactionE: bgInteractionE,
         pitch01: bgPitch01,
         vel01: bgVel01,
         theta01: bgTheta01,
         pulse: bgPulse,
         noteSeed: bgDrive.noteSeed,
         notePos: bgDrive.notePos,
+        interactionPos: bgDrive.notePos,
         noteHue: bgNoteHue,
       });
 

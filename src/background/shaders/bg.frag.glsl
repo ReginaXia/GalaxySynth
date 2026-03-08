@@ -24,10 +24,12 @@ uniform float uTime;
 
 // Audio / interaction
 uniform float uLeadE;    // 0..1 overall "music energy"
+uniform float uInteractionE; // 0..1 local turbulence strength
 uniform float uPitch01;  // 0..1 pitch
 uniform float uVel01;    // 0..1 velocity
 uniform float uTheta01;  // 0..1 (angle around disk)
 uniform vec2  uMouse;    // 0..1
+uniform vec2  uInteractionPos; // 0..1 interaction anchor
 
 // Base + look
 uniform vec3  uBase;         // base dark (#131527)
@@ -159,6 +161,7 @@ void main(){
   float e = saturate(uLeadE);
   float e2 = e*e;
   float vel = saturate(uVel01);
+  float ie = saturate(uInteractionE);
 
   vec2 p = (uv - 0.5) * (0.75 + 1.35 * uScale);
 
@@ -169,7 +172,16 @@ void main(){
   vec2 w2 = vec2(fbm(p * 1.30 + vec2(-t*1.2, t*0.8)), fbm(p * 1.30 + vec2(t*0.9, -t*0.9)));
   vec2 warp = (w1 - 0.5) * (0.55 + 0.85*e) * uWarp + (w2 - 0.5) * (0.18 + 0.45*e) * uDetail;
 
-  vec2 q = p + warp;
+  // Local interaction turbulence (screen-space centered, smooth falloff).
+  vec2 dInt = uv - uInteractionPos;
+  float distInt = length(dInt);
+  float flowInfluence = exp(-distInt * 4.0) * ie;
+  vec2 swirlDir = vec2(-dInt.y, dInt.x) / max(1e-4, distInt);
+  float swirlPhase = sin(uTime * (0.35 + 0.45 * uFlow) + distInt * 16.0 + uTheta01 * 6.28318);
+  vec2 localVectorField = swirlDir * swirlPhase * 0.022 + dInt * (-0.018);
+  vec2 flowUV = p + flowInfluence * localVectorField;
+
+  vec2 q = flowUV + warp;
   float f = fbm(q * 0.70 + vec2(0.0, t*0.45));
   float g = fbm(q * 1.25 + vec2(t*0.55, 0.0));
 
