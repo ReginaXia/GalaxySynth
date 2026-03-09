@@ -15,6 +15,7 @@ import { playMeteorSfx } from "./audio/meteorSfx.js";
 import { createNebulaSystem } from "./nebula/nebulaSystem.js";
 import { createMeteorSystem } from "./meteor/meteorSystem.js";
 import { createDolphinSystem } from "./dolphin/dolphinSystem.js";
+import { createNotePopSystem } from "./notePop/notePopSystem.js";
 
 import { createDreamyBackground } from "./background/dreamyBackground";
 
@@ -30,6 +31,7 @@ import { createNoteColorPanel } from "./ui/noteColorPanel.js";
 import { createBackgroundDockPanel } from "./ui/backgroundDockPanel.js";
 import { createDockPanel } from "./ui/dockPanel.js";
 import { setupDolphinGUI } from "./ui/dolphinGui.js";
+import { setupNotePopGUI } from "./ui/notePopGui.js";
 
 import { createCameraControlSystem } from "./input/cameraControlSystem.js";
 import { musicState } from "./state/musicState.js";
@@ -608,6 +610,7 @@ const autoReplayVisual = {
   lastEventMs: 0,
 };
 let lastDolphinEmitMs = 0;
+let lastNotePopEmitMs = 0;
 
 function smoothPulse01(x) {
   const t = THREE.MathUtils.clamp(x, 0, 1);
@@ -669,6 +672,19 @@ function onAutoPlayNoteEvent(ev) {
       theta01: ev?.theta01 ?? Math.random(),
       velocity: ev?.velocity ?? 0.66,
       strength: 0.9,
+      now: now * 0.001,
+    });
+  }
+
+  const notePopGapMs = 90;
+  if ((now - lastNotePopEmitMs) >= notePopGapMs) {
+    lastNotePopEmitMs = now;
+    notePopSystem?.triggerFromNote?.({
+      galaxyId: ev?.galaxyId ?? null,
+      theta01: ev?.theta01 ?? Math.random(),
+      velocity: ev?.velocity ?? 0.66,
+      noteHue: ev?.theta01 ?? null,
+      strength: 0.86,
       now: now * 0.001,
     });
   }
@@ -841,6 +857,12 @@ const dolphinSystem = createDolphinSystem({
   planeY: nebulaSystem.planeY,
 });
 window.__dolphin = dolphinSystem;
+const notePopSystem = createNotePopSystem({
+  scene,
+  nebulaSystem,
+  planeY: nebulaSystem.planeY,
+});
+window.__notePop = notePopSystem;
 
 // 新系统没有 mesh（旧系统才有 instanced quad mesh）
 console.log("meteor system", meteorSystem);
@@ -849,6 +871,7 @@ console.log("vert len", meteorVert.length, "frag len", meteorFrag.length);
 
 const meteorGui = setupMeteorGUI(meteorSystem);
 const dolphinGui = setupDolphinGUI(dolphinSystem);
+const notePopGui = setupNotePopGUI(notePopSystem);
 
 const UI_STATE_KEY = "GalaxySynth_UIState_v6";
 function readUiState() {
@@ -1103,6 +1126,16 @@ const dolphinDock = createDockPanel({
   minHeight: 120,
   zIndex: 9997,
 });
+const notePopDock = createDockPanel({
+  id: "note-pop",
+  title: "Note Pop",
+  contentEl: notePopGui?.domElement,
+  x: 12,
+  y: 810,
+  width: 340,
+  minHeight: 120,
+  zIndex: 9997,
+});
 
 const uiBtn = uiShell.querySelector('[data-act="toggle-ui"]');
 const showcaseBtn = uiShell.querySelector('[data-act="toggle-showcase"]');
@@ -1156,6 +1189,7 @@ function applyUiState() {
     galaxyDock?.setVisible?.(false);
     meteorDock?.setVisible?.(false);
     dolphinDock?.setVisible?.(false);
+    notePopDock?.setVisible?.(false);
     const tempoRingEl2 = document.getElementById("tempo-ring");
     const stepRingEl2 = document.getElementById("step-ring");
     if (tempoRingEl2) tempoRingEl2.style.display = uiState.visible ? "" : "none";
@@ -1168,6 +1202,7 @@ function applyUiState() {
     galaxyDock?.setVisible?.(showLook);
     meteorDock?.setVisible?.(showLook);
     dolphinDock?.setVisible?.(showLook);
+    notePopDock?.setVisible?.(showLook);
     const tempoRingEl2 = document.getElementById("tempo-ring");
     const stepRingEl2 = document.getElementById("step-ring");
     if (tempoRingEl2) tempoRingEl2.style.display = showTransport ? "" : "none";
@@ -1373,6 +1408,14 @@ canvas.addEventListener("pointerdown", (e) => {
           galaxyId: activeNebulaKey,
           theta01: musicState.activeIntent.theta01,
           velocity: 0.72,
+          strength: 1.0,
+          now: performance.now() * 0.001,
+        });
+        notePopSystem?.triggerFromNote?.({
+          galaxyId: activeNebulaKey,
+          theta01: musicState.activeIntent.theta01,
+          velocity: 0.76,
+          noteHue: musicState.activeIntent.theta01,
           strength: 1.0,
           now: performance.now() * 0.001,
         });
@@ -1975,6 +2018,7 @@ const hasNebulaHit = !!nebulaHit;
 
   meteorSystem.update(t);
   dolphinSystem.update(t);
+  notePopSystem.update(t);
 
   // -----------------------------
   // ✅ Phase1: Inputs -> PerformanceState -> Audio -> Visual
@@ -2322,6 +2366,17 @@ bgDrive.theta01 = theta01;
           theta01: musicState.activeIntent?.theta01 ?? (stepNow / 7),
           velocity: scratchVel01,
           strength: 0.82,
+          now: nowMsD * 0.001,
+        });
+      }
+      if ((nowMsD - lastNotePopEmitMs) >= 90) {
+        lastNotePopEmitMs = nowMsD;
+        notePopSystem?.triggerFromNote?.({
+          galaxyId: activeNebulaKey ?? musicState.activeIntent?.galaxyId ?? null,
+          theta01: musicState.activeIntent?.theta01 ?? (stepNow / 7),
+          velocity: scratchVel01,
+          noteHue: musicState.activeIntent?.theta01 ?? (stepNow / 7),
+          strength: 0.9,
           now: nowMsD * 0.001,
         });
       }
