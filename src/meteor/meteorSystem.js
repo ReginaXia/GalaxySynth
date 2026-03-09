@@ -273,6 +273,11 @@ export function createMeteorSystem({
   const birth = new Float32Array(MAX_P);
   const life = new Float32Array(MAX_P);
   const seed = new Float32Array(MAX_P);
+  const baseR = new Float32Array(MAX_P);
+  const baseG = new Float32Array(MAX_P);
+  const baseB = new Float32Array(MAX_P);
+  const baseSize = new Float32Array(MAX_P);
+  const layerType = new Uint8Array(MAX_P); // 0: core, 1: halo, 2: accent
 
   // init all dead
   for (let i = 0; i < MAX_P; i++) {
@@ -283,6 +288,11 @@ export function createMeteorSystem({
     col[i * 3 + 0] = 1;
     col[i * 3 + 1] = 0.3;
     col[i * 3 + 2] = 0.85;
+    baseR[i] = 1;
+    baseG[i] = 0.3;
+    baseB[i] = 0.85;
+    baseSize[i] = params.tailSize;
+    layerType[i] = 0;
   }
 
   const tailGeo = new THREE.BufferGeometry();
@@ -345,6 +355,12 @@ export function createMeteorSystem({
   }
 
   function lerp(a, b, t) { return a + (b - a) * t; }
+  function lerpHue(a, b, t) {
+    let d = b - a;
+    if (d > 0.5) d -= 1.0;
+    if (d < -0.5) d += 1.0;
+    return wrap01(a + d * t);
+  }
 
 
   function hsv2rgb(h, s, v) {
@@ -501,14 +517,40 @@ export function createMeteorSystem({
       birth[i] = now;
       life[i] = tailLife * THREE.MathUtils.lerp(0.75, 1.25, Math.random());
 
-      const base = params.tailSize * lerp(0.95, 1.40, params.meteorTail);
-      siz[i] = base * THREE.MathUtils.lerp(0.7, 1.25, Math.random());
+      const isHalo = Math.random() < 0.24;
+      const isPinkAccent = !isHalo && Math.random() < 0.16;
+      layerType[i] = isHalo ? 1 : (isPinkAccent ? 2 : 0);
 
-      const [r, g, b] = hsv2rgb(meteorHue, 0.65, 1.0);
-      const glowMul = params.tailGlow * lerp(0.95, 1.35, params.meteorRomance);
-      col[i * 3 + 0] = r * glowMul;
-      col[i * 3 + 1] = g * glowMul;
-      col[i * 3 + 2] = b * glowMul;
+      const coolHue = lerp(0.54, 0.76, Math.random()); // cyan -> blue-violet
+      const accentHue = lerp(0.87, 0.95, Math.random()); // magenta accent
+      let h = coolHue;
+      if (isPinkAccent) h = lerpHue(coolHue, accentHue, 0.82);
+      h = lerpHue(h, meteorHue, isPinkAccent ? 0.25 : 0.10);
+
+      const s = isHalo
+        ? lerp(0.18, 0.36, Math.random())
+        : (isPinkAccent ? lerp(0.60, 0.78, Math.random()) : lerp(0.46, 0.64, Math.random()));
+      const val = isHalo
+        ? lerp(1.12, 1.34, Math.random())
+        : lerp(0.96, 1.14, Math.random());
+
+      if (isHalo) life[i] *= THREE.MathUtils.lerp(1.10, 1.55, Math.random());
+
+      const base = params.tailSize * lerp(0.94, 1.34, params.meteorTail);
+      const layerSizeMul = isHalo
+        ? THREE.MathUtils.lerp(1.35, 2.25, Math.random())
+        : THREE.MathUtils.lerp(0.72, 1.24, Math.random());
+      baseSize[i] = base * layerSizeMul;
+      siz[i] = baseSize[i];
+
+      const [r, g, b] = hsv2rgb(h, s, val);
+      const glowMul = params.tailGlow * lerp(0.90, 1.22, params.meteorRomance) * (isHalo ? 0.72 : 1.0);
+      baseR[i] = r * glowMul;
+      baseG[i] = g * glowMul;
+      baseB[i] = b * glowMul;
+      col[i * 3 + 0] = baseR[i];
+      col[i * 3 + 1] = baseG[i];
+      col[i * 3 + 2] = baseB[i];
 
       seed[i] = Math.random();
     }
@@ -659,6 +701,7 @@ export function createMeteorSystem({
       const k = a / Math.max(1e-5, L); // 0..1
       const fade = 1.0 - k;
       const fade2 = fade * fade;
+      const fadeCurve = Math.pow(fade, 1.65);
 
       // integrate velocity
       pos[i * 3 + 0] += vel[i * 3 + 0] * dt;
@@ -677,14 +720,21 @@ export function createMeteorSystem({
       pos[i * 3 + 0] += w;
       pos[i * 3 + 2] -= w * 0.8;
 
-      // size expands over life
-      const grow = THREE.MathUtils.lerp(0.85, 1.9, 1.0 - fade2);
-      siz[i] = Math.max(0.0, params.tailSize * grow * fade2);
+      // size: bloom a bit then vanish, avoids dusty residue.
+      const kind = layerType[i];
+      const grow = THREE.MathUtils.lerp(0.92, kind === 1 ? 1.88 : 1.62, 1.0 - fade2);
+      const twinkle = 0.92 + 0.18 * Math.sin(t * (3.0 + s * 6.0) + s * 15.0);
+      siz[i] = Math.max(0.0, baseSize[i] * grow * fadeCurve * twinkle);
 
-      // subtle color decay
-      // col[i * 3 + 0] *= 0.995;
-      // col[i * 3 + 1] *= 0.995;
-      // col[i * 3 + 2] *= 0.995;
+      // color evolution: desaturate to pearl near end instead of pink residue.
+      const desat = THREE.MathUtils.smoothstep(k, 0.35, 1.0);
+      const whiteMix = (kind === 1)
+        ? THREE.MathUtils.lerp(0.10, 0.78, desat)
+        : THREE.MathUtils.lerp(0.04, 0.56, desat);
+      const pearl = ((baseR[i] + baseG[i] + baseB[i]) / 3) * (kind === 1 ? 1.15 : 1.02);
+      col[i * 3 + 0] = THREE.MathUtils.lerp(baseR[i], pearl, whiteMix) * fadeCurve;
+      col[i * 3 + 1] = THREE.MathUtils.lerp(baseG[i], pearl, whiteMix) * fadeCurve;
+      col[i * 3 + 2] = THREE.MathUtils.lerp(baseB[i], pearl, whiteMix) * fadeCurve;
     }
 
     tailGeo.attributes.position.needsUpdate = true;
