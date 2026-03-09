@@ -8,21 +8,43 @@ function rand(a, b) {
   return a + Math.random() * (b - a);
 }
 
+const NOTE_GLYPHS = [
+  "♫⋆｡",
+  "♪",
+  "♬",
+  "₊˚♪",
+  "𝄞",
+  "𝄢",
+  "𝄚𝅦",
+  "𝄞₊˚",
+];
+
 function makeNoteTexture(char = "♪") {
   const canvas = document.createElement("canvas");
-  canvas.width = 192;
-  canvas.height = 192;
+  canvas.width = 320;
+  canvas.height = 320;
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
 
-  ctx.clearRect(0, 0, 192, 192);
+  ctx.clearRect(0, 0, 320, 320);
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.font = "bold 136px 'Segoe UI Symbol','Apple Symbols','Noto Sans Symbols','Arial'";
-  ctx.shadowColor = "rgba(180,220,255,0.85)";
-  ctx.shadowBlur = 18;
-  ctx.fillStyle = "rgba(255,255,255,0.96)";
-  ctx.fillText(char, 96, 96);
+  const fontStack = "'Noto Music','Noto Sans Symbols 2','Segoe UI Symbol','Apple Symbols','Arial Unicode MS',sans-serif";
+
+  let fontSize = 220;
+  for (; fontSize >= 96; fontSize -= 8) {
+    ctx.font = `700 ${fontSize}px ${fontStack}`;
+    if (ctx.measureText(char).width <= 260) break;
+  }
+  ctx.font = `700 ${fontSize}px ${fontStack}`;
+
+  ctx.shadowColor = "rgba(190,230,255,0.78)";
+  ctx.shadowBlur = 22;
+  ctx.lineWidth = Math.max(2, Math.round(fontSize * 0.04));
+  ctx.strokeStyle = "rgba(170,215,255,0.72)";
+  ctx.fillStyle = "rgba(255,255,255,0.97)";
+  ctx.strokeText(char, 160, 160);
+  ctx.fillText(char, 160, 160);
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -45,7 +67,7 @@ export function createNotePopSystem({ scene, nebulaSystem, planeY = 0.0 }) {
     followNoteColor: true,
   };
 
-  const textures = [makeNoteTexture("♪"), makeNoteTexture("♫"), makeNoteTexture("♩")];
+  const textures = NOTE_GLYPHS.map((g) => makeNoteTexture(g));
   const items = [];
   const maxPool = 72;
 
@@ -179,4 +201,3 @@ export function createNotePopSystem({ scene, nebulaSystem, planeY = 0.0 }) {
     update,
   };
 }
-
