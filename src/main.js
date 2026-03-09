@@ -138,6 +138,14 @@ function __bgRiseFall(current, target, dt, rise = 16.0, fall = 4.0) {
 function __wrap01(v) {
   return ((v % 1) + 1) % 1;
 }
+function __lerpHue01(a, b, t) {
+  const aa = __wrap01(a);
+  const bb = __wrap01(b);
+  let d = bb - aa;
+  if (d > 0.5) d -= 1.0;
+  if (d < -0.5) d += 1.0;
+  return __wrap01(aa + d * THREE.MathUtils.clamp(t, 0, 1));
+}
 
 function __bgRiseFallWrap(current, target, dt, rise = 16.0, fall = 4.0) {
   const c = __wrap01(current);
@@ -1832,17 +1840,17 @@ function tick() {
       );
       const pWorld = cluster.group.localToWorld(pLocal);
       const pNdc = pWorld.clone().project(camera);
-      bgDrive.notePos.set(
+      bgTargetPos.set(
         THREE.MathUtils.clamp(pNdc.x * 0.5 + 0.5, 0, 1),
         THREE.MathUtils.clamp(1 - (pNdc.y * 0.5 + 0.5), 0, 1)
       );
-      bgDrive.noteHue = ((ev.theta01 % 1) + 1) % 1;
+      bgDrive.noteHue = __lerpHue01(bgDrive.noteHue, ((ev.theta01 % 1) + 1) % 1, 0.32);
       bgDrive.noteSeed = Math.random() * 0.999 + 0.001;
-      bgLastEmitPos.copy(bgDrive.notePos);
+      bgLastEmitPos.copy(bgTargetPos);
       bgLastEmitHue = bgDrive.noteHue;
       bgLastEmitStep = ev.step ?? -1;
-      bgLastEmitE = Math.max(bgLastEmitE, 0.92);
-      bgClickPulse = Math.max(bgClickPulse, 0.64);
+      bgLastEmitE = Math.max(bgLastEmitE, 0.72);
+      bgClickPulse = Math.max(bgClickPulse, 0.42);
     }
   }
 
@@ -2433,8 +2441,8 @@ bgDrive.theta01 = theta01;
       const hoverHue = hoverIntentNow?.theta01 ?? bgTheta01 ?? activeHue;
       const colorBlend = THREE.MathUtils.clamp(backgroundDockUI?.getColorBlend?.() ?? 0.72, 0, 1);
       const notePresence = THREE.MathUtils.lerp(0.35, 1.0, colorBlend);
-      const harmony = THREE.MathUtils.lerp(0.70, 0.10, colorBlend);
-      const colorMix = THREE.MathUtils.clamp(0.22 + 0.62 * notePresence, 0, 1);
+      const harmony = THREE.MathUtils.lerp(0.46, 0.06, colorBlend);
+      const colorMix = THREE.MathUtils.clamp(0.16 + 0.42 * notePresence, 0, 0.72);
       const activeStep = (typeof activeIntentNow?.step === "number") ? activeIntentNow.step : -1;
       const hoverStep = (typeof hoverIntentNow?.step === "number") ? hoverIntentNow.step : -1;
       const lastStep = (typeof bgLastEmitStep === "number") ? bgLastEmitStep : -1;
@@ -2447,7 +2455,7 @@ bgDrive.theta01 = theta01;
       const resolveTone = (baseRgb, customRgb, step, thetaFallback) => {
         const manual = customRgb ? lerp3(baseRgb, customRgb, colorMix) : baseRgb;
         const derived = sampleBackgroundPaletteAt((step >= 0 ? (step % 7) / 7 : thetaFallback));
-        const harmonyBlend = 0.08 + 0.42 * harmony; // keep note color identifiable
+        const harmonyBlend = 0.04 + 0.20 * harmony; // keep note color identifiable
         const fused = lerp3(manual, derived, harmonyBlend);
         return lerp3(derived, fused, 0.45 + 0.55 * notePresence);
       };
@@ -2470,32 +2478,32 @@ bgDrive.theta01 = theta01;
       const glowGain = 0.56 + 0.58 * glowUi;
       const presenceGain = 0.35 + 0.95 * notePresence;
       const localLift = THREE.MathUtils.lerp(0.72, 1.50, localColorLiftUi);
-      const activeStrength = THREE.MathUtils.clamp((bgInteractionE * 0.95 + bgClickPulseVis * 0.25) * glowGain * presenceGain * localLift, 0, 1);
-      const hoverStrength = THREE.MathUtils.clamp((hoverIntentNow ? 0.14 : 0.0) * (0.45 + 0.55 * bgInteractionE) * glowGain * presenceGain * (0.88 + 0.40 * localColorLiftUi), 0, 0.42);
-      const lastStrength = THREE.MathUtils.clamp(bgLastEmitE * 0.62 * glowGain * presenceGain * (0.92 + 0.46 * localColorLiftUi), 0, 0.86);
+      const activeStrength = THREE.MathUtils.clamp((bgInteractionE * 0.74 + bgClickPulseVis * 0.16) * glowGain * presenceGain * localLift, 0, 0.84);
+      const hoverStrength = THREE.MathUtils.clamp((hoverIntentNow ? 0.10 : 0.0) * (0.40 + 0.50 * bgInteractionE) * glowGain * presenceGain * (0.88 + 0.28 * localColorLiftUi), 0, 0.28);
+      const lastStrength = THREE.MathUtils.clamp(bgLastEmitE * 0.46 * glowGain * presenceGain * (0.92 + 0.30 * localColorLiftUi), 0, 0.52);
       const wrap01 = (v) => ((v % 1) + 1) % 1;
       const blendTrail = {
         x: THREE.MathUtils.lerp(bgDrive.notePos.x, bgLastEmitPos.x, 0.58),
         y: THREE.MathUtils.lerp(bgDrive.notePos.y, bgLastEmitPos.y, 0.58),
       };
-      const sat1 = {
-        x: wrap01(blendTrail.x + 0.16 * Math.cos((bgTheta01 + 0.08) * Math.PI * 2)),
-        y: wrap01(blendTrail.y + 0.14 * Math.sin((bgTheta01 + 0.08) * Math.PI * 2)),
-      };
       const sat2 = {
         x: wrap01(bgLastEmitPos.x - 0.20 * Math.cos((bgTheta01 + 0.33) * Math.PI * 2)),
         y: wrap01(bgLastEmitPos.y - 0.12 * Math.sin((bgTheta01 + 0.33) * Math.PI * 2)),
       };
+      const sat1 = {
+        x: wrap01(blendTrail.x + 0.16 * Math.cos((bgTheta01 + 0.08) * Math.PI * 2)),
+        y: wrap01(blendTrail.y + 0.14 * Math.sin((bgTheta01 + 0.08) * Math.PI * 2)),
+      };
       const [s1r, s1g, s1b] = resolveTone([hr, hg, hb], activeCustom ?? hoverCustom, activeStep >= 0 ? activeStep : hoverStep, hoverHue);
       const [s2r, s2g, s2b] = resolveTone([lr, lg, lb], activeCustom ?? lastCustom, activeStep >= 0 ? activeStep : lastStep, bgLastEmitHue);
-      const satelliteStrength = THREE.MathUtils.clamp(activeStrength * 0.44 + hoverStrength * 0.40 + lastStrength * 0.42, 0, 0.78);
+      const satelliteStrength = THREE.MathUtils.clamp(activeStrength * 0.26 + hoverStrength * 0.24 + lastStrength * 0.22, 0, 0.34);
       const noteColorMixFinal = THREE.MathUtils.clamp(
         Math.max(
-          (colorMix * 0.90 + 0.06) * (0.55 + 1.15 * notePresence) * (0.86 + 0.26 * localColorLiftUi),
+          (colorMix * 0.76 + 0.04) * (0.55 + 1.00 * notePresence) * (0.90 + 0.18 * localColorLiftUi),
           0.22 + 0.58 * notePresence
         ),
         0,
-        1
+        0.72
       );
       bg.setAudio({
         leadE: bgLeadE,
@@ -2516,7 +2524,7 @@ bgDrive.theta01 = theta01;
         emitters: [
           { x: bgDrive.notePos.x, y: bgDrive.notePos.y, r: ar, g: ag, b: ab, s: activeStrength },
           { x: sat1.x, y: sat1.y, r: s1r, g: s1g, b: s1b, s: satelliteStrength },
-          { x: sat2.x, y: sat2.y, r: s2r, g: s2g, b: s2b, s: satelliteStrength * 0.92 + lastStrength * 0.28 },
+          { x: sat2.x, y: sat2.y, r: s2r, g: s2g, b: s2b, s: satelliteStrength + lastStrength * 0.18 },
         ],
       });
 
