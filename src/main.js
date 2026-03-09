@@ -14,6 +14,7 @@ import { playMeteorSfx } from "./audio/meteorSfx.js";
 
 import { createNebulaSystem } from "./nebula/nebulaSystem.js";
 import { createMeteorSystem } from "./meteor/meteorSystem.js";
+import { createDolphinSystem } from "./dolphin/dolphinSystem.js";
 
 import { createDreamyBackground } from "./background/dreamyBackground";
 
@@ -28,6 +29,7 @@ import { createAudioMonitorUI } from "./ui/audioMonitor.js";
 import { createNoteColorPanel } from "./ui/noteColorPanel.js";
 import { createBackgroundDockPanel } from "./ui/backgroundDockPanel.js";
 import { createDockPanel } from "./ui/dockPanel.js";
+import { setupDolphinGUI } from "./ui/dolphinGui.js";
 
 import { createCameraControlSystem } from "./input/cameraControlSystem.js";
 import { musicState } from "./state/musicState.js";
@@ -605,6 +607,7 @@ const autoReplayVisual = {
   pending: null,
   lastEventMs: 0,
 };
+let lastDolphinEmitMs = 0;
 
 function smoothPulse01(x) {
   const t = THREE.MathUtils.clamp(x, 0, 1);
@@ -657,6 +660,18 @@ function onAutoPlayNoteEvent(ev) {
   autoReplayVisual.lastEventMs = now;
   autoReplayVisual.pending = ev;
   autoReplayVisual.energy = Math.max(autoReplayVisual.energy, 1.0);
+
+  const dolphinGapMs = 130;
+  if ((now - lastDolphinEmitMs) >= dolphinGapMs) {
+    lastDolphinEmitMs = now;
+    dolphinSystem?.triggerFromNote?.({
+      galaxyId: ev?.galaxyId ?? null,
+      theta01: ev?.theta01 ?? Math.random(),
+      velocity: ev?.velocity ?? 0.66,
+      strength: 0.9,
+      now: now * 0.001,
+    });
+  }
 }
 
 const autoPlayConductor = createAutoPlayConductor({
@@ -820,12 +835,20 @@ const meteorSystem = createMeteorSystem({
 
 window.__meteor = meteorSystem;
 
+const dolphinSystem = createDolphinSystem({
+  scene,
+  nebulaSystem,
+  planeY: nebulaSystem.planeY,
+});
+window.__dolphin = dolphinSystem;
+
 // 新系统没有 mesh（旧系统才有 instanced quad mesh）
 console.log("meteor system", meteorSystem);
 console.log("vert len", meteorVert.length, "frag len", meteorFrag.length);
 
 
 const meteorGui = setupMeteorGUI(meteorSystem);
+const dolphinGui = setupDolphinGUI(dolphinSystem);
 
 const UI_STATE_KEY = "GalaxySynth_UIState_v6";
 function readUiState() {
@@ -1070,6 +1093,16 @@ const meteorDock = createDockPanel({
   minHeight: 120,
   zIndex: 9997,
 });
+const dolphinDock = createDockPanel({
+  id: "dolphin",
+  title: "Dolphin Sky",
+  contentEl: dolphinGui?.domElement,
+  x: 12,
+  y: 620,
+  width: 340,
+  minHeight: 120,
+  zIndex: 9997,
+});
 
 const uiBtn = uiShell.querySelector('[data-act="toggle-ui"]');
 const showcaseBtn = uiShell.querySelector('[data-act="toggle-showcase"]');
@@ -1122,6 +1155,7 @@ function applyUiState() {
     noteOverlay.style.display = "none";
     galaxyDock?.setVisible?.(false);
     meteorDock?.setVisible?.(false);
+    dolphinDock?.setVisible?.(false);
     const tempoRingEl2 = document.getElementById("tempo-ring");
     const stepRingEl2 = document.getElementById("step-ring");
     if (tempoRingEl2) tempoRingEl2.style.display = uiState.visible ? "" : "none";
@@ -1133,6 +1167,7 @@ function applyUiState() {
     noteOverlay.style.display = showDebug ? "" : "none";
     galaxyDock?.setVisible?.(showLook);
     meteorDock?.setVisible?.(showLook);
+    dolphinDock?.setVisible?.(showLook);
     const tempoRingEl2 = document.getElementById("tempo-ring");
     const stepRingEl2 = document.getElementById("step-ring");
     if (tempoRingEl2) tempoRingEl2.style.display = showTransport ? "" : "none";
@@ -1334,6 +1369,13 @@ canvas.addEventListener("pointerdown", (e) => {
           instrument,
         });
         triggerBackgroundPulse(1.0);
+        dolphinSystem?.triggerFromNote?.({
+          galaxyId: activeNebulaKey,
+          theta01: musicState.activeIntent.theta01,
+          velocity: 0.72,
+          strength: 1.0,
+          now: performance.now() * 0.001,
+        });
       }
     } else {
       activeNebulaKey = null;
@@ -1932,6 +1974,7 @@ const hasNebulaHit = !!nebulaHit;
   }
 
   meteorSystem.update(t);
+  dolphinSystem.update(t);
 
   // -----------------------------
   // ✅ Phase1: Inputs -> PerformanceState -> Audio -> Visual
@@ -2271,6 +2314,17 @@ bgDrive.theta01 = theta01;
       bgLastEmitHue = bgDrive.noteHue;
       bgLastEmitStep = stepNow;
       bgLastEmitE = 1.0;
+      const nowMsD = performance.now();
+      if ((nowMsD - lastDolphinEmitMs) >= 120) {
+        lastDolphinEmitMs = nowMsD;
+        dolphinSystem?.triggerFromNote?.({
+          galaxyId: activeNebulaKey ?? musicState.activeIntent?.galaxyId ?? null,
+          theta01: musicState.activeIntent?.theta01 ?? (stepNow / 7),
+          velocity: scratchVel01,
+          strength: 0.82,
+          now: nowMsD * 0.001,
+        });
+      }
     }
     bgPulse = Math.max(0.0, bgPulse - dt / 0.70);
 
