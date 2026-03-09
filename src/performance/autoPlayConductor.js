@@ -70,7 +70,7 @@ export function createAutoPlayConductor({
     nebulaSystem?.triggerNotePulse?.({
       galaxyId,
       theta01: intent.theta01,
-      strength: Math.max(0, Math.min(1, 0.55 + vel * 0.40)),
+      strength: Math.max(0, Math.min(1, 0.62 + vel * 0.52)),
     });
     triggerBackgroundPulse?.(0.45);
     onEvent?.({

@@ -188,10 +188,11 @@ export function createNebulaSystem({ scene, planeY = 0.0, starTexture }) {
   const pickables = [];
 
   const attractionUI = {
-    outerStrength: 0.018,
-    coreStrength: 0.016,
-    starsStrength: 0.018,
-    radius: 1.55,
+    outerStrength: 0.024,
+    coreStrength: 0.022,
+    starsStrength: 0.026,
+    radius: 1.90,
+    boost: 0.0, // runtime-only interaction gain (0..1), does not replace user base values
   };
 
   function setActive(id) {
@@ -322,13 +323,17 @@ export function createNebulaSystem({ scene, planeY = 0.0, starTexture }) {
 
       const pLocal = c.group.worldToLocal(pWorld.clone());
 
+      const b = clamp(attractionUI.boost, 0.0, 1.0);
+      const strengthMul = 1.0 + b * 1.05;
+      const radiusMul = 1.0 + b * 0.52;
+
       applyAttraction({
         points: c.outer,
         basePositions: c.outer.userData.basePositions,
         targetLocal: pLocal,
-        strength: attractionUI.outerStrength * inflOuter,
+        strength: attractionUI.outerStrength * strengthMul * inflOuter,
         swirl: 0.3 * inflOuter,
-        radius: attractionUI.radius,
+        radius: attractionUI.radius * radiusMul,
         t,
       });
 
@@ -336,9 +341,9 @@ export function createNebulaSystem({ scene, planeY = 0.0, starTexture }) {
         points: c.core,
         basePositions: c.core.userData.basePositions,
         targetLocal: pLocal,
-        strength: attractionUI.coreStrength * inflCore,
+        strength: attractionUI.coreStrength * strengthMul * inflCore,
         swirl: 0.22 * inflCore,
-        radius: attractionUI.radius,
+        radius: attractionUI.radius * radiusMul,
         t: t + 13.7,
       });
 
@@ -347,9 +352,9 @@ export function createNebulaSystem({ scene, planeY = 0.0, starTexture }) {
         points: c.armStars,
         basePositions: c.armStars.userData.basePositions,
         targetLocal: pLocal,
-        strength: attractionUI.starsStrength * inflOuter, // 比 outer/core 略大一点，更显眼
+        strength: attractionUI.starsStrength * strengthMul * inflOuter, // 比 outer/core 略大一点，更显眼
         swirl: 0.28 * inflOuter,
-        radius: attractionUI.radius,
+        radius: attractionUI.radius * radiusMul,
         t: t + 7.3,
       });
 

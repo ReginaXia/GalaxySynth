@@ -162,8 +162,8 @@ export function createDolphinSystem({ scene, nebulaSystem, planeY = 0.0 }) {
     item.alive = true;
     item.birth = now;
     item.life = params.jumpDuration * rand(0.92, 1.18) * (0.9 + 0.25 * (1 - v));
-    item.height = params.jumpHeight * rand(0.78, 1.35) * (0.75 + v * 0.65);
-    item.size = params.size * rand(0.80, 1.45) * (0.82 + v * 0.45);
+    item.height = params.jumpHeight * rand(0.78, 1.35) * (0.70 + v * 1.05);
+    item.size = params.size * rand(0.80, 1.45) * (0.80 + v * 0.62);
     item.start.copy(start);
     item.end.copy(end);
     item.dir.copy(dir);

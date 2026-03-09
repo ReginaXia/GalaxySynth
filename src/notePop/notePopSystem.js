@@ -143,9 +143,10 @@ export function createNotePopSystem({ scene, nebulaSystem, planeY = 0.0 }) {
     const item = alloc();
     item.alive = true;
     item.birth = now;
-    item.life = params.duration * rand(0.88, 1.18) * (0.9 + 0.22 * (1 - v));
-    item.height = params.jumpHeight * rand(0.72, 1.28) * (0.72 + v * 0.64);
-    item.size = params.size * rand(0.82, 1.3) * (0.8 + v * 0.38);
+    item.life = params.duration * rand(0.84, 1.22) * (0.9 + 0.22 * (1 - v));
+    const lively = clamp01(0.55 * v + 0.45 * clamp01(strength));
+    item.height = params.jumpHeight * rand(0.58, 1.85) * (0.62 + lively * 1.45);
+    item.size = params.size * rand(0.82, 1.3) * (0.78 + v * 0.58);
     item.start.copy(start);
     item.end.copy(end);
     item.hue = (noteHue != null ? noteHue : (0.55 + theta01 * 0.22)) % 1;

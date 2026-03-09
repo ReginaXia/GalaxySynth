@@ -612,6 +612,11 @@ const autoReplayVisual = {
 let lastDolphinEmitMs = 0;
 let lastNotePopEmitMs = 0;
 
+function emitGapMsFromVelocity(v01, slowMs = 150, fastMs = 55) {
+  const v = THREE.MathUtils.clamp(v01 ?? 0, 0, 1);
+  return THREE.MathUtils.lerp(slowMs, fastMs, v);
+}
+
 function smoothPulse01(x) {
   const t = THREE.MathUtils.clamp(x, 0, 1);
   return Math.sin(t * Math.PI);
@@ -664,27 +669,28 @@ function onAutoPlayNoteEvent(ev) {
   autoReplayVisual.pending = ev;
   autoReplayVisual.energy = Math.max(autoReplayVisual.energy, 1.0);
 
-  const dolphinGapMs = 130;
+  const vAuto = THREE.MathUtils.clamp(ev?.velocity ?? 0.66, 0, 1);
+  const dolphinGapMs = emitGapMsFromVelocity(vAuto, 150, 70);
   if ((now - lastDolphinEmitMs) >= dolphinGapMs) {
     lastDolphinEmitMs = now;
     dolphinSystem?.triggerFromNote?.({
       galaxyId: ev?.galaxyId ?? null,
       theta01: ev?.theta01 ?? Math.random(),
-      velocity: ev?.velocity ?? 0.66,
+      velocity: vAuto,
       strength: 0.9,
       now: now * 0.001,
     });
   }
 
-  const notePopGapMs = 90;
+  const notePopGapMs = emitGapMsFromVelocity(vAuto, 130, 48);
   if ((now - lastNotePopEmitMs) >= notePopGapMs) {
     lastNotePopEmitMs = now;
     notePopSystem?.triggerFromNote?.({
       galaxyId: ev?.galaxyId ?? null,
       theta01: ev?.theta01 ?? Math.random(),
-      velocity: ev?.velocity ?? 0.66,
+      velocity: vAuto,
       noteHue: ev?.theta01 ?? null,
-      strength: 0.86,
+      strength: THREE.MathUtils.lerp(0.82, 1.0, vAuto),
       now: now * 0.001,
     });
   }
@@ -1404,19 +1410,20 @@ canvas.addEventListener("pointerdown", (e) => {
           instrument,
         });
         triggerBackgroundPulse(1.0);
+        const velHit = THREE.MathUtils.clamp(Math.max(move01, 0.48), 0, 1);
         dolphinSystem?.triggerFromNote?.({
           galaxyId: activeNebulaKey,
           theta01: musicState.activeIntent.theta01,
-          velocity: 0.72,
-          strength: 1.0,
+          velocity: velHit,
+          strength: THREE.MathUtils.lerp(0.88, 1.0, velHit),
           now: performance.now() * 0.001,
         });
         notePopSystem?.triggerFromNote?.({
           galaxyId: activeNebulaKey,
           theta01: musicState.activeIntent.theta01,
-          velocity: 0.76,
+          velocity: velHit,
           noteHue: musicState.activeIntent.theta01,
-          strength: 1.0,
+          strength: THREE.MathUtils.lerp(0.90, 1.0, velHit),
           now: performance.now() * 0.001,
         });
       }
@@ -1705,6 +1712,7 @@ let bgLastEmitStep = -1;
 let lastPX = 0,
   lastPY = 0;
 let move01 = 0;
+let nebulaBoostSmoothed = 0;
 
 window.addEventListener("pointermove", (e) => {
   __markPointerMoved(e.clientX, e.clientY);
@@ -1984,6 +1992,14 @@ const hasNebulaHit = !!nebulaHit;
       // 用 raycast 平面的 hitPoint 也行；这里保留 disturb = hitPoint
       disturb = hitPoint;
     }
+  }
+
+  const autoExpress = autoPlayConductor?.getConfig?.()?.enabled ? autoReplayVisual.energy : 0.0;
+  const pointerExpress = (pointerDown && activeNebulaKey) ? THREE.MathUtils.clamp(move01 * 1.25, 0, 1) : 0.0;
+  const disturbExpress = THREE.MathUtils.clamp(Math.max(pointerExpress, autoExpress * 0.9), 0, 1);
+  nebulaBoostSmoothed = __bgRiseFall(nebulaBoostSmoothed, disturbExpress, dt, 12.0, 2.2);
+  if (nebulaSystem?.attractionUI) {
+    nebulaSystem.attractionUI.boost = nebulaBoostSmoothed;
   }
 
   nebulaSystem.update(disturb, t);
@@ -2359,24 +2375,25 @@ bgDrive.theta01 = theta01;
       bgLastEmitStep = stepNow;
       bgLastEmitE = 1.0;
       const nowMsD = performance.now();
-      if ((nowMsD - lastDolphinEmitMs) >= 120) {
+      const vPlay = THREE.MathUtils.clamp(scratchVel01, 0, 1);
+      if ((nowMsD - lastDolphinEmitMs) >= emitGapMsFromVelocity(vPlay, 145, 60)) {
         lastDolphinEmitMs = nowMsD;
         dolphinSystem?.triggerFromNote?.({
           galaxyId: activeNebulaKey ?? musicState.activeIntent?.galaxyId ?? null,
           theta01: musicState.activeIntent?.theta01 ?? (stepNow / 7),
-          velocity: scratchVel01,
-          strength: 0.82,
+          velocity: vPlay,
+          strength: THREE.MathUtils.lerp(0.78, 1.0, vPlay),
           now: nowMsD * 0.001,
         });
       }
-      if ((nowMsD - lastNotePopEmitMs) >= 90) {
+      if ((nowMsD - lastNotePopEmitMs) >= emitGapMsFromVelocity(vPlay, 125, 44)) {
         lastNotePopEmitMs = nowMsD;
         notePopSystem?.triggerFromNote?.({
           galaxyId: activeNebulaKey ?? musicState.activeIntent?.galaxyId ?? null,
           theta01: musicState.activeIntent?.theta01 ?? (stepNow / 7),
-          velocity: scratchVel01,
+          velocity: vPlay,
           noteHue: musicState.activeIntent?.theta01 ?? (stepNow / 7),
-          strength: 0.9,
+          strength: THREE.MathUtils.lerp(0.84, 1.0, vPlay),
           now: nowMsD * 0.001,
         });
       }
