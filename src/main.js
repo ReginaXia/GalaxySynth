@@ -611,6 +611,8 @@ const autoReplayVisual = {
 };
 let lastDolphinEmitMs = 0;
 let lastNotePopEmitMs = 0;
+const autoDisturbPoint = new THREE.Vector3(0, 0, 0);
+let autoDisturbE = 0.0;
 
 function emitGapMsFromVelocity(v01, slowMs = 150, fastMs = 55) {
   const v = THREE.MathUtils.clamp(v01 ?? 0, 0, 1);
@@ -698,6 +700,18 @@ function onAutoPlayNoteEvent(ev) {
       strength: THREE.MathUtils.lerp(0.82, 1.0, vAuto),
       now: now * 0.001,
     });
+  }
+
+  const cluster = nebulaSystem?.getCluster?.(ev?.galaxyId);
+  if (cluster?.group) {
+    const sizeScale = cluster?.preset?.shape?.sizeScale ?? 1.0;
+    const groupScale = cluster?.group?.scale?.x ?? 1.0;
+    const rWorld = Math.max(0.2, 1.9 * sizeScale * groupScale * (0.34 + (ev?.r01 ?? 0.5) * 0.66));
+    const a = ((ev?.theta01 ?? Math.random()) % 1 + 1) % 1 * Math.PI * 2;
+    const pLocal = new THREE.Vector3(Math.cos(a) * rWorld, 0, Math.sin(a) * rWorld);
+    const pWorld = cluster.group.localToWorld(pLocal);
+    autoDisturbPoint.copy(pWorld);
+    autoDisturbE = Math.max(autoDisturbE, 1.0);
   }
 }
 
@@ -1998,11 +2012,14 @@ const hasNebulaHit = !!nebulaHit;
       // 用 raycast 平面的 hitPoint 也行；这里保留 disturb = hitPoint
       disturb = hitPoint;
     }
+  } else if (autoDisturbE > 0.001) {
+    disturb = autoDisturbPoint;
   }
 
   const autoExpress = autoPlayConductor?.getConfig?.()?.enabled ? autoReplayVisual.energy : 0.0;
   const pointerExpress = (pointerDown && activeNebulaKey) ? THREE.MathUtils.clamp(move01 * 1.25, 0, 1) : 0.0;
-  const disturbExpress = THREE.MathUtils.clamp(Math.max(pointerExpress, autoExpress * 0.9), 0, 1);
+  autoDisturbE = Math.max(0.0, autoDisturbE - dt / 0.95);
+  const disturbExpress = THREE.MathUtils.clamp(Math.max(pointerExpress, autoExpress * 0.9, autoDisturbE * 0.95), 0, 1);
   nebulaBoostSmoothed = __bgRiseFall(nebulaBoostSmoothed, disturbExpress, dt, 12.0, 2.2);
   if (nebulaSystem?.attractionUI) {
     nebulaSystem.attractionUI.boost = nebulaBoostSmoothed;
