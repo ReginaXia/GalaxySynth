@@ -386,7 +386,6 @@ const audioEngine = audio;
 const voices = createGalaxyVoices();
 const audioUI = createAudioMonitorUI();
 const noteColorUI = createNoteColorPanel();
-const audioVoices = createGalaxyVoices();
 
 
 // -------------------------------------
@@ -601,6 +600,12 @@ const cinematicState = {
   prevMeteor: null,
 };
 
+const autoReplayVisual = {
+  energy: 0.0,
+  pending: null,
+  lastEventMs: 0,
+};
+
 function smoothPulse01(x) {
   const t = THREE.MathUtils.clamp(x, 0, 1);
   return Math.sin(t * Math.PI);
@@ -645,11 +650,21 @@ const nebulaSystem = createNebulaSystem({
   starTexture,
 });
 
+function onAutoPlayNoteEvent(ev) {
+  const now = performance.now();
+  const minGapMs = 42; // throttle replay visuals to avoid overload on dense patterns
+  if ((now - autoReplayVisual.lastEventMs) < minGapMs) return;
+  autoReplayVisual.lastEventMs = now;
+  autoReplayVisual.pending = ev;
+  autoReplayVisual.energy = Math.max(autoReplayVisual.energy, 1.0);
+}
+
 const autoPlayConductor = createAutoPlayConductor({
   nebulaSystem,
   voices,
   audio,
   triggerBackgroundPulse,
+  onEvent: onAutoPlayNoteEvent,
 });
 
 function focusCameraToGalaxy(galaxyId) {
@@ -1269,6 +1284,7 @@ let lastY = 0;
 
 canvas.addEventListener("pointerdown", (e) => {
   if (e.target.closest?.(".lil-gui") || e.target.closest?.(".dg")) return;
+  void audio.start?.();
 
   // ✅ Alt + 左键：永远是旋转（不管当前选没选星云）
   if (e.altKey && e.button === 0) {
@@ -1685,6 +1701,35 @@ function tick() {
   }
   const t = clock.getElapsedTime();
   autoPlayConductor?.update?.(t, { pointerDown });
+  autoReplayVisual.energy = __bgRiseFall(autoReplayVisual.energy, 0.0, dt, 10.0, 1.8);
+  if (autoReplayVisual.pending) {
+    const ev = autoReplayVisual.pending;
+    autoReplayVisual.pending = null;
+    const cluster = nebulaSystem.getCluster?.(ev.galaxyId);
+    if (cluster?.group) {
+      const sizeScale = cluster?.preset?.shape?.sizeScale ?? 1.0;
+      const groupScale = cluster?.group?.scale?.x ?? 1.0;
+      const rW = Math.max(0.25, 1.9 * sizeScale * groupScale * (0.36 + ev.r01 * 0.64));
+      const pLocal = new THREE.Vector3(
+        Math.cos(ev.theta01 * Math.PI * 2) * rW,
+        0,
+        Math.sin(ev.theta01 * Math.PI * 2) * rW
+      );
+      const pWorld = cluster.group.localToWorld(pLocal);
+      const pNdc = pWorld.clone().project(camera);
+      bgDrive.notePos.set(
+        THREE.MathUtils.clamp(pNdc.x * 0.5 + 0.5, 0, 1),
+        THREE.MathUtils.clamp(1 - (pNdc.y * 0.5 + 0.5), 0, 1)
+      );
+      bgDrive.noteHue = ((ev.theta01 % 1) + 1) % 1;
+      bgDrive.noteSeed = Math.random() * 0.999 + 0.001;
+      bgLastEmitPos.copy(bgDrive.notePos);
+      bgLastEmitHue = bgDrive.noteHue;
+      bgLastEmitStep = ev.step ?? -1;
+      bgLastEmitE = Math.max(bgLastEmitE, 0.92);
+      bgClickPulse = Math.max(bgClickPulse, 0.64);
+    }
+  }
 
   // 更新背景效果
   updateBackgroundEffects(dt);
@@ -2130,11 +2175,12 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
 
     // Immediate interaction drive for hold/slide, with no hover-delay dependency.
     const baseHold = interactionNow ? 0.12 : 0.0;
-    const targetLead = THREE.MathUtils.clamp(baseHold + scratchVel01 * 0.62 + bgClickPulseVis * 0.42, 0, 1);
+    const autoVisualLead = autoPlayConductor?.getConfig?.()?.enabled ? autoReplayVisual.energy : 0.0;
+    const targetLead = THREE.MathUtils.clamp(baseHold + scratchVel01 * 0.62 + bgClickPulseVis * 0.42 + autoVisualLead * 0.34, 0, 1);
     // slower fall to calm (~1-2s)
     bgLeadE = __bgRiseFall(bgLeadE, targetLead, dt, 14.0, 1.1);
     const interactionTarget = THREE.MathUtils.clamp(
-      (interactionNow ? 0.9 : 0.0) + scratchVel01 * 0.35 + bgClickPulseVis * 0.25,
+      (interactionNow ? 0.9 : 0.0) + scratchVel01 * 0.35 + bgClickPulseVis * 0.25 + autoVisualLead * 0.40,
       0,
       1
     );
@@ -2146,14 +2192,15 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     const targetPitch = (typeof sScratch?.pitch01 === "number") ? sScratch.pitch01 : bgDrive.pitch01;
     const targetVel   = interactionNow ? Math.max(0.12, scratchVel01) : 0.0;
     const targetTheta = (typeof sScratch?.theta01 === "number") ? sScratch.theta01 : bgDrive.theta01;
+    const autoVisual = autoPlayConductor?.getConfig?.()?.enabled ? autoReplayVisual.energy : 0.0;
 
     bgPitch01 = __bgRiseFall(bgPitch01, THREE.MathUtils.clamp(targetPitch, 0, 1), dt, 14.0, 7.0);
-    bgVel01   = __bgRiseFall(bgVel01,   THREE.MathUtils.clamp(targetVel,   0, 1), dt, 16.0, 6.0);
+    bgVel01   = __bgRiseFall(bgVel01,   THREE.MathUtils.clamp(targetVel + autoVisual * 0.18,   0, 1), dt, 16.0, 6.0);
     bgTheta01 = __bgRiseFallWrap(bgTheta01, THREE.MathUtils.clamp(targetTheta, 0, 1), dt, 14.0, 8.0);
 
     // Directly drive visible flow/brightness response (keeps click + hold responsive).
     const cinematicGain = cinematicState.enabled ? (1.0 + cinematicState.energy * 0.42) : 1.0;
-    const flowTarget = THREE.MathUtils.clamp((0.020 + bgLeadE * 0.90 + bgClickPulseVis * 0.62) * (0.80 + 0.35 * glowUi) * (0.92 + 0.22 * richnessUi) * cinematicGain, 0, 1.20);
+    const flowTarget = THREE.MathUtils.clamp((0.020 + bgLeadE * 0.90 + bgClickPulseVis * 0.62 + autoVisual * 0.26) * (0.80 + 0.35 * glowUi) * (0.92 + 0.22 * richnessUi) * cinematicGain, 0, 1.20);
     const sparkleTarget = THREE.MathUtils.clamp(0.003 + richnessUi * 0.010, 0.001, 0.018);
     const satTargetRaw = 0.24 + bgLeadE * 0.44 + bgClickPulseVis * 0.22 + dreamUi * 0.10;
     const satTarget = THREE.MathUtils.clamp(
@@ -2167,7 +2214,7 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     const darkInteractionLift = THREE.MathUtils.lerp(0.0, 0.36, darkSpaceUi) * (0.55 * bgInteractionE + 0.45 * bgClickPulseVis);
     const darkGain = THREE.MathUtils.clamp(darkCalmDim + darkInteractionLift, 0.28, 1.0);
     const intensityTarget = THREE.MathUtils.clamp(
-      (0.010 + bgLeadE * 0.42 + bgClickPulseVis * 0.22 + cinematicState.energy * 0.08) * readabilityLimiter * (0.64 + 0.56 * glowUi) * darkGain,
+      (0.010 + bgLeadE * 0.42 + bgClickPulseVis * 0.22 + cinematicState.energy * 0.08 + autoVisual * 0.08) * readabilityLimiter * (0.64 + 0.56 * glowUi) * darkGain,
       0.006,
       0.62
     );

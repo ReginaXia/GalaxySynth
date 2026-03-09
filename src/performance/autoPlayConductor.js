@@ -19,6 +19,7 @@ export function createAutoPlayConductor({
   voices,
   audio,
   triggerBackgroundPulse,
+  onEvent = null,
 } = {}) {
   const state = {
     enabled: false,
@@ -63,6 +64,7 @@ export function createAutoPlayConductor({
       midi: intent.midi,
       instrument,
       forceTrigger: true,
+      disableHarmony: true,
       now: Tone.now(),
     });
     nebulaSystem?.triggerNotePulse?.({
@@ -71,10 +73,19 @@ export function createAutoPlayConductor({
       strength: Math.max(0, Math.min(1, 0.55 + vel * 0.40)),
     });
     triggerBackgroundPulse?.(0.45);
+    onEvent?.({
+      galaxyId,
+      theta01: intent.theta01,
+      r01: intent.r01,
+      step: intent.step,
+      degree: intent.degree,
+      velocity: vel,
+      timeMs: performance.now(),
+    });
   }
 
   function update(tSec, { pointerDown = false } = {}) {
-    if (!state.enabled || pointerDown) return;
+    if (!state.enabled) return;
     const stepDur = (60 / Math.max(50, Math.min(160, state.tempo))) / 4; // 16th note
     const stepIndex = Math.floor(tSec / stepDur);
     if (stepIndex === state.lastStepIndex) return;
@@ -135,4 +146,3 @@ export function createAutoPlayConductor({
     update,
   };
 }
-

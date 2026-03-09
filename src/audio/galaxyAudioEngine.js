@@ -64,6 +64,7 @@ function radialExpressionFromR01(r01) {
 
 export function createGalaxyAudioEngine() {
   let started = false;
+  let startPromise = null;
   const nebulaState = new Map();
   const harmonyState = {
     enabled: true,
@@ -300,15 +301,38 @@ let __globalMonotonicStartTime = -Infinity;
   // ---------------------------
   // START / STOP
   // ---------------------------
-  function start() {
-    if (started) return;
-    Tone.start();
-    started = true;
+  async function start() {
+    if (started && Tone.context?.state === "running") return true;
+    if (startPromise) return startPromise;
 
-    // ✅ 今晚目标：默认安静。节奏之后由 16-step 音轨来触发。
-    // scheduleAll();
+    startPromise = (async () => {
+      try {
+        await Tone.start();
+      } catch {}
 
-    Tone.Transport.start();
+      try {
+        if (Tone.context?.state !== "running") {
+          await Tone.context?.resume?.();
+        }
+      } catch {}
+
+      const running = Tone.context?.state === "running";
+      if (!running) {
+        started = false;
+        return false;
+      }
+
+      started = true;
+
+      // ✅ 今晚目标：默认安静。节奏之后由 16-step 音轨来触发。
+      // scheduleAll();
+      if (Tone.Transport.state !== "started") Tone.Transport.start();
+      return true;
+    })().finally(() => {
+      startPromise = null;
+    });
+
+    return startPromise;
   }
 
 
@@ -322,13 +346,16 @@ let __globalMonotonicStartTime = -Infinity;
 
   // IMPORTANT: browsers require a user gesture to start audio
   function bindUserStart(target = window) {
+    const opts = { capture: true };
     const handler = async () => {
-      if (!started) await start();
-      target.removeEventListener("pointerdown", handler);
-      target.removeEventListener("keydown", handler);
+      const ok = await start();
+      if (ok || Tone.context?.state === "running") {
+        target.removeEventListener("pointerdown", handler, opts);
+        target.removeEventListener("keydown", handler, opts);
+      }
     };
-    target.addEventListener("pointerdown", handler, { once: false });
-    target.addEventListener("keydown", handler, { once: false });
+    target.addEventListener("pointerdown", handler, opts);
+    target.addEventListener("keydown", handler, opts);
   }
 
   // ---------------------------
@@ -425,10 +452,14 @@ let __globalMonotonicStartTime = -Infinity;
     step: intentStep = null,
     degree: intentDegree = null,
     forceTrigger = false,
+    disableHarmony = false,
     instrument,
     now = Tone.now(),
   }) {
     if (!instrument) return;
+    if (Tone.context?.state !== "running") {
+      void start();
+    }
 // Tone v15 requires start times to be strictly increasing.
 // During rapid interactions (same frame), Tone.now() can repeat.
 // Also, multiple nebulae can share the same instrument instance.
@@ -495,10 +526,18 @@ now = safeNow;
     const dur = Math.max(0.11, (0.22 - speed * 0.02) * expr.durMul);
 
     // Trigger immediately (omit explicit time) to avoid Tone scheduling monotonic-time errors in rapid interactions.
-    instrument.triggerAttackRelease(note, dur, now, velocity);
+    try {
+      instrument.triggerAttackRelease(note, dur, now, velocity);
+    } catch (e) {
+      console.warn("[audio] nebula trigger failed:", e);
+      st.lastTheta = theta01;
+      st.lastTime = now;
+      nebulaState.set(galaxyId, st);
+      return;
+    }
 
     // Lightweight auto-harmony layer for more presentable one-click sound.
-    if (harmonyState.enabled) {
+    if (harmonyState.enabled && !disableHarmony) {
       const lastHarmonyTime = harmonyState.lastTimeByGalaxy.get(galaxyId) ?? -Infinity;
       const canHarmony = (now - lastHarmonyTime) >= harmonyState.minGapSec;
       if (canHarmony && Math.random() < harmonyState.chance) {
@@ -507,7 +546,11 @@ now = safeNow;
         const harmonyNote = Tone.Frequency(note).transpose(interval).toNote();
         const harmonyDur = Math.max(0.08, dur * (interval === 12 ? 0.78 : 0.86));
         const harmonyVel = clamp01(velocity * harmonyState.mix * (interval === 12 ? 0.85 : 1.0));
-        instrument.triggerAttackRelease(harmonyNote, harmonyDur, now + 0.008, harmonyVel);
+        try {
+          instrument.triggerAttackRelease(harmonyNote, harmonyDur, now + 0.008, harmonyVel);
+        } catch (e) {
+          console.warn("[audio] harmony trigger failed:", e);
+        }
         harmonyState.lastTimeByGalaxy.set(galaxyId, now);
       }
     }
