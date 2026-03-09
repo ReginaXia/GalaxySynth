@@ -161,6 +161,8 @@ export function createNotePopSystem({ scene, nebulaSystem, planeY = 0.0 }) {
     item.sprite.visible = true;
     item.sprite.position.copy(start);
     item.sprite.scale.set(item.size, item.size, 1);
+    // Immediate feedback on trigger: show a visible seed alpha right away.
+    item.sprite.material.opacity = Math.min(1, params.glow * (0.24 + 0.42 * v));
   }
 
   function update(nowSec) {
@@ -185,7 +187,7 @@ export function createNotePopSystem({ scene, nebulaSystem, planeY = 0.0 }) {
       const breathe = Math.sin(nowSec * 1.8 + it.phase) * 0.03;
       it.sprite.material.rotation = tiltFall + breathe;
 
-      const fadeIn = Math.min(1, u / THREE.MathUtils.lerp(0.16, 0.07, it.speed01));
+      const fadeIn = Math.min(1, u / THREE.MathUtils.lerp(0.06, 0.02, it.speed01));
       const fadeOut = Math.min(1, (1 - u) / THREE.MathUtils.lerp(0.62, 0.32, it.speed01));
       const alpha = fadeIn * fadeOut * (0.34 + 0.66 * arc) * params.glow;
       it.sprite.material.opacity = alpha;
