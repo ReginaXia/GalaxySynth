@@ -96,6 +96,8 @@ export function createNotePopSystem({ scene, nebulaSystem, planeY = 0.0 }) {
       height: 1.0,
       size: 0.5,
       hue: 0.58,
+      speed01: 0.5,
+      pitch01: 0.5,
       phase: Math.random() * Math.PI * 2,
     });
   }
@@ -115,6 +117,7 @@ export function createNotePopSystem({ scene, nebulaSystem, planeY = 0.0 }) {
     galaxyId = null,
     theta01 = Math.random(),
     velocity = 0.66,
+    notePitch01 = null,
     noteHue = null,
     strength = 1.0,
     now = performance.now() * 0.001,
@@ -140,16 +143,19 @@ export function createNotePopSystem({ scene, nebulaSystem, planeY = 0.0 }) {
     end.y = planeY + rand(0.05, 0.2);
 
     const v = clamp01(velocity);
+    const pitch01 = clamp01(notePitch01 ?? theta01 ?? 0.5);
     const item = alloc();
     item.alive = true;
     item.birth = now;
-    item.life = params.duration * rand(0.84, 1.22) * (0.9 + 0.22 * (1 - v));
+    item.life = params.duration * rand(0.84, 1.22) * THREE.MathUtils.lerp(1.24, 0.80, v) * THREE.MathUtils.lerp(1.06, 0.90, pitch01);
     const lively = clamp01(0.55 * v + 0.45 * clamp01(strength));
-    item.height = params.jumpHeight * rand(0.58, 1.85) * (0.62 + lively * 1.45);
+    item.height = params.jumpHeight * rand(0.58, 1.95) * (0.58 + lively * 1.45) * (0.72 + pitch01 * 0.95);
     item.size = params.size * rand(0.82, 1.3) * (0.78 + v * 0.58);
     item.start.copy(start);
     item.end.copy(end);
     item.hue = (noteHue != null ? noteHue : (0.55 + theta01 * 0.22)) % 1;
+    item.speed01 = v;
+    item.pitch01 = pitch01;
     item.phase = Math.random() * Math.PI * 2;
 
     item.sprite.visible = true;
@@ -179,8 +185,8 @@ export function createNotePopSystem({ scene, nebulaSystem, planeY = 0.0 }) {
       const breathe = Math.sin(nowSec * 1.8 + it.phase) * 0.03;
       it.sprite.material.rotation = tiltFall + breathe;
 
-      const fadeIn = Math.min(1, u / 0.08);
-      const fadeOut = Math.min(1, (1 - u) / 0.42);
+      const fadeIn = Math.min(1, u / THREE.MathUtils.lerp(0.16, 0.07, it.speed01));
+      const fadeOut = Math.min(1, (1 - u) / THREE.MathUtils.lerp(0.62, 0.32, it.speed01));
       const alpha = fadeIn * fadeOut * (0.34 + 0.66 * arc) * params.glow;
       it.sprite.material.opacity = alpha;
 
@@ -190,7 +196,9 @@ export function createNotePopSystem({ scene, nebulaSystem, planeY = 0.0 }) {
         it.sprite.material.color.setRGB(0.76, 0.88, 1.0);
       }
 
-      const s = it.size * (0.86 + 0.24 * arc);
+      const drift = (1.0 - it.speed01) * 0.22 * u;
+      it.sprite.position.y += drift;
+      const s = it.size * (0.84 + (0.22 + 0.12 * it.pitch01) * arc);
       it.sprite.scale.set(s, s, 1);
     }
   }

@@ -79,6 +79,7 @@ export function createAutoPlayConductor({
       r01: intent.r01,
       step: intent.step,
       degree: intent.degree,
+      midi: intent.midi,
       velocity: vel,
       timeMs: performance.now(),
     });

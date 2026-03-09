@@ -616,6 +616,10 @@ function emitGapMsFromVelocity(v01, slowMs = 150, fastMs = 55) {
   const v = THREE.MathUtils.clamp(v01 ?? 0, 0, 1);
   return THREE.MathUtils.lerp(slowMs, fastMs, v);
 }
+function midiToPitch01(midi) {
+  if (!Number.isFinite(Number(midi))) return 0.5;
+  return THREE.MathUtils.clamp((Number(midi) - 36) / 60, 0, 1);
+}
 
 function smoothPulse01(x) {
   const t = THREE.MathUtils.clamp(x, 0, 1);
@@ -689,6 +693,7 @@ function onAutoPlayNoteEvent(ev) {
       galaxyId: ev?.galaxyId ?? null,
       theta01: ev?.theta01 ?? Math.random(),
       velocity: vAuto,
+      notePitch01: midiToPitch01(ev?.midi),
       noteHue: ev?.theta01 ?? null,
       strength: THREE.MathUtils.lerp(0.82, 1.0, vAuto),
       now: now * 0.001,
@@ -1422,6 +1427,7 @@ canvas.addEventListener("pointerdown", (e) => {
           galaxyId: activeNebulaKey,
           theta01: musicState.activeIntent.theta01,
           velocity: velHit,
+          notePitch01: midiToPitch01(musicState.activeIntent.midi),
           noteHue: musicState.activeIntent.theta01,
           strength: THREE.MathUtils.lerp(0.90, 1.0, velHit),
           now: performance.now() * 0.001,
@@ -2392,6 +2398,7 @@ bgDrive.theta01 = theta01;
           galaxyId: activeNebulaKey ?? musicState.activeIntent?.galaxyId ?? null,
           theta01: musicState.activeIntent?.theta01 ?? (stepNow / 7),
           velocity: vPlay,
+          notePitch01: midiToPitch01(musicState.activeIntent?.midi),
           noteHue: musicState.activeIntent?.theta01 ?? (stepNow / 7),
           strength: THREE.MathUtils.lerp(0.84, 1.0, vPlay),
           now: nowMsD * 0.001,
