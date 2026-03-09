@@ -1608,6 +1608,8 @@ const bgDrive = {
   noteHue: 0.0,
   noteSeed: 0.123,
 };
+const bgTargetPos = new THREE.Vector2(0.5, 0.5);
+let bgLastSoftInjectMs = 0;
 const bgLastEmitPos = new THREE.Vector2(0.5, 0.5);
 let bgLastEmitHue = 0.66;
 let bgLastEmitStep = -1;
@@ -2050,11 +2052,13 @@ bgDrive.theta01 = theta01;
     // ✅ 给背景一个“随音符变化的色相驱动”（避免一直停留在同一主色）
     // 这里用 theta + pitch 的混合做一个稳定又有变化的 hue（0..1）
     // Keep note hue tied to angular position directly to avoid abrupt composite wrap jumps.
-    bgDrive.noteHue = ((theta01 % 1) + 1) % 1;
-// trigger a short "ink injection" pulse
-bgDrive.pulse = 1.0;
-bgDrive.noteSeed = (Math.random() * 0.999) + 0.001;
-bgDrive.notePos.set(mouse01.x, mouse01.y);
+    bgTargetPos.set(mouse01.x, mouse01.y);
+    const nowMsSoft = performance.now();
+    if ((nowMsSoft - bgLastSoftInjectMs) > 120) {
+      bgLastSoftInjectMs = nowMsSoft;
+      bgDrive.pulse = Math.max(bgDrive.pulse, 0.22);
+      bgDrive.noteSeed = (Math.random() * 0.999) + 0.001;
+    }
 
 
 
@@ -2176,11 +2180,11 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     // Immediate interaction drive for hold/slide, with no hover-delay dependency.
     const baseHold = interactionNow ? 0.12 : 0.0;
     const autoVisualLead = autoPlayConductor?.getConfig?.()?.enabled ? autoReplayVisual.energy : 0.0;
-    const targetLead = THREE.MathUtils.clamp(baseHold + scratchVel01 * 0.62 + bgClickPulseVis * 0.42 + autoVisualLead * 0.34, 0, 1);
+    const targetLead = THREE.MathUtils.clamp(baseHold + scratchVel01 * 0.46 + bgClickPulseVis * 0.30 + autoVisualLead * 0.24, 0, 1);
     // slower fall to calm (~1-2s)
     bgLeadE = __bgRiseFall(bgLeadE, targetLead, dt, 14.0, 1.1);
     const interactionTarget = THREE.MathUtils.clamp(
-      (interactionNow ? 0.9 : 0.0) + scratchVel01 * 0.35 + bgClickPulseVis * 0.25 + autoVisualLead * 0.40,
+      (interactionNow ? 0.82 : 0.0) + scratchVel01 * 0.24 + bgClickPulseVis * 0.18 + autoVisualLead * 0.28,
       0,
       1
     );
@@ -2197,10 +2201,12 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     bgPitch01 = __bgRiseFall(bgPitch01, THREE.MathUtils.clamp(targetPitch, 0, 1), dt, 14.0, 7.0);
     bgVel01   = __bgRiseFall(bgVel01,   THREE.MathUtils.clamp(targetVel + autoVisual * 0.18,   0, 1), dt, 16.0, 6.0);
     bgTheta01 = __bgRiseFallWrap(bgTheta01, THREE.MathUtils.clamp(targetTheta, 0, 1), dt, 14.0, 8.0);
+    bgDrive.noteHue = __bgRiseFallWrap(bgDrive.noteHue, bgTheta01, dt, 8.0, 4.0);
+    bgDrive.notePos.lerp(bgTargetPos, 1.0 - Math.exp(-dt * 7.5));
 
     // Directly drive visible flow/brightness response (keeps click + hold responsive).
     const cinematicGain = cinematicState.enabled ? (1.0 + cinematicState.energy * 0.42) : 1.0;
-    const flowTarget = THREE.MathUtils.clamp((0.020 + bgLeadE * 0.90 + bgClickPulseVis * 0.62 + autoVisual * 0.26) * (0.80 + 0.35 * glowUi) * (0.92 + 0.22 * richnessUi) * cinematicGain, 0, 1.20);
+    const flowTarget = THREE.MathUtils.clamp((0.015 + bgLeadE * 0.64 + bgClickPulseVis * 0.34 + autoVisual * 0.18) * (0.80 + 0.28 * glowUi) * (0.94 + 0.18 * richnessUi) * cinematicGain, 0, 1.00);
     const sparkleTarget = THREE.MathUtils.clamp(0.003 + richnessUi * 0.010, 0.001, 0.018);
     const satTargetRaw = 0.24 + bgLeadE * 0.44 + bgClickPulseVis * 0.22 + dreamUi * 0.10;
     const satTarget = THREE.MathUtils.clamp(
@@ -2214,7 +2220,7 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
     const darkInteractionLift = THREE.MathUtils.lerp(0.0, 0.36, darkSpaceUi) * (0.55 * bgInteractionE + 0.45 * bgClickPulseVis);
     const darkGain = THREE.MathUtils.clamp(darkCalmDim + darkInteractionLift, 0.28, 1.0);
     const intensityTarget = THREE.MathUtils.clamp(
-      (0.010 + bgLeadE * 0.42 + bgClickPulseVis * 0.22 + cinematicState.energy * 0.08 + autoVisual * 0.08) * readabilityLimiter * (0.64 + 0.56 * glowUi) * darkGain,
+      (0.008 + bgLeadE * 0.32 + bgClickPulseVis * 0.16 + cinematicState.energy * 0.06 + autoVisual * 0.06) * readabilityLimiter * (0.64 + 0.44 * glowUi) * darkGain,
       0.006,
       0.62
     );
@@ -2273,8 +2279,8 @@ bgDrive.notePos.set(mouse01.x, mouse01.y);
       const activeIntentNow = musicState.activeIntent;
       const hoverIntentNow = musicState.hoverIntent;
       const focusIntent = activeIntentNow ?? hoverIntentNow ?? musicState.lastIntent ?? null;
-      const activeHue = activeIntentNow?.theta01 ?? bgDrive.noteHue;
-      const hoverHue = hoverIntentNow?.theta01 ?? activeHue;
+      const activeHue = bgDrive.noteHue;
+      const hoverHue = hoverIntentNow?.theta01 ?? bgTheta01 ?? activeHue;
       const colorBlend = THREE.MathUtils.clamp(backgroundDockUI?.getColorBlend?.() ?? 0.72, 0, 1);
       const notePresence = THREE.MathUtils.lerp(0.35, 1.0, colorBlend);
       const harmony = THREE.MathUtils.lerp(0.70, 0.10, colorBlend);
