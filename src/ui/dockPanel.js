@@ -179,6 +179,15 @@ export function createDockPanel({
     root,
     body,
     contentEl,
+    setPosition(x, y) {
+      const w = width;
+      const h = root.offsetHeight || minHeight;
+      root.style.left = `${clamp(x, 8, Math.max(8, window.innerWidth - w - 8))}px`;
+      root.style.top = `${clamp(y, 8, Math.max(8, window.innerHeight - h - 8))}px`;
+      state.x = parseFloat(root.style.left);
+      state.y = parseFloat(root.style.top);
+      saveState(id, state);
+    },
     setVisible(v) {
       state.visible = !!v;
       root.style.display = state.visible ? "" : "none";

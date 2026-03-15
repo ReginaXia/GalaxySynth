@@ -248,11 +248,194 @@ export function setupGalaxyGUI({
     savePerGalaxy(id, { ...snapshot(), toneProfile: state.toneProfile });
   }
 
+  function activeOptions() {
+    const opts = {};
+    for (const c of nebulaSystem.clusters) opts[c.id] = c.id;
+    return opts;
+  }
+
+  let activeCtrl = null;
+  function handleActiveChanged() {
+    nebulaSystem.setActive(state.active);
+    pullStateFromActive();
+    const saved = loadPerGalaxy(state.active);
+    if (saved?.toneProfile && voices?.setNebulaInstrumentProfile) {
+      state.toneProfile = saved.toneProfile;
+      voices.setNebulaInstrumentProfile(state.active, state.toneProfile);
+    }
+    updateAllDisplays(gui);
+  }
+
+  function refreshActiveCtrl() {
+    if (activeCtrl) fScene.remove(activeCtrl);
+    activeCtrl = fScene.add(state, "active", activeOptions()).name("active nebula");
+    activeCtrl.onChange(handleActiveChanged);
+  }
+
+  function captureSceneSnapshot() {
+    return {
+      activeId: nebulaSystem.getActiveId(),
+      clusters: nebulaSystem.clusters.map((c) => ({
+        id: c.id,
+        transform: {
+          x: c.group.position.x,
+          y: c.group.position.y,
+          z: c.group.position.z,
+          scale: c.group.scale.x,
+        },
+        preset: structuredCloneSafe(c.preset),
+        toneProfile: voices?.getNebulaInstrumentName?.(c.id) ?? "auto",
+      })),
+    };
+  }
+
+  function clearAllClusters() {
+    while (nebulaSystem.clusters.length > 0) {
+      nebulaSystem.removeCluster(nebulaSystem.clusters[0].id);
+    }
+  }
+
+  function restoreSceneSnapshot(snapshotData) {
+    if (!snapshotData?.clusters?.length) return;
+    clearAllClusters();
+    for (const item of snapshotData.clusters) {
+      const newId = nebulaSystem.addCluster({
+        id: item.id,
+        x: item.transform.x,
+        y: item.transform.y,
+        z: item.transform.z,
+        scale: item.transform.scale,
+        preset: structuredCloneSafe(item.preset),
+      });
+      if (voices?.setNebulaInstrumentProfile && item.toneProfile && item.toneProfile !== "auto") {
+        voices.setNebulaInstrumentProfile(newId, item.toneProfile);
+      }
+    }
+    state.active = snapshotData.activeId ?? nebulaSystem.getActiveId();
+    nebulaSystem.setActive(state.active);
+    refreshActiveCtrl();
+    pullStateFromActive();
+    updateAllDisplays(gui);
+  }
+
+  function randomBetween(a, b) {
+    return a + Math.random() * (b - a);
+  }
+
+  function randomInt(a, b) {
+    return Math.floor(randomBetween(a, b + 1));
+  }
+
+  const RANDOM_NEBULA_FAMILIES = {
+    dreamy: [
+      ["#7FD8FF", "#9D8BFF", "#F3A8FF", "#BDF4FF"],
+      ["#8BD7FF", "#B89CFF", "#FFD1F6", "#9FF1FF"],
+      ["#74C8FF", "#9C9BFF", "#F6B8FF", "#D7F6FF"],
+    ],
+    dense: [
+      ["#4CB7FF", "#7A74FF", "#F07DFF", "#7FE6FF"],
+      ["#58D4FF", "#9572FF", "#FF87D4", "#A3F8FF"],
+      ["#6AC2FF", "#6E8FFF", "#FF8AF0", "#92EFFF"],
+    ],
+  };
+
+  function hslColor(h, s, l) {
+    const c = new THREE.Color();
+    c.setHSL(h, s, l);
+    return `#${c.getHexString()}`;
+  }
+
+  function jitterHexColor(hex, { hue = 0.025, sat = 0.10, light = 0.08 } = {}) {
+    const c = new THREE.Color(hex);
+    const hsl = { h: 0, s: 0, l: 0 };
+    c.getHSL(hsl);
+    const h = (hsl.h + randomBetween(-hue, hue) + 1) % 1;
+    const s = THREE.MathUtils.clamp(hsl.s + randomBetween(-sat, sat), 0.38, 0.92);
+    const l = THREE.MathUtils.clamp(hsl.l + randomBetween(-light, light), 0.42, 0.82);
+    return hslColor(h, s, l);
+  }
+
+  function randomNebulaPalette(style = "dreamy") {
+    const families = RANDOM_NEBULA_FAMILIES[style] ?? RANDOM_NEBULA_FAMILIES.dreamy;
+    const base = families[randomInt(0, families.length - 1)];
+    return {
+      c0: jitterHexColor(base[0], { hue: 0.018, sat: 0.08, light: 0.06 }),
+      c1: jitterHexColor(base[1], { hue: 0.022, sat: 0.08, light: 0.06 }),
+      c2: jitterHexColor(base[2], { hue: 0.022, sat: 0.10, light: 0.05 }),
+      c3: jitterHexColor(base[3], { hue: 0.018, sat: 0.08, light: 0.06 }),
+    };
+  }
+
+  function randomNebulaPreset(style = "dreamy") {
+    const dense = style === "dense";
+    const paletteColors = randomNebulaPalette(style);
+    return {
+      rotSpeed: randomBetween(-0.05, 0.05),
+      shape: {
+        arms: randomInt(dense ? 2 : 1, dense ? 7 : 6),
+        gap: randomBetween(dense ? 0.02 : 0.04, dense ? 0.16 : 0.22),
+        length: randomBetween(dense ? 0.95 : 0.72, dense ? 2.05 : 1.75),
+        sizeScale: randomBetween(dense ? 0.80 : 0.55, dense ? 1.70 : 1.45),
+      },
+      palette: {
+        count: 4,
+        ...paletteColors,
+        mode: Math.random() < (dense ? 0.55 : 0.82) ? 0 : 2,
+        strength: randomBetween(dense ? 1.18 : 1.05, dense ? 1.75 : 1.45),
+        noise: randomBetween(dense ? 0.22 : 0.10, dense ? 0.58 : 0.42),
+        hueJitter: randomBetween(dense ? 0.12 : 0.06, dense ? 0.34 : 0.24),
+        rainbowMix: randomBetween(0.0, dense ? 0.12 : 0.08),
+        hueScale: randomBetween(0.008, dense ? 0.024 : 0.018),
+      },
+      layers: {
+        outer: { opacity: randomBetween(dense ? 0.22 : 0.16, dense ? 0.46 : 0.32), size: randomBetween(dense ? 8.0 : 7.0, dense ? 14.0 : 12.0) },
+        core: { opacity: randomBetween(dense ? 0.18 : 0.14, dense ? 0.38 : 0.28), size: randomBetween(dense ? 7.5 : 6.5, dense ? 13.0 : 11.0) },
+        stars: { opacity: randomBetween(dense ? 0.42 : 0.32, dense ? 0.82 : 0.66), size: randomBetween(dense ? 10.0 : 8.0, dense ? 18.0 : 14.0) },
+      },
+    };
+  }
+
+  function randomTransform(index, total) {
+    const golden = 2.399963229728653;
+    const angle = index * golden + randomBetween(-0.24, 0.24);
+    const radius = randomBetween(2.2, 8.4) * (0.58 + index / Math.max(1, total - 1) * 0.52);
+    return {
+      x: Math.cos(angle) * radius,
+      y: nebulaSystem.planeY + randomBetween(-0.14, 0.18),
+      z: Math.sin(angle) * radius,
+      scale: randomBetween(0.62, 1.42),
+    };
+  }
+
+  function buildRandomNebulaMode(style = "dreamy") {
+    clearAllClusters();
+    const safeCount = Math.max(4, Math.min(style === "dense" ? 9 : 10, Math.round(randomModeState.count)));
+    for (let i = 0; i < safeCount; i++) {
+      const tf = randomTransform(i, safeCount);
+      nebulaSystem.addCluster({
+        x: tf.x,
+        y: tf.y,
+        z: tf.z,
+        scale: tf.scale,
+        preset: randomNebulaPreset(style),
+      });
+    }
+    state.active = nebulaSystem.getActiveId();
+    nebulaSystem.setActive(state.active);
+    refreshActiveCtrl();
+    pullStateFromActive();
+    if (voices?.setNebulaInstrumentProfile) {
+      state.toneProfile = voices.getNebulaInstrumentName?.(state.active) ?? "auto";
+    }
+    updateAllDisplays(gui);
+  }
+
   // init
   pullStateFromActive();
 
   // -------- GUI --------
   const gui = new GUI({ title: "GalaxySynth" });
+  const fScene = gui.addFolder("Scene Setup");
 
   const performanceCameraState = performanceCamera?.getRuntimeConfig?.() ?? {
     enablePerformanceOrbit: true,
@@ -289,14 +472,19 @@ export function setupGalaxyGUI({
     strength: 1.05,
     color: "#fdfeff",
   };
+  const randomModeState = {
+    enabled: false,
+    count: 8,
+    style: "dreamy",
+  };
+  let randomModeSnapshot = null;
 
   // ===============================
   // Nebula Attraction (搓碟引力)
   // ===============================
   // 注意：nebulaSystem 必须在 return 里暴露 attractionUI 才能用
   // nebulaSystem.attractionUI = { outerStrength, coreStrength, starsStrength, radius }
-  const fAttract = gui.addFolder("Nebula Attraction");
-  fAttract.open();
+  const fAttract = gui.addFolder("Interaction Pull");
 
   // 做个小防御：如果 attractionUI 还没加进 nebulaSystem，就提示但不崩
   if (nebulaSystem.attractionUI) {
@@ -334,7 +522,7 @@ export function setupGalaxyGUI({
     cameraControl?.setDistanceLimits?.({ maxDistance: v });
   });
 
-  const fDreamGlow = gui.addFolder("Dream Glow");
+  const fDreamGlow = gui.addFolder("Atmosphere");
   const applyEtherealPreset = () => {
     dreamyGlowState.enabled = true;
     dreamyGlowState.intensity = 1.22;
@@ -448,7 +636,7 @@ export function setupGalaxyGUI({
     backgroundReactivityController?.updateConfig?.({ enableLocalEmitters: !!v });
   });
 
-  const fPure = gui.addFolder("Pure Color");
+  const fPure = gui.addFolder("Color Purity");
   fPure.add(pureColorState, "enabled").name("enabled").onChange((v) => {
     pureColorController?.updateConfig?.({ enabled: !!v });
   });
@@ -462,7 +650,7 @@ export function setupGalaxyGUI({
     pureColorController?.updateConfig?.({ contrastSoftness: v });
   });
 
-  const fPearlWhite = gui.addFolder("Pearl White");
+  const fPearlWhite = gui.addFolder("Pearl Mist");
   fPearlWhite.add(pearlWhiteState, "enabled").name("enabled").onChange((v) => {
     pearlWhiteController?.updateConfig?.({ enabled: !!v });
   });
@@ -474,26 +662,10 @@ export function setupGalaxyGUI({
   });
 
   // Active dropdown (dynamic)
-  function activeOptions() {
-    const opts = {};
-    for (const c of nebulaSystem.clusters) opts[c.id] = c.id;
-    return opts;
-  }
-
-  let activeCtrl = gui.add(state, "active", activeOptions()).name("Active Galaxy");
-  activeCtrl.onChange(() => {
-    nebulaSystem.setActive(state.active);
-    pullStateFromActive();
-    const saved = loadPerGalaxy(state.active);
-    if (saved?.toneProfile && voices?.setNebulaInstrumentProfile) {
-      state.toneProfile = saved.toneProfile;
-      voices.setNebulaInstrumentProfile(state.active, state.toneProfile);
-    }
-    updateAllDisplays(gui);
-  });
+  refreshActiveCtrl();
 
   // Cluster manager
-  const fCluster = gui.addFolder("Cluster");
+  const fCluster = fScene.addFolder("Nebula Library");
   fCluster
     .add(
       {
@@ -506,13 +678,7 @@ export function setupGalaxyGUI({
             preset: structuredCloneSafe(activeCluster().preset),
           });
 
-          gui.remove(activeCtrl);
-          activeCtrl = gui.add(state, "active", activeOptions()).name("Active Galaxy");
-          activeCtrl.onChange(() => {
-            nebulaSystem.setActive(state.active);
-            pullStateFromActive();
-            updateAllDisplays(gui);
-          });
+          refreshActiveCtrl();
 
           state.active = newId;
           nebulaSystem.setActive(newId);
@@ -525,7 +691,7 @@ export function setupGalaxyGUI({
       },
       "Add"
     )
-    .name("Add Galaxy (Duplicate Active)");
+    .name("duplicate active");
 
   fCluster
     .add(
@@ -536,13 +702,7 @@ export function setupGalaxyGUI({
           if (!confirm(`Remove galaxy ${id}?`)) return;
           nebulaSystem.removeCluster(id);
 
-          gui.remove(activeCtrl);
-          activeCtrl = gui.add(state, "active", activeOptions()).name("Active Galaxy");
-          activeCtrl.onChange(() => {
-            nebulaSystem.setActive(state.active);
-            pullStateFromActive();
-            updateAllDisplays(gui);
-          });
+          refreshActiveCtrl();
 
           state.active = nebulaSystem.getActiveId();
           nebulaSystem.setActive(state.active);
@@ -557,9 +717,73 @@ export function setupGalaxyGUI({
       },
       "Remove"
     )
-    .name("Remove Active");
+    .name("remove active");
 
-  const fTone = gui.addFolder("Tone");
+  const fRandom = fScene.addFolder("Random Scene");
+  fRandom.add(randomModeState, "enabled").name("enabled").onChange((v) => {
+    if (v) {
+      randomModeSnapshot = captureSceneSnapshot();
+      buildRandomNebulaMode(randomModeState.style);
+      return;
+    }
+    if (randomModeSnapshot) {
+      restoreSceneSnapshot(randomModeSnapshot);
+      randomModeSnapshot = null;
+    }
+  });
+  fRandom.add(randomModeState, "count", 4, 10, 1).name("cluster count");
+  fRandom
+    .add(randomModeState, "style", { Dreamy: "dreamy", Dense: "dense" })
+    .name("style");
+  fRandom
+    .add(
+      {
+        Regenerate: () => {
+          if (!randomModeState.enabled) {
+            randomModeState.enabled = true;
+            randomModeSnapshot = captureSceneSnapshot();
+          }
+          buildRandomNebulaMode(randomModeState.style);
+          updateAllDisplays(gui);
+        },
+      },
+      "Regenerate"
+    )
+    .name("Regenerate");
+  fRandom
+    .add(
+      {
+        Dreamy: () => {
+          if (!randomModeState.enabled) {
+            randomModeState.enabled = true;
+            randomModeSnapshot = captureSceneSnapshot();
+          }
+          randomModeState.style = "dreamy";
+          buildRandomNebulaMode("dreamy");
+          updateAllDisplays(gui);
+        },
+      },
+      "Dreamy"
+    )
+    .name("Random Dreamy");
+  fRandom
+    .add(
+      {
+        Dense: () => {
+          if (!randomModeState.enabled) {
+            randomModeState.enabled = true;
+            randomModeSnapshot = captureSceneSnapshot();
+          }
+          randomModeState.style = "dense";
+          buildRandomNebulaMode("dense");
+          updateAllDisplays(gui);
+        },
+      },
+      "Dense"
+    )
+    .name("Random Dense");
+
+  const fTone = fScene.addFolder("Instrument");
   const profileList = voices?.getAvailableNebulaProfiles?.() ?? [];
   const toneOptions = { Auto: "auto" };
   for (const p of profileList) toneOptions[p] = p;
@@ -567,21 +791,21 @@ export function setupGalaxyGUI({
   toneCtrl.onChange(applyToneProfileAndSave);
 
   // Shape
-  const fShape = gui.addFolder("Shape (Rebuild)");
+  const fShape = gui.addFolder("Active Nebula Shape");
   fShape.add(state, "arms", 1, 7, 1).name("arms").onChange(scheduleRebuild);
   fShape.add(state, "gap", 0.0, 0.35, 0.005).name("armGap").onChange(scheduleRebuild);
   fShape.add(state, "length", 0.5, 2.2, 0.01).name("armLength").onChange(scheduleRebuild);
   fShape.add(state, "sizeScale", 0.35, 2.5, 0.01).name("galaxySize").onChange(scheduleRebuild);
 
   // Transform
-  const fTf = gui.addFolder("Transform");
+  const fTf = gui.addFolder("Active Nebula Transform");
   fTf.add(state, "posX", -10, 10, 0.01).name("x").onChange(applyTransformAndSave);
   fTf.add(state, "posY", nebulaSystem.planeY - 2, nebulaSystem.planeY + 2, 0.01).name("y").onChange(applyTransformAndSave);
   fTf.add(state, "posZ", -10, 10, 0.01).name("z").onChange(applyTransformAndSave);
   fTf.add(state, "scale", 0.2, 3.5, 0.01).name("scale").onChange(applyTransformAndSave);
 
   // Palette
-  const fPal = gui.addFolder("Palette (Radial Default)");
+  const fPal = gui.addFolder("Active Nebula Palette");
   fPal.add(state, "palCount", 2, 4, 1).name("paletteCount").onChange(applyPaletteAndLookAndSave);
   fPal.add(state, "colorMode", { RADIAL: 0, PATCH: 2 }).name("colorMode").onChange(applyPaletteAndLookAndSave);
   fPal.add(state, "colorStrength", 0, 2, 0.01).name("colorStrength").onChange(applyPaletteAndLookAndSave);
@@ -595,7 +819,7 @@ export function setupGalaxyGUI({
   fPal.addColor(state, "pal3").name("outerColor").onChange(applyPaletteAndLookAndSave);
 
   // Look
-  const fLook = gui.addFolder("Look (Realtime)");
+  const fLook = gui.addFolder("Active Nebula Layers");
   fLook.add(state, "outerOpacity", 0, 2, 0.01).name("outerOpacity").onChange(applyPaletteAndLookAndSave);
   fLook.add(state, "coreOpacity", 0, 2, 0.01).name("coreOpacity").onChange(applyPaletteAndLookAndSave);
   fLook.add(state, "starsOpacity", 0, 2, 0.01).name("starsOpacity").onChange(applyPaletteAndLookAndSave);
@@ -605,6 +829,21 @@ export function setupGalaxyGUI({
 
   // final: ensure perGalaxy saved
   savePerGalaxy(state.active, snapshot());
+
+  fScene.open();
+  fDreamGlow.open();
+  fCluster.open();
+  fRandom.open();
+  fAttract.close();
+  fPerfCam.close();
+  fBgReact.close();
+  fPure.close();
+  fPearlWhite.close();
+  fTone.close();
+  fShape.close();
+  fTf.close();
+  fPal.close();
+  fLook.close();
 
   return { gui, state, destroy: () => gui.destroy() };
 

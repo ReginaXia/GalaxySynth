@@ -1210,6 +1210,7 @@ uiShell.innerHTML = `
   </div>
   <div class="row">
     <button class="btn secondary" data-act="toggle-cinematic">Cinematic: OFF</button>
+    <button class="btn secondary" data-act="clean-layout">Clean Layout</button>
   </div>
   <div class="group-title">Panels</div>
   <label class="chk"><input type="checkbox" data-k="play"> Play Panel</label>
@@ -1352,6 +1353,7 @@ const notePopDock = createDockPanel({
 const uiBtn = uiShell.querySelector('[data-act="toggle-ui"]');
 const showcaseBtn = uiShell.querySelector('[data-act="toggle-showcase"]');
 const cinematicBtn = uiShell.querySelector('[data-act="toggle-cinematic"]');
+const cleanLayoutBtn = uiShell.querySelector('[data-act="clean-layout"]');
 const playChk = uiShell.querySelector('input[data-k="play"]');
 const lookChk = uiShell.querySelector('input[data-k="look"]');
 const audioChk = uiShell.querySelector('input[data-k="audio"]');
@@ -1363,6 +1365,33 @@ const autoPlayChk = uiShell.querySelector('input[data-k="autoplay"]');
 const autoPlayStyleSel = uiShell.querySelector('select[data-k="autoplay-style"]');
 const autoPlayTempoRange = uiShell.querySelector('input[data-k="autoplay-tempo"]');
 const autoPlayTempoLabel = uiShell.querySelector('[data-k="autoplay-tempo-v"]');
+
+function applyCleanDockLayout() {
+  const margin = 12;
+  const leftX = 12;
+  const rightX = Math.max(12, window.innerWidth - 320);
+  let leftY = margin;
+  let rightY = margin;
+
+  const leftColumn = [galaxyDock, colorDock, audioDock];
+  const rightColumn = [uiHubDock, meteorDock, dolphinDock, notePopDock, debugDock];
+
+  for (const dock of leftColumn) {
+    if (!dock?.root) continue;
+    dock.setVisible(true);
+    dock.setCollapsed(false);
+    dock.setPosition(leftX, leftY);
+    leftY += (dock.root.offsetHeight || 120) + 12;
+  }
+
+  for (const dock of rightColumn) {
+    if (!dock?.root) continue;
+    dock.setVisible(true);
+    dock.setCollapsed(dock === debugDock);
+    dock.setPosition(rightX, rightY);
+    rightY += (dock.root.offsetHeight || 120) + 12;
+  }
+}
 
 function applyUiState() {
   uiBtn.textContent = `Master: ${uiState.visible ? "ON" : "OFF"}`;
@@ -1435,6 +1464,10 @@ showcaseBtn.addEventListener("click", () => {
 });
 cinematicBtn.addEventListener("click", () => {
   uiState.cinematic = !uiState.cinematic;
+  applyUiState();
+});
+cleanLayoutBtn?.addEventListener("click", () => {
+  applyCleanDockLayout();
   applyUiState();
 });
 playChk.addEventListener("change", () => {
