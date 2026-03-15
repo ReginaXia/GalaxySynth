@@ -305,6 +305,7 @@ const dreamyGlowController = (() => {
   const state = {
     enabled: true,
     legacyBloom: true,
+    legacyBloomBase: 0.32,
     intensity: 0.92,
     softness: 0.32,
     starGlowBoost: 0.92,
@@ -320,6 +321,7 @@ const dreamyGlowController = (() => {
     updateConfig(partial = {}) {
       if (typeof partial.enabled === "boolean") state.enabled = partial.enabled;
       if (typeof partial.legacyBloom === "boolean") state.legacyBloom = partial.legacyBloom;
+      if (Number.isFinite(partial.legacyBloomBase)) state.legacyBloomBase = THREE.MathUtils.clamp(partial.legacyBloomBase, 0, 1.2);
       if (Number.isFinite(partial.intensity)) state.intensity = THREE.MathUtils.clamp(partial.intensity, 0, 1.5);
       if (Number.isFinite(partial.softness)) state.softness = THREE.MathUtils.clamp(partial.softness, 0, 1.5);
       if (Number.isFinite(partial.starGlowBoost)) state.starGlowBoost = THREE.MathUtils.clamp(partial.starGlowBoost, 0, 1.5);
@@ -2540,15 +2542,18 @@ bgDrive.theta01 = theta01;
   const dreamyGlowBloom = dreamyGlowController.getConfig();
   const dreamBloomE = dreamyGlowBloom.enabled ? THREE.MathUtils.clamp(dreamyGlowBloom.intensity, 0, 1.5) : 0;
   if (dreamyGlowBloom.legacyBloom) {
+    const legacyBase = dreamyGlowBloom.enabled
+      ? THREE.MathUtils.lerp(0.12, 0.72, THREE.MathUtils.clamp(dreamyGlowBloom.legacyBloomBase ?? 0.32, 0, 1.2) / 1.2)
+      : 0.0;
     const bloomTarget = dreamyGlowBloom.enabled
       ? THREE.MathUtils.clamp(
-          (0.22 + bgMood.energy * 0.30 + cinematicState.energy * 0.06) *
+          (legacyBase + bgMood.energy * 0.30 + cinematicState.energy * 0.06) *
             (0.88 + glowUiBloom * 0.28) *
             (0.94 + dreamBloomE * 0.18),
-          0.20,
-          0.72
+          legacyBase,
+          0.96
         )
-      : 0.20;
+      : 0.0;
     bloomPass.strength += (bloomTarget - bloomPass.strength) * (1 - Math.exp(-dt * 2.0));
     bloomPass.threshold = 0.95;
     bloomPass.radius = 0.18;

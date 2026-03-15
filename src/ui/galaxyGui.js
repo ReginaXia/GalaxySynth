@@ -450,6 +450,7 @@ export function setupGalaxyGUI({
   const dreamyGlowState = dreamyGlowController?.getConfig?.() ?? {
     enabled: true,
     legacyBloom: true,
+    legacyBloomBase: 0.32,
     intensity: 0.92,
     softness: 0.32,
     starGlowBoost: 0.92,
@@ -527,6 +528,7 @@ export function setupGalaxyGUI({
   const applyLegacyBloomPreset = () => {
     dreamyGlowState.enabled = true;
     dreamyGlowState.legacyBloom = true;
+    dreamyGlowState.legacyBloomBase = 0.32;
     dreamyGlowState.intensity = 0.92;
     dreamyGlowState.softness = 0.32;
     dreamyGlowState.starGlowBoost = 0.92;
@@ -537,6 +539,7 @@ export function setupGalaxyGUI({
     dreamyGlowController?.updateConfig?.({
       enabled: dreamyGlowState.enabled,
       legacyBloom: dreamyGlowState.legacyBloom,
+      legacyBloomBase: dreamyGlowState.legacyBloomBase,
       intensity: dreamyGlowState.intensity,
       softness: dreamyGlowState.softness,
       starGlowBoost: dreamyGlowState.starGlowBoost,
@@ -560,6 +563,7 @@ export function setupGalaxyGUI({
     dreamyGlowController?.updateConfig?.({
       enabled: dreamyGlowState.enabled,
       legacyBloom: dreamyGlowState.legacyBloom,
+      legacyBloomBase: dreamyGlowState.legacyBloomBase,
       intensity: dreamyGlowState.intensity,
       softness: dreamyGlowState.softness,
       starGlowBoost: dreamyGlowState.starGlowBoost,
@@ -591,6 +595,7 @@ export function setupGalaxyGUI({
     dreamyGlowController?.updateConfig?.({
       enabled: dreamyGlowState.enabled,
       legacyBloom: dreamyGlowState.legacyBloom,
+      legacyBloomBase: dreamyGlowState.legacyBloomBase,
       intensity: dreamyGlowState.intensity,
       softness: dreamyGlowState.softness,
       starGlowBoost: dreamyGlowState.starGlowBoost,
@@ -637,6 +642,9 @@ export function setupGalaxyGUI({
   });
   fDreamGlow.add(dreamyGlowState, "legacyBloom").name("legacy bloom").onChange((v) => {
     dreamyGlowController?.updateConfig?.({ legacyBloom: !!v });
+  });
+  fDreamGlow.add(dreamyGlowState, "legacyBloomBase", 0.0, 1.2, 0.01).name("base bloom").onChange((v) => {
+    dreamyGlowController?.updateConfig?.({ legacyBloomBase: v });
   });
   fDreamGlow.add(dreamyGlowState, "intensity", 0.0, 1.5, 0.01).name("intensity").onChange((v) => {
     dreamyGlowController?.updateConfig?.({ intensity: v });
