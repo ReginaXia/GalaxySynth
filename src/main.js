@@ -34,6 +34,7 @@ import { setupDolphinGUI } from "./ui/dolphinGui.js";
 import { setupNotePopGUI } from "./ui/notePopGui.js";
 
 import { createCameraControlSystem } from "./input/cameraControlSystem.js";
+import { createPerformanceCameraController } from "./camera/performanceCameraController.js";
 import { musicState } from "./state/musicState.js";
 import { resolveNoteIntent } from "./interaction/resolveNoteIntent.js";
 import { onPointerMove, onPointerDown, onPointerMovePressed, onPointerUp } from "./interaction/intentStateMachine.js";
@@ -180,6 +181,7 @@ const cameraControl = createCameraControlSystem({
   getPivotWorldPoint: getMouseWorldOnPlane, // ✅ 关键：用你已有的平面求交当 pivot
   zoomSpeed: 0.0018, // 可以从 0.0012~0.0022 调
 });
+const performanceCamera = createPerformanceCameraController();
 
 const bg = await createDreamyBackground(scene, camera, {
   palette: "aurora",
@@ -1806,6 +1808,7 @@ function tick() {
 
   // dt 用于输入平滑/音频平滑
   const dt = Math.min(0.05, clock.getDelta());
+  performanceCamera?.beginFrame?.(camera);
   cameraControl?.update?.(dt);
   if (cameraFocus.active) {
     cameraFocus.elapsed += dt;
@@ -1963,6 +1966,14 @@ const hasNebulaHit = !!nebulaHit;
     hoverTheta01: musicState.hoverIntent?.theta01 ?? null,
     activeTheta01: musicState.activeIntent?.theta01 ?? null,
     lastTheta01: musicState.lastIntent?.theta01 ?? null,
+  });
+
+  const performanceCameraBaseTarget = cameraControl?.getTarget?.() ?? orbitTarget.clone();
+  performanceCamera?.update?.(dt, {
+    camera,
+    baseTarget: performanceCameraBaseTarget,
+    hoveredNebulaId: musicState.hoverIntent?.galaxyId ?? null,
+    nebulaSystem,
   });
 
 
@@ -2537,6 +2548,10 @@ bgDrive.theta01 = theta01;
   }
 // -------------------- /Dreamy background (CLEAN) --------------------
 
+
+  performanceCamera?.apply?.(camera, performanceCameraBaseTarget);
+  if (bg) bg.update(0, camera);
+  stars.position.copy(camera.position);
 
   // --- render
   composer.render();
