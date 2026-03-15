@@ -271,7 +271,7 @@ export function setupGalaxyGUI({
     starGlowBoost: 0.92,
     backgroundLift: 0.82,
     filterAmount: 0.72,
-    filterTintMix: 0.24,
+    filterTintMix: 0.10,
     filterHaze: 0.30,
   };
   const backgroundReactivityState = backgroundReactivityController?.getConfig?.() ?? {
@@ -287,7 +287,7 @@ export function setupGalaxyGUI({
   const pearlWhiteState = pearlWhiteController?.getConfig?.() ?? {
     enabled: true,
     strength: 1.05,
-    color: "#f2efff",
+    color: "#fdfeff",
   };
 
   // ===============================
@@ -342,7 +342,7 @@ export function setupGalaxyGUI({
     dreamyGlowState.starGlowBoost = 1.12;
     dreamyGlowState.backgroundLift = 1.08;
     dreamyGlowState.filterAmount = 1.12;
-    dreamyGlowState.filterTintMix = 0.34;
+    dreamyGlowState.filterTintMix = 0.12;
     dreamyGlowState.filterHaze = 0.56;
     dreamyGlowController?.updateConfig?.({
       enabled: dreamyGlowState.enabled,
@@ -364,7 +364,57 @@ export function setupGalaxyGUI({
 
     updateAllDisplays(gui);
   };
+  const applyCelestialPreset = () => {
+    dreamyGlowState.enabled = true;
+    dreamyGlowState.intensity = 1.34;
+    dreamyGlowState.softness = 1.36;
+    dreamyGlowState.starGlowBoost = 1.18;
+    dreamyGlowState.backgroundLift = 1.18;
+    dreamyGlowState.filterAmount = 1.28;
+    dreamyGlowState.filterTintMix = 0.06;
+    dreamyGlowState.filterHaze = 0.72;
+    dreamyGlowController?.updateConfig?.({
+      enabled: dreamyGlowState.enabled,
+      intensity: dreamyGlowState.intensity,
+      softness: dreamyGlowState.softness,
+      starGlowBoost: dreamyGlowState.starGlowBoost,
+      backgroundLift: dreamyGlowState.backgroundLift,
+      filterAmount: dreamyGlowState.filterAmount,
+      filterTintMix: dreamyGlowState.filterTintMix,
+      filterHaze: dreamyGlowState.filterHaze,
+    });
+
+    backgroundReactivityState.enableNoteColorInjection = false;
+    backgroundReactivityState.enableLocalEmitters = false;
+    backgroundReactivityController?.updateConfig?.({
+      enableNoteColorInjection: false,
+      enableLocalEmitters: false,
+    });
+
+    pureColorState.enabled = true;
+    pureColorState.lift = 1.02;
+    pureColorState.saturation = 0.82;
+    pureColorState.contrastSoftness = 0.86;
+    pureColorController?.updateConfig?.({
+      enabled: pureColorState.enabled,
+      lift: pureColorState.lift,
+      saturation: pureColorState.saturation,
+      contrastSoftness: pureColorState.contrastSoftness,
+    });
+
+    pearlWhiteState.enabled = true;
+    pearlWhiteState.strength = 1.24;
+    pearlWhiteState.color = "#fffefe";
+    pearlWhiteController?.updateConfig?.({
+      enabled: pearlWhiteState.enabled,
+      strength: pearlWhiteState.strength,
+      color: pearlWhiteState.color,
+    });
+
+    updateAllDisplays(gui);
+  };
   fDreamGlow.add({ Apply: applyEtherealPreset }, "Apply").name("Ethereal");
+  fDreamGlow.add({ Apply: applyCelestialPreset }, "Apply").name("Celestial");
   fDreamGlow.add(dreamyGlowState, "enabled").name("enabled").onChange((v) => {
     dreamyGlowController?.updateConfig?.({ enabled: !!v });
   });

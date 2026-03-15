@@ -6,8 +6,8 @@ export const DreamGlowShader = {
     uResolution: { value: new THREE.Vector2(1, 1) },
     uAmount: { value: 0.0 },
     uBlurScale: { value: 1.0 },
-    uTintMix: { value: 0.18 },
-    uTintColor: { value: new THREE.Vector3(0.92, 0.88, 1.0) },
+    uTintMix: { value: 0.08 },
+    uTintColor: { value: new THREE.Vector3(0.985, 0.99, 1.0) },
     uHaze: { value: 0.0 },
   },
   vertexShader: /* glsl */`

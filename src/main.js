@@ -309,7 +309,7 @@ const dreamyGlowController = (() => {
     starGlowBoost: 0.92,
     backgroundLift: 0.82,
     filterAmount: 0.72,
-    filterTintMix: 0.24,
+    filterTintMix: 0.10,
     filterHaze: 0.30,
   };
   return {
@@ -373,7 +373,7 @@ const pearlWhiteController = (() => {
   const state = {
     enabled: true,
     strength: 1.05,
-    color: new THREE.Color("#F2EFFF"),
+    color: new THREE.Color("#FDFEFF"),
   };
   return {
     getConfig() {

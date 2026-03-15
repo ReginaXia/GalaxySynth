@@ -301,13 +301,13 @@ float ink = pulse * inkFall;
   cInk = mix(cInk, uNoteColor, noteImpact * (0.42 + 0.58 * ink));
 
   // Step 3: coexisting spectral fields (no global hue replacement).
-  vec3 spectralDeepBlue = vec3(0.12, 0.22, 0.56);
-  vec3 spectralViolet   = vec3(0.36, 0.24, 0.62);
-  vec3 spectralCyan     = vec3(0.20, 0.56, 0.66);
-  vec3 spectralMagenta  = vec3(0.56, 0.28, 0.58);
-  vec3 spectralGold     = vec3(0.50, 0.42, 0.42);
-  vec3 spectralIndigo   = vec3(0.20, 0.24, 0.66);
-  vec3 spectralPearl    = vec3(0.54, 0.68, 0.78);
+  vec3 spectralDeepBlue = vec3(0.40, 0.56, 0.88);
+  vec3 spectralViolet   = vec3(0.66, 0.60, 0.92);
+  vec3 spectralCyan     = vec3(0.52, 0.82, 0.92);
+  vec3 spectralMagenta  = vec3(0.86, 0.74, 0.94);
+  vec3 spectralGold     = vec3(0.88, 0.88, 0.90);
+  vec3 spectralIndigo   = vec3(0.52, 0.58, 0.92);
+  vec3 spectralPearl    = vec3(0.92, 0.95, 0.99);
 
   float fBlue    = fbm(q * 0.26 + vec2( t * 0.18, -t * 0.12));
   float fViolet  = fbm(q * 0.22 + vec2(-t * 0.15,  t * 0.19) + vec2( 3.4, -1.9));
@@ -395,7 +395,7 @@ float ink = pulse * inkFall;
   col += mix(c0, c1, 0.50) * contour * (0.05 + 0.14 * rich) * (0.55 + 0.45 * e);
 
   // Local "cosmic sunset" glow injection from note color (localized only).
-  vec3 warmSunset = vec3(0.82, 0.62, 0.84);
+  vec3 warmSunset = vec3(0.96, 0.94, 0.98);
   vec3 sunsetTint = mix(uNoteColor, warmSunset, 0.12);
   float sunsetCore = exp(-d * 10.5) * (0.45 + 0.55 * pulse);
   float sunsetHalo = exp(-d * 4.8) * (0.20 + 0.80 * energy);

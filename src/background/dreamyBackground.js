@@ -4,11 +4,11 @@ import bgVert from "./shaders/bg.vert.glsl?raw";
 import bgFrag from "./shaders/bg.frag.glsl?raw";
 
 export const BACKGROUND_PALETTES = {
-  pearl: { name: "Pearl Shell", colors: ["#8BE8FF","#E98DFF","#BDA7FF","#8BCBFF"] },
-  candy: { name: "Cotton Candy", colors: ["#7BDEFF","#F18BFF","#C29DFF","#9AD8FF"] },
-  aurora:{ name: "Aurora Soft",  colors: ["#67E7FF","#8F86FF","#E788FF","#97FFD8"] },
-  cosmic:{ name: "Cosmic Iris",  colors: ["#4B78FF","#7A62FF","#43D5FF","#E66BFF"] },
-  neo:   { name: "Neo Dream",    colors: ["#79FFD8","#5E8BFF","#F07DFF","#A4E8FF"] },
+  pearl: { name: "Pearl Shell", colors: ["#F9FDFF","#DAEEFF","#E7DFFF","#BEE8FF"] },
+  candy: { name: "Cotton Candy", colors: ["#EEF9FF","#D9EAFF","#EEDFFF","#B7E5FF"] },
+  aurora:{ name: "Aurora Soft",  colors: ["#EAFBFF","#CFE6FF","#E7DEFF","#C8F8F1"] },
+  cosmic:{ name: "Cosmic Iris",  colors: ["#C8E0FF","#AFC6FF","#D7CBFF","#C0EEFF"] },
+  neo:   { name: "Neo Dream",    colors: ["#DDFBFF","#C8D7FF","#E8DAFF","#CDEEFF"] },
 };
 
 function hexToVec3(hex){
