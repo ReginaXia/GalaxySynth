@@ -4,6 +4,7 @@ import * as Tone from "tone";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 
 import { setupGalaxyGUI } from "./ui/galaxyGui.js";
 import { setupMeteorGUI } from "./ui/meteorGui.js";
@@ -44,6 +45,7 @@ import starsVert from "./shaders/stars.vert.glsl?raw";
 import starsFrag from "./shaders/stars.frag.glsl?raw";
 import meteorVert from "./shaders/meteor.vert.glsl?raw";
 import meteorFrag from "./shaders/meteor.frag.glsl?raw";
+import { DreamGlowShader } from "./postprocessing/dreamGlowShader.js";
 
 console.log("MAIN JS LOADED");
 // --- Debug HUD (show active/hover)
@@ -290,10 +292,14 @@ composer.addPass(new RenderPass(scene, camera));
 
 const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.65, 0.22);
 composer.addPass(bloomPass);
+const dreamGlowPass = new ShaderPass(DreamGlowShader);
+composer.addPass(dreamGlowPass);
 
 bloomPass.strength = 1;
 bloomPass.radius = 1;
 bloomPass.threshold = 0.7;
+dreamGlowPass.enabled = false;
+dreamGlowPass.uniforms.uResolution.value.set(window.innerWidth, window.innerHeight);
 
 const dreamyGlowController = (() => {
   const state = {
@@ -302,6 +308,8 @@ const dreamyGlowController = (() => {
     softness: 0.94,
     starGlowBoost: 0.92,
     backgroundLift: 0.82,
+    filterAmount: 0.72,
+    filterTintMix: 0.24,
   };
   return {
     getConfig() {
@@ -313,6 +321,8 @@ const dreamyGlowController = (() => {
       if (Number.isFinite(partial.softness)) state.softness = THREE.MathUtils.clamp(partial.softness, 0, 1.5);
       if (Number.isFinite(partial.starGlowBoost)) state.starGlowBoost = THREE.MathUtils.clamp(partial.starGlowBoost, 0, 1.5);
       if (Number.isFinite(partial.backgroundLift)) state.backgroundLift = THREE.MathUtils.clamp(partial.backgroundLift, 0, 1.5);
+      if (Number.isFinite(partial.filterAmount)) state.filterAmount = THREE.MathUtils.clamp(partial.filterAmount, 0, 1.5);
+      if (Number.isFinite(partial.filterTintMix)) state.filterTintMix = THREE.MathUtils.clamp(partial.filterTintMix, 0, 1.0);
     },
   };
 })();
@@ -2412,6 +2422,14 @@ bgDrive.theta01 = theta01;
   bloomPass.radius = dreamyGlowBloom.enabled
     ? THREE.MathUtils.lerp(0.25, 0.88, THREE.MathUtils.clamp(dreamyGlowBloom.softness, 0, 1.5) / 1.5)
     : 0.25;
+  dreamGlowPass.enabled = dreamyGlowBloom.enabled;
+  dreamGlowPass.uniforms.uAmount.value = dreamyGlowBloom.enabled
+    ? dreamyGlowBloom.filterAmount * (0.55 + dreamBloomE * 0.65)
+    : 0.0;
+  dreamGlowPass.uniforms.uBlurScale.value = dreamyGlowBloom.enabled
+    ? THREE.MathUtils.lerp(1.4, 4.8, THREE.MathUtils.clamp(dreamyGlowBloom.softness, 0, 1.5) / 1.5)
+    : 1.0;
+  dreamGlowPass.uniforms.uTintMix.value = dreamyGlowBloom.filterTintMix;
 
   // -------------------- Dreamy background (CLEAN) --------------------
   // Clean dt/t timing. No legacy time state object.
@@ -2709,6 +2727,7 @@ window.addEventListener("resize", () => {
   camera.updateProjectionMatrix();
   composer.setSize(w, h);
   bloomPass.setSize(w, h);
+  dreamGlowPass.uniforms.uResolution.value.set(w, h);
   if (stars?.material?.uniforms?.uBaseSize) {
     const starSizeUi = THREE.MathUtils.clamp(backgroundDockUI?.getStarSize?.() ?? 16, 2, 28);
     stars.material.uniforms.uBaseSize.value = getStarBaseSize(starSizeUi);

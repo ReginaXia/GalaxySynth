@@ -259,6 +259,8 @@ export function setupGalaxyGUI({ camera, renderer, nebulaSystem, voices = null, 
     softness: 0.94,
     starGlowBoost: 0.92,
     backgroundLift: 0.82,
+    filterAmount: 0.72,
+    filterTintMix: 0.24,
   };
 
   // ===============================
@@ -320,6 +322,12 @@ export function setupGalaxyGUI({ camera, renderer, nebulaSystem, voices = null, 
   });
   fDreamGlow.add(dreamyGlowState, "backgroundLift", 0.0, 1.5, 0.01).name("bg lift").onChange((v) => {
     dreamyGlowController?.updateConfig?.({ backgroundLift: v });
+  });
+  fDreamGlow.add(dreamyGlowState, "filterAmount", 0.0, 1.5, 0.01).name("veil").onChange((v) => {
+    dreamyGlowController?.updateConfig?.({ filterAmount: v });
+  });
+  fDreamGlow.add(dreamyGlowState, "filterTintMix", 0.0, 0.8, 0.01).name("tint").onChange((v) => {
+    dreamyGlowController?.updateConfig?.({ filterTintMix: v });
   });
 
   // Active dropdown (dynamic)
