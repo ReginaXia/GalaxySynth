@@ -19,7 +19,7 @@ function clamp01(x){ return Math.max(0, Math.min(1, x)); }
 
 export async function createDreamyBackground(scene, camera = null, opts = {}){
   const radius = opts.radius ?? 2000;
-  const base = new THREE.Color(opts.baseColor ?? "#1D2140");
+  const base = new THREE.Color(opts.baseColor ?? "#2B2F54");
   const paletteKey = opts.palette ?? "pearl";
   const pal = BACKGROUND_PALETTES[paletteKey] ?? BACKGROUND_PALETTES.pearl;
 
@@ -35,6 +35,8 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
     uMouse:   { value: new THREE.Vector2(0.5, 0.5) },
 
     uBase:      { value: new THREE.Vector3(base.r, base.g, base.b) },
+    uBaseLift:  { value: new THREE.Vector3(base.r, base.g, base.b) },
+    uBaseLiftMix: { value: 0.0 },
     uIntensity: { value: opts.intensity ?? 0.05 },
     uFlow:      { value: opts.flow ?? 0.08 },
     uScale:     { value: opts.scale ?? 0.75 },

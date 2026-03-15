@@ -42,6 +42,8 @@ uniform float uEmitStr2;
 
 // Base + look
 uniform vec3  uBase;         // base dark (#131527)
+uniform vec3  uBaseLift;     // pearly lifted base
+uniform float uBaseLiftMix;  // 0..1
 uniform float uIntensity;    // overall brightness
 uniform float uFlow;         // flow speed
 uniform float uScale;        // pattern scale
@@ -356,13 +358,14 @@ float ink = pulse * inkFall;
 
   // Deep-space gradient base to avoid flat white wash.
   float gy = smoothstep(0.08, 0.92, uv.y + (flowA - 0.5) * 0.08);
-  vec3 deepLow = vec3(0.045, 0.052, 0.095);
-  vec3 deepMid = vec3(0.082, 0.086, 0.145);
-  vec3 deepHigh = vec3(0.126, 0.100, 0.186);
+  vec3 deepLow = vec3(0.072, 0.078, 0.132);
+  vec3 deepMid = vec3(0.116, 0.118, 0.182);
+  vec3 deepHigh = vec3(0.162, 0.136, 0.226);
   vec3 gradBase = mix(deepLow, deepMid, gy);
   gradBase = mix(gradBase, deepHigh, smoothstep(0.62, 1.0, gy) * 0.55);
 
-  vec3 col = mix(uBase, gradBase, 0.90);
+  vec3 baseTone = mix(uBase, uBaseLift, saturate(uBaseLiftMix));
+  vec3 col = mix(baseTone, gradBase, 0.90);
   col = mix(col, c0, wCloud);
   col = mix(col, c1, wSheen);
   col = mix(col, cInk, wInk);

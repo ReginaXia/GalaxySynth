@@ -12,6 +12,7 @@ export function setupGalaxyGUI({
   dreamyGlowController = null,
   backgroundReactivityController = null,
   pureColorController = null,
+  pearlWhiteController = null,
 }) {
   const STORAGE_KEY = "GalaxySynth_GalaxyPresets_v2";
 
@@ -283,6 +284,11 @@ export function setupGalaxyGUI({
     saturation: 0.72,
     contrastSoftness: 0.58,
   };
+  const pearlWhiteState = pearlWhiteController?.getConfig?.() ?? {
+    enabled: true,
+    strength: 1.05,
+    color: "#f2efff",
+  };
 
   // ===============================
   // Nebula Attraction (搓碟引力)
@@ -404,6 +410,17 @@ export function setupGalaxyGUI({
   });
   fPure.add(pureColorState, "contrastSoftness", 0.0, 1.5, 0.01).name("soft contrast").onChange((v) => {
     pureColorController?.updateConfig?.({ contrastSoftness: v });
+  });
+
+  const fPearlWhite = gui.addFolder("Pearl White");
+  fPearlWhite.add(pearlWhiteState, "enabled").name("enabled").onChange((v) => {
+    pearlWhiteController?.updateConfig?.({ enabled: !!v });
+  });
+  fPearlWhite.add(pearlWhiteState, "strength", 0.0, 1.5, 0.01).name("strength").onChange((v) => {
+    pearlWhiteController?.updateConfig?.({ strength: v });
+  });
+  fPearlWhite.addColor(pearlWhiteState, "color").name("mist color").onChange((v) => {
+    pearlWhiteController?.updateConfig?.({ color: v });
   });
 
   // Active dropdown (dynamic)

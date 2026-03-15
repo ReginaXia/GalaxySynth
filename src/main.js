@@ -187,7 +187,7 @@ const performanceCamera = createPerformanceCameraController();
 
 const bg = await createDreamyBackground(scene, camera, {
   palette: "pearl",
-  baseColor: "#1D2140",
+  baseColor: "#2B2F54",
 });
 
 // 初始时禁用流动效果和亮度
@@ -365,6 +365,31 @@ const pureColorController = (() => {
       if (Number.isFinite(partial.lift)) state.lift = THREE.MathUtils.clamp(partial.lift, 0, 1.5);
       if (Number.isFinite(partial.saturation)) state.saturation = THREE.MathUtils.clamp(partial.saturation, 0, 1.5);
       if (Number.isFinite(partial.contrastSoftness)) state.contrastSoftness = THREE.MathUtils.clamp(partial.contrastSoftness, 0, 1.5);
+    },
+  };
+})();
+
+const pearlWhiteController = (() => {
+  const state = {
+    enabled: true,
+    strength: 1.05,
+    color: new THREE.Color("#F2EFFF"),
+  };
+  return {
+    getConfig() {
+      return {
+        enabled: state.enabled,
+        strength: state.strength,
+        color: `#${state.color.getHexString()}`,
+      };
+    },
+    updateConfig(partial = {}) {
+      if (typeof partial.enabled === "boolean") state.enabled = partial.enabled;
+      if (Number.isFinite(partial.strength)) state.strength = THREE.MathUtils.clamp(partial.strength, 0, 1.5);
+      if (typeof partial.color === "string") state.color.set(partial.color);
+    },
+    getColor() {
+      return state.color;
     },
   };
 })();
@@ -914,6 +939,7 @@ const galaxyGuiRef = setupGalaxyGUI({
   dreamyGlowController,
   backgroundReactivityController,
   pureColorController,
+  pearlWhiteController,
 });
 window.__gui = galaxyGuiRef?.gui ?? null;
 const backgroundDockUI = createBackgroundDockPanel({ bg });
@@ -2492,8 +2518,11 @@ bgDrive.theta01 = theta01;
     const glowUi = THREE.MathUtils.clamp(noteColorUI?.getGlow?.() ?? 0.56, 0, 1);
     const dreamyGlowBg = dreamyGlowController.getConfig();
     const pureColorCfg = pureColorController.getConfig();
+    const pearlWhiteCfg = pearlWhiteController.getConfig();
+    const pearlWhiteColor = pearlWhiteController.getColor();
     const pureColorE = pureColorCfg.enabled ? 1.0 : 0.0;
     const dreamBgE = dreamyGlowBg.enabled ? THREE.MathUtils.clamp(dreamyGlowBg.intensity, 0, 1.5) : 0;
+    const pearlWhiteE = pearlWhiteCfg.enabled ? 1.0 : 0.0;
     const richnessUi = THREE.MathUtils.clamp(noteColorUI?.getRichness?.() ?? 0.58, 0, 1);
     const dreamUi = THREE.MathUtils.clamp(noteColorUI?.getDream?.() ?? 0.52, 0, 1);
     const flowDetailUi = THREE.MathUtils.clamp(backgroundDockUI?.getFlowDetail?.() ?? 0.62, 0, 1);
@@ -2599,6 +2628,13 @@ bgDrive.theta01 = theta01;
     bg.uniforms.uDetail.value = __bgRiseFall(bg.uniforms.uDetail.value, detailTarget, dt, 7.0, 2.4);
     bg.uniforms.uWarp.value = __bgRiseFall(bg.uniforms.uWarp.value, warpTarget, dt, 7.5, 2.5);
     bg.uniforms.uScale.value = __bgRiseFall(bg.uniforms.uScale.value, scaleTarget, dt, 5.8, 2.0);
+    const pearlWhiteTarget = THREE.MathUtils.clamp(
+      (0.18 + bgInteractionE * 0.48 + bgClickPulseVis * 0.26 + bgLeadE * 0.22) * pearlWhiteCfg.strength * pearlWhiteE,
+      0,
+      1
+    );
+    bg.uniforms.uBaseLift.value.set(pearlWhiteColor.r, pearlWhiteColor.g, pearlWhiteColor.b);
+    bg.uniforms.uBaseLiftMix.value = __bgRiseFall(bg.uniforms.uBaseLiftMix.value, pearlWhiteTarget, dt, 4.5, 1.8);
 
     // Pulse: when step changes while playing
     const stepNow = (typeof sScratch?.step === "number") ? sScratch.step : -1;
