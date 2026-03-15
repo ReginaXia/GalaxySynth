@@ -295,6 +295,28 @@ bloomPass.strength = 1;
 bloomPass.radius = 1;
 bloomPass.threshold = 0.7;
 
+const dreamyGlowController = (() => {
+  const state = {
+    enabled: false,
+    intensity: 0.88,
+    softness: 0.94,
+    starGlowBoost: 0.92,
+    backgroundLift: 0.82,
+  };
+  return {
+    getConfig() {
+      return { ...state };
+    },
+    updateConfig(partial = {}) {
+      if (typeof partial.enabled === "boolean") state.enabled = partial.enabled;
+      if (Number.isFinite(partial.intensity)) state.intensity = THREE.MathUtils.clamp(partial.intensity, 0, 1.5);
+      if (Number.isFinite(partial.softness)) state.softness = THREE.MathUtils.clamp(partial.softness, 0, 1.5);
+      if (Number.isFinite(partial.starGlowBoost)) state.starGlowBoost = THREE.MathUtils.clamp(partial.starGlowBoost, 0, 1.5);
+      if (Number.isFinite(partial.backgroundLift)) state.backgroundLift = THREE.MathUtils.clamp(partial.backgroundLift, 0, 1.5);
+    },
+  };
+})();
+
 // -------------------------------------
 // Raycast plane (y = 0)
 // -------------------------------------
@@ -830,7 +852,7 @@ function applyFocusOrbitMode(dt) {
   cameraControl?.syncOrbitFromCamera?.();
 }
 
-const galaxyGuiRef = setupGalaxyGUI({ camera, renderer, nebulaSystem, voices, performanceCamera, cameraControl });
+const galaxyGuiRef = setupGalaxyGUI({ camera, renderer, nebulaSystem, voices, performanceCamera, cameraControl, dreamyGlowController });
 window.__gui = galaxyGuiRef?.gui ?? null;
 const backgroundDockUI = createBackgroundDockPanel({ bg });
 
@@ -2085,6 +2107,8 @@ const hasNebulaHit = !!nebulaHit;
   const starBreathUi = THREE.MathUtils.clamp(backgroundDockUI?.getStarBreath?.() ?? 0.60, 0, 1);
   const starColorGlowUi = THREE.MathUtils.clamp(backgroundDockUI?.getStarColorGlow?.() ?? 1.8, 0, 30);
   const starSizeUi = THREE.MathUtils.clamp(backgroundDockUI?.getStarSize?.() ?? 16, 2, 28);
+  const dreamyGlow = dreamyGlowController.getConfig();
+  const dreamGlowE = dreamyGlow.enabled ? THREE.MathUtils.clamp(dreamyGlow.intensity, 0, 1.5) : 0;
   const [gAr, gAg, gAb] = backgroundDockUI?.getStarGlowColorA01?.() ?? [0.62, 0.84, 1.0];
   const [gBr, gBg, gBb] = backgroundDockUI?.getStarGlowColorB01?.() ?? [0.78, 0.70, 1.0];
   const [gCr, gCg, gCb] = backgroundDockUI?.getStarGlowColorC01?.() ?? [1.0, 0.78, 0.94];
@@ -2094,13 +2118,16 @@ const hasNebulaHit = !!nebulaHit;
   stars.material.uniforms.uBling.value = derivedBling;
   stars.material.uniforms.uSoftness.value = derivedSoftness;
   stars.material.uniforms.uCross.value = THREE.MathUtils.lerp(0.10, 0.24, starBreathUi);
-  stars.material.uniforms.uColorGlow.value = starColorGlowUi;
+  stars.material.uniforms.uColorGlow.value = starColorGlowUi * (1.0 + dreamGlowE * dreamyGlow.starGlowBoost * 1.10);
   stars.material.uniforms.uGlowColorA.value.set(gAr, gAg, gAb);
   stars.material.uniforms.uGlowColorB.value.set(gBr, gBg, gBb);
   stars.material.uniforms.uGlowColorC.value.set(gCr, gCg, gCb);
   const glowNorm = THREE.MathUtils.clamp(starColorGlowUi / 10.0, 0, 1);
   const colorPreserve = THREE.MathUtils.lerp(1.0, 0.60, glowNorm);
-  stars.material.uniforms.uOpacity.value = THREE.MathUtils.lerp(0.58, 0.92, starBreathUi) * colorPreserve;
+  stars.material.uniforms.uOpacity.value =
+    THREE.MathUtils.lerp(0.58, 0.92, starBreathUi) *
+    colorPreserve *
+    (1.0 + dreamGlowE * dreamyGlow.starGlowBoost * 0.18);
   stars.material.uniforms.uBaseSize.value = getStarBaseSize(starSizeUi);
 
   // --- nebula & meteor
@@ -2374,9 +2401,17 @@ bgDrive.theta01 = theta01;
   // 7) Bloom：只跟随 lead 能量（慢），并且整体更低
   // 这样“弹奏有光”但不会糊掉星云
   const glowUiBloom = THREE.MathUtils.clamp(noteColorUI?.getGlow?.() ?? 0.56, 0, 1);
-  bloomPass.strength += ((0.03 + bgMood.energy * 0.06 + cinematicState.energy * 0.022) * (0.55 + glowUiBloom * 0.75) - bloomPass.strength) * (1 - Math.exp(-dt * 1.4));
-  bloomPass.threshold = 0.88;   // 更柔和：避免只有极亮点被硬阈值抽出来
-  bloomPass.radius = 0.25;      // 让中心星光更柔，不容易出现硬形状
+  const dreamyGlowBloom = dreamyGlowController.getConfig();
+  const dreamBloomE = dreamyGlowBloom.enabled ? THREE.MathUtils.clamp(dreamyGlowBloom.intensity, 0, 1.5) : 0;
+  const bloomTargetBase = (0.03 + bgMood.energy * 0.06 + cinematicState.energy * 0.022) * (0.55 + glowUiBloom * 0.75);
+  const bloomTarget = bloomTargetBase * (1.0 + dreamBloomE * 1.65);
+  bloomPass.strength += (bloomTarget - bloomPass.strength) * (1 - Math.exp(-dt * 1.4));
+  bloomPass.threshold = dreamyGlowBloom.enabled
+    ? THREE.MathUtils.lerp(0.88, 0.58, THREE.MathUtils.clamp(dreamyGlowBloom.softness, 0, 1.5) / 1.5)
+    : 0.88;
+  bloomPass.radius = dreamyGlowBloom.enabled
+    ? THREE.MathUtils.lerp(0.25, 0.88, THREE.MathUtils.clamp(dreamyGlowBloom.softness, 0, 1.5) / 1.5)
+    : 0.25;
 
   // -------------------- Dreamy background (CLEAN) --------------------
   // Clean dt/t timing. No legacy time state object.
@@ -2384,6 +2419,8 @@ bgDrive.theta01 = theta01;
     const sScratch = audio.getState()?.scratch;
     const pearlUi = THREE.MathUtils.clamp(noteColorUI?.getPearl?.() ?? 0.62, 0, 1);
     const glowUi = THREE.MathUtils.clamp(noteColorUI?.getGlow?.() ?? 0.56, 0, 1);
+    const dreamyGlowBg = dreamyGlowController.getConfig();
+    const dreamBgE = dreamyGlowBg.enabled ? THREE.MathUtils.clamp(dreamyGlowBg.intensity, 0, 1.5) : 0;
     const richnessUi = THREE.MathUtils.clamp(noteColorUI?.getRichness?.() ?? 0.58, 0, 1);
     const dreamUi = THREE.MathUtils.clamp(noteColorUI?.getDream?.() ?? 0.52, 0, 1);
     const flowDetailUi = THREE.MathUtils.clamp(backgroundDockUI?.getFlowDetail?.() ?? 0.62, 0, 1);
@@ -2434,7 +2471,11 @@ bgDrive.theta01 = theta01;
     // Directly drive visible flow/brightness response (keeps click + hold responsive).
     const cinematicGain = cinematicState.enabled ? (1.0 + cinematicState.energy * 0.42) : 1.0;
     const flowTarget = THREE.MathUtils.clamp((0.015 + bgLeadE * 0.64 + bgClickPulseVis * 0.34 + autoVisual * 0.18) * (0.80 + 0.28 * glowUi) * (0.94 + 0.18 * richnessUi) * cinematicGain, 0, 1.00);
-    const sparkleTarget = THREE.MathUtils.clamp(0.003 + richnessUi * 0.010, 0.001, 0.018);
+    const sparkleTarget = THREE.MathUtils.clamp(
+      (0.003 + richnessUi * 0.010) * (1.0 + dreamBgE * dreamyGlowBg.backgroundLift * 0.60),
+      0.001,
+      0.042
+    );
     const satTargetRaw = 0.24 + bgLeadE * 0.44 + bgClickPulseVis * 0.22 + dreamUi * 0.10;
     const satTarget = THREE.MathUtils.clamp(
       satTargetRaw * (1.0 - 0.24 * darkSpaceUi),
@@ -2447,9 +2488,13 @@ bgDrive.theta01 = theta01;
     const darkInteractionLift = THREE.MathUtils.lerp(0.0, 0.36, darkSpaceUi) * (0.55 * bgInteractionE + 0.45 * bgClickPulseVis);
     const darkGain = THREE.MathUtils.clamp(darkCalmDim + darkInteractionLift, 0.28, 1.0);
     const intensityTarget = THREE.MathUtils.clamp(
-      (0.008 + bgLeadE * 0.32 + bgClickPulseVis * 0.16 + cinematicState.energy * 0.06 + autoVisual * 0.06) * readabilityLimiter * (0.64 + 0.44 * glowUi) * darkGain,
+      (0.008 + bgLeadE * 0.32 + bgClickPulseVis * 0.16 + cinematicState.energy * 0.06 + autoVisual * 0.06) *
+      readabilityLimiter *
+      (0.64 + 0.44 * glowUi) *
+      darkGain *
+      (1.0 + dreamBgE * dreamyGlowBg.backgroundLift * 0.52),
       0.006,
-      0.62
+      0.72
     );
     bg.uniforms.uFlow.value = __bgRiseFall(bg.uniforms.uFlow.value, flowTarget, dt, 12.0, 1.5);
     bg.uniforms.uSparkle.value = __bgRiseFall(bg.uniforms.uSparkle.value, sparkleTarget, dt, 6.0, 2.6);

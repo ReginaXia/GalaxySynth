@@ -2,7 +2,7 @@
 import * as THREE from "three";
 import GUI from "lil-gui";
 
-export function setupGalaxyGUI({ camera, renderer, nebulaSystem, voices = null, performanceCamera = null, cameraControl = null }) {
+export function setupGalaxyGUI({ camera, renderer, nebulaSystem, voices = null, performanceCamera = null, cameraControl = null, dreamyGlowController = null }) {
   const STORAGE_KEY = "GalaxySynth_GalaxyPresets_v2";
 
   // -------- storage --------
@@ -253,6 +253,13 @@ export function setupGalaxyGUI({ camera, renderer, nebulaSystem, voices = null, 
   const cameraDistanceState = {
     maxDistance: cameraControl?.getDistanceLimits?.()?.maxDistance ?? 60,
   };
+  const dreamyGlowState = dreamyGlowController?.getConfig?.() ?? {
+    enabled: false,
+    intensity: 0.88,
+    softness: 0.94,
+    starGlowBoost: 0.92,
+    backgroundLift: 0.82,
+  };
 
   // ===============================
   // Nebula Attraction (搓碟引力)
@@ -296,6 +303,23 @@ export function setupGalaxyGUI({ camera, renderer, nebulaSystem, voices = null, 
   });
   fPerfCam.add(cameraDistanceState, "maxDistance", 6, 120, 0.5).name("max distance").onChange((v) => {
     cameraControl?.setDistanceLimits?.({ maxDistance: v });
+  });
+
+  const fDreamGlow = gui.addFolder("Dream Glow");
+  fDreamGlow.add(dreamyGlowState, "enabled").name("enabled").onChange((v) => {
+    dreamyGlowController?.updateConfig?.({ enabled: !!v });
+  });
+  fDreamGlow.add(dreamyGlowState, "intensity", 0.0, 1.5, 0.01).name("intensity").onChange((v) => {
+    dreamyGlowController?.updateConfig?.({ intensity: v });
+  });
+  fDreamGlow.add(dreamyGlowState, "softness", 0.0, 1.5, 0.01).name("softness").onChange((v) => {
+    dreamyGlowController?.updateConfig?.({ softness: v });
+  });
+  fDreamGlow.add(dreamyGlowState, "starGlowBoost", 0.0, 1.5, 0.01).name("star lift").onChange((v) => {
+    dreamyGlowController?.updateConfig?.({ starGlowBoost: v });
+  });
+  fDreamGlow.add(dreamyGlowState, "backgroundLift", 0.0, 1.5, 0.01).name("bg lift").onChange((v) => {
+    dreamyGlowController?.updateConfig?.({ backgroundLift: v });
   });
 
   // Active dropdown (dynamic)
