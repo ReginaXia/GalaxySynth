@@ -2,7 +2,7 @@
 import * as THREE from "three";
 import GUI from "lil-gui";
 
-export function setupGalaxyGUI({ camera, renderer, nebulaSystem, voices = null }) {
+export function setupGalaxyGUI({ camera, renderer, nebulaSystem, voices = null, performanceCamera = null, cameraControl = null }) {
   const STORAGE_KEY = "GalaxySynth_GalaxyPresets_v2";
 
   // -------- storage --------
@@ -243,6 +243,17 @@ export function setupGalaxyGUI({ camera, renderer, nebulaSystem, voices = null }
   // -------- GUI --------
   const gui = new GUI({ title: "GalaxySynth" });
 
+  const performanceCameraState = performanceCamera?.getRuntimeConfig?.() ?? {
+    enablePerformanceOrbit: true,
+    performanceOrbitStrength: 0.95,
+    performanceOrbitSpeed: 1 / 30,
+    performanceOrbitDelay: 0.72,
+    performanceOrbitVerticalBias: 0.20,
+  };
+  const cameraDistanceState = {
+    maxDistance: cameraControl?.getDistanceLimits?.()?.maxDistance ?? 60,
+  };
+
   // ===============================
   // Nebula Attraction (搓碟引力)
   // ===============================
@@ -266,6 +277,26 @@ export function setupGalaxyGUI({ camera, renderer, nebulaSystem, voices = null }
   } else {
     fAttract.add({ note: "nebulaSystem.attractionUI missing" }, "note").name("⚠ setup required");
   }
+
+  const fPerfCam = gui.addFolder("Performance Camera");
+  fPerfCam.add(performanceCameraState, "enablePerformanceOrbit").name("sustain orbit").onChange((v) => {
+    performanceCamera?.updateRuntimeConfig?.({ enablePerformanceOrbit: !!v });
+  });
+  fPerfCam.add(performanceCameraState, "performanceOrbitStrength", 0.0, 2.0, 0.01).name("orbit strength").onChange((v) => {
+    performanceCamera?.updateRuntimeConfig?.({ performanceOrbitStrength: v });
+  });
+  fPerfCam.add(performanceCameraState, "performanceOrbitSpeed", 0.005, 0.15, 0.001).name("orbit speed").onChange((v) => {
+    performanceCamera?.updateRuntimeConfig?.({ performanceOrbitSpeed: v });
+  });
+  fPerfCam.add(performanceCameraState, "performanceOrbitDelay", 0.15, 2.0, 0.01).name("orbit delay").onChange((v) => {
+    performanceCamera?.updateRuntimeConfig?.({ performanceOrbitDelay: v });
+  });
+  fPerfCam.add(performanceCameraState, "performanceOrbitVerticalBias", 0.0, 0.4, 0.01).name("vertical bias").onChange((v) => {
+    performanceCamera?.updateRuntimeConfig?.({ performanceOrbitVerticalBias: v });
+  });
+  fPerfCam.add(cameraDistanceState, "maxDistance", 6, 120, 0.5).name("max distance").onChange((v) => {
+    cameraControl?.setDistanceLimits?.({ maxDistance: v });
+  });
 
   // Active dropdown (dynamic)
   function activeOptions() {

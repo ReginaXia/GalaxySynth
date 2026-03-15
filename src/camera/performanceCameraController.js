@@ -46,6 +46,16 @@ export function createPerformanceCameraController({
   pulseLookMaxDistanceFactor = 0.018,
   pulsePositionFraction = 0.010,
   pulsePositionMaxDistanceFactor = 0.010,
+  enablePerformanceOrbit = true,
+  performanceOrbitStrength = 0.95,
+  performanceOrbitSpeed = 1 / 30,
+  performanceOrbitDelay = 0.72,
+  performanceOrbitVerticalBias = 0.20,
+  performanceOrbitBlendIn = 1.8,
+  performanceOrbitBlendOut = 2.6,
+  performanceOrbitLookFraction = 0.090,
+  performanceOrbitLookMaxDistanceFactor = 0.080,
+  performanceOrbitPositionMaxDistanceFactor = 0.140,
   idleEnabled = false,
 } = {}) {
   const hover = {
@@ -82,6 +92,23 @@ export function createPerformanceCameraController({
       targetCenter: new THREE.Vector3(),
       smoothCenter: new THREE.Vector3(),
     },
+    performanceOrbit: {
+      enabled: enablePerformanceOrbit,
+      positionOffset: new THREE.Vector3(),
+      lookAtOffset: new THREE.Vector3(),
+      distanceOffset: 0,
+      rollOffset: 0,
+      strength: performanceOrbitStrength,
+      speed: performanceOrbitSpeed,
+      delay: performanceOrbitDelay,
+      verticalBias: performanceOrbitVerticalBias,
+      sustainTime: 0,
+      phase: 0,
+      weight: 0,
+      activeId: null,
+      targetCenter: new THREE.Vector3(),
+      smoothCenter: new THREE.Vector3(),
+    },
     idle: {
       enabled: idleEnabled,
       positionOffset: new THREE.Vector3(),
@@ -108,6 +135,13 @@ export function createPerformanceCameraController({
     center: new THREE.Vector3(),
     toHover: new THREE.Vector3(),
     forward: new THREE.Vector3(),
+    orbitBase: new THREE.Vector3(),
+    orbitPlanar: new THREE.Vector3(),
+    orbitTangent: new THREE.Vector3(),
+    orbitUp: new THREE.Vector3(),
+    orbitRotated: new THREE.Vector3(),
+    orbitFocus: new THREE.Vector3(),
+    quatY: new THREE.Quaternion(),
   };
 
   function resetVec4Layer(layer) {
@@ -252,6 +286,104 @@ export function createPerformanceCameraController({
       -Math.min(pulseDistanceMax, cameraDistance * pulseDistanceFactor) * offsets.pulse.energy;
   }
 
+  function updatePerformanceOrbitOffset(
+    dt,
+    camera,
+    baseTarget,
+    focusedNebulaId,
+    activePerformanceNebulaId,
+    isSustainedPlaying,
+    forceOrbitNebulaId,
+    nebulaSystem
+  ) {
+    resetVec4Layer(offsets.performanceOrbit);
+
+    if (!offsets.performanceOrbit.enabled) {
+      offsets.performanceOrbit.sustainTime = 0;
+      offsets.performanceOrbit.activeId = null;
+      offsets.performanceOrbit.weight = damp01(offsets.performanceOrbit.weight, 0, performanceOrbitBlendOut, dt);
+      return;
+    }
+
+    const forcedFocusId = forceOrbitNebulaId || null;
+    const focusNebulaId = forcedFocusId || focusedNebulaId || offsets.performanceOrbit.activeId;
+    const sustainedTargetReady = !!(
+      activePerformanceNebulaId &&
+      focusNebulaId &&
+      activePerformanceNebulaId === focusNebulaId &&
+      isSustainedPlaying
+    );
+    const orbitTargetId = forcedFocusId || (sustainedTargetReady ? activePerformanceNebulaId : null);
+
+    if (!orbitTargetId) {
+      offsets.performanceOrbit.sustainTime = 0;
+      offsets.performanceOrbit.activeId = focusNebulaId ?? null;
+      offsets.performanceOrbit.weight = damp01(offsets.performanceOrbit.weight, 0, performanceOrbitBlendOut, dt);
+      return;
+    }
+
+    if (offsets.performanceOrbit.activeId !== orbitTargetId) {
+      offsets.performanceOrbit.activeId = orbitTargetId;
+      offsets.performanceOrbit.sustainTime = 0;
+      offsets.performanceOrbit.weight = damp01(offsets.performanceOrbit.weight, 0, performanceOrbitBlendOut, dt);
+    } else {
+      offsets.performanceOrbit.sustainTime += forcedFocusId ? dt * 2.0 : dt;
+    }
+
+    const info = getNebulaFocusData(nebulaSystem, orbitTargetId, scratch.center);
+    if (!info) {
+      offsets.performanceOrbit.weight = damp01(offsets.performanceOrbit.weight, 0, performanceOrbitBlendOut, dt);
+      return;
+    }
+
+    offsets.performanceOrbit.targetCenter.copy(info.center);
+    offsets.performanceOrbit.smoothCenter.lerp(
+      offsets.performanceOrbit.targetCenter,
+      1.0 - Math.exp(-dt * 4.8)
+    );
+
+    const activationDelay = forcedFocusId ? Math.min(0.18, offsets.performanceOrbit.delay * 0.25) : offsets.performanceOrbit.delay;
+    const targetWeight = offsets.performanceOrbit.sustainTime >= activationDelay ? 1.0 : 0.0;
+    offsets.performanceOrbit.weight = damp01(
+      offsets.performanceOrbit.weight,
+      targetWeight,
+      targetWeight > offsets.performanceOrbit.weight ? performanceOrbitBlendIn : performanceOrbitBlendOut,
+      dt
+    );
+
+    if (offsets.performanceOrbit.weight <= 1e-4) return;
+
+    offsets.performanceOrbit.phase += dt * offsets.performanceOrbit.speed * Math.PI * 2.0;
+
+    const cameraDistance = Math.max(1e-4, camera.position.distanceTo(baseTarget));
+    const orbitAngle = offsets.performanceOrbit.weight * offsets.performanceOrbit.strength * 0.20;
+    const orbitYOffset =
+      cameraDistance *
+      performanceOrbitPositionMaxDistanceFactor *
+      offsets.performanceOrbit.verticalBias *
+      0.22 *
+      Math.sin(offsets.performanceOrbit.phase * 0.5 + Math.PI * 0.25);
+    const lookMax = cameraDistance * performanceOrbitLookMaxDistanceFactor * offsets.performanceOrbit.strength;
+
+    scratch.orbitBase.copy(camera.position).sub(offsets.performanceOrbit.smoothCenter);
+    scratch.orbitUp.copy(camera.up).normalize();
+    scratch.quatY.setFromAxisAngle(scratch.orbitUp, offsets.performanceOrbit.phase * orbitAngle);
+    scratch.orbitRotated.copy(scratch.orbitBase).applyQuaternion(scratch.quatY);
+    scratch.orbitRotated.y += orbitYOffset;
+
+    offsets.performanceOrbit.positionOffset
+      .copy(scratch.orbitRotated)
+      .sub(scratch.orbitBase);
+
+    scratch.orbitFocus
+      .copy(offsets.performanceOrbit.smoothCenter)
+      .sub(baseTarget)
+      .clampLength(0, lookMax)
+      .multiplyScalar(performanceOrbitLookFraction * offsets.performanceOrbit.weight);
+
+    offsets.performanceOrbit.lookAtOffset.copy(scratch.orbitFocus);
+  }
+
   function updateIdleOffset(dt) {
     resetVec4Layer(offsets.idle);
     if (!offsets.idle.enabled) return;
@@ -262,30 +394,53 @@ export function createPerformanceCameraController({
     offsets.composed.positionOffset
       .copy(offsets.hover.positionOffset)
       .add(offsets.pulse.positionOffset)
+      .add(offsets.performanceOrbit.positionOffset)
       .add(offsets.idle.positionOffset);
 
     offsets.composed.lookAtOffset
       .copy(offsets.hover.lookAtOffset)
       .add(offsets.pulse.lookAtOffset)
+      .add(offsets.performanceOrbit.lookAtOffset)
       .add(offsets.idle.lookAtOffset);
 
     offsets.composed.distanceOffset =
       offsets.hover.distanceOffset +
       offsets.pulse.distanceOffset +
+      offsets.performanceOrbit.distanceOffset +
       offsets.idle.distanceOffset;
 
     offsets.composed.rollOffset =
       offsets.hover.rollOffset +
       offsets.pulse.rollOffset +
+      offsets.performanceOrbit.rollOffset +
       offsets.idle.rollOffset;
   }
 
-  function update(dt, { camera, baseTarget, hoveredNebulaId = null, nebulaSystem } = {}) {
+  function update(dt, {
+    camera,
+    baseTarget,
+    hoveredNebulaId = null,
+    focusedNebulaId = null,
+    activePerformanceNebulaId = null,
+    isSustainedPlaying = false,
+    forceOrbitNebulaId = null,
+    nebulaSystem,
+  } = {}) {
     if (!camera || !baseTarget) return getOffsets();
 
     updateStableHover(dt, hoveredNebulaId, nebulaSystem);
     updateHoverOffset(dt, camera, baseTarget, nebulaSystem);
     updatePulseOffset(dt, camera, baseTarget, nebulaSystem);
+    updatePerformanceOrbitOffset(
+      dt,
+      camera,
+      baseTarget,
+      focusedNebulaId,
+      activePerformanceNebulaId,
+      isSustainedPlaying,
+      forceOrbitNebulaId,
+      nebulaSystem
+    );
     updateIdleOffset(dt);
     composeOffsets();
 
@@ -326,6 +481,7 @@ export function createPerformanceCameraController({
       rollOffset: offsets.composed.rollOffset,
       hoverWeight: hover.weight,
       hoveredNebulaId: hover.activeId,
+      performanceOrbitWeight: offsets.performanceOrbit.weight,
     };
   }
 
@@ -344,6 +500,34 @@ export function createPerformanceCameraController({
     offsets.pulse.enabled = !!value;
   }
 
+  function getRuntimeConfig() {
+    return {
+      enablePerformanceOrbit: offsets.performanceOrbit.enabled,
+      performanceOrbitStrength: offsets.performanceOrbit.strength,
+      performanceOrbitSpeed: offsets.performanceOrbit.speed,
+      performanceOrbitDelay: offsets.performanceOrbit.delay,
+      performanceOrbitVerticalBias: offsets.performanceOrbit.verticalBias,
+    };
+  }
+
+  function updateRuntimeConfig(partial = {}) {
+    if (typeof partial.enablePerformanceOrbit === "boolean") {
+      offsets.performanceOrbit.enabled = partial.enablePerformanceOrbit;
+    }
+    if (Number.isFinite(partial.performanceOrbitStrength)) {
+      offsets.performanceOrbit.strength = THREE.MathUtils.clamp(partial.performanceOrbitStrength, 0, 2);
+    }
+    if (Number.isFinite(partial.performanceOrbitSpeed)) {
+      offsets.performanceOrbit.speed = THREE.MathUtils.clamp(partial.performanceOrbitSpeed, 0.005, 0.3);
+    }
+    if (Number.isFinite(partial.performanceOrbitDelay)) {
+      offsets.performanceOrbit.delay = THREE.MathUtils.clamp(partial.performanceOrbitDelay, 0.1, 4.0);
+    }
+    if (Number.isFinite(partial.performanceOrbitVerticalBias)) {
+      offsets.performanceOrbit.verticalBias = THREE.MathUtils.clamp(partial.performanceOrbitVerticalBias, 0, 0.6);
+    }
+  }
+
   function setIdleEnabled(value) {
     offsets.idle.enabled = !!value;
   }
@@ -357,6 +541,10 @@ export function createPerformanceCameraController({
     // MVP2 scaffold
     queueNotePulse,
     setPulseEnabled,
+
+    // Optional sustained-play orbit bias
+    getRuntimeConfig,
+    updateRuntimeConfig,
 
     // MVP3 scaffold
     setIdleEnabled,

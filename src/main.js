@@ -253,6 +253,18 @@ const cameraFocus = {
   startTarget: new THREE.Vector3(),
   endTarget: new THREE.Vector3(),
 };
+let focusedPerformanceNebulaId = null;
+let focusOrbitNebulaId = null;
+const focusOrbitState = {
+  weight: 0,
+  phase: 0,
+  activeId: null,
+};
+const focusOrbitCenter = new THREE.Vector3();
+const focusOrbitOffset = new THREE.Vector3();
+const focusOrbitRotated = new THREE.Vector3();
+const focusOrbitAxis = new THREE.Vector3(0, 1, 0);
+const focusOrbitQuat = new THREE.Quaternion();
 
 function syncLegacyOrbitFromCamera(targetWorld) {
   orbitTarget.copy(targetWorld);
@@ -488,6 +500,7 @@ window.addEventListener("keydown", (e) => {
     interactionMode = "orbit";
     activeNebulaKey = null; // ✅ ESC 退出当前星云控制
     musicState.activeIntent = null;
+    focusOrbitNebulaId = null;
   }
 });
 
@@ -495,6 +508,7 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     activeNebulaKey = null;
     musicState.activeIntent = null;
+    focusOrbitNebulaId = null;
   }
 });
 
@@ -745,13 +759,15 @@ function focusCameraToGalaxy(galaxyId) {
   if (!galaxyId) return;
   const c = nebulaSystem.getCluster?.(galaxyId);
   if (!c?.group) return;
+  focusedPerformanceNebulaId = galaxyId;
 
   const center = c.group.localToWorld(new THREE.Vector3(0, 0, 0));
   const sizeScale = c?.preset?.shape?.sizeScale ?? 1.0;
   const lengthScale = c?.preset?.shape?.length ?? 1.0;
   const groupScale = c?.group?.scale?.x ?? 1.0;
   const nebulaRadius = Math.max(0.8, 1.9 * sizeScale * lengthScale * groupScale);
-  const desiredDist = THREE.MathUtils.clamp(nebulaRadius * 3.1, 3.8, 13.5);
+  const cameraDistanceLimits = cameraControl?.getDistanceLimits?.() ?? { maxDistance: 13.5 };
+  const desiredDist = THREE.MathUtils.clamp(nebulaRadius * 3.1, 3.8, cameraDistanceLimits.maxDistance);
 
   const currentTarget = cameraControl?.getTarget?.() ?? orbitTarget.clone();
   const viewDir = camera.position.clone().sub(currentTarget);
@@ -771,7 +787,50 @@ function focusCameraToGalaxy(galaxyId) {
   cameraFocus.active = true;
 }
 
-const galaxyGuiRef = setupGalaxyGUI({ camera, renderer, nebulaSystem, voices });
+function applyFocusOrbitMode(dt) {
+  const cfg = performanceCamera?.getRuntimeConfig?.();
+  const orbitEnabled = !!(cfg?.enablePerformanceOrbit && focusOrbitNebulaId && !cameraFocus.active);
+  focusOrbitState.weight = THREE.MathUtils.damp(
+    focusOrbitState.weight,
+    orbitEnabled ? 1.0 : 0.0,
+    orbitEnabled ? 1.6 : 2.4,
+    dt
+  );
+
+  if (!orbitEnabled || focusOrbitState.weight <= 1e-4) {
+    if (!orbitEnabled) focusOrbitState.activeId = null;
+    return;
+  }
+
+  const cluster = nebulaSystem.getCluster?.(focusOrbitNebulaId);
+  if (!cluster?.group) return;
+
+  cluster.group.localToWorld(focusOrbitCenter.set(0, 0, 0));
+
+  if (focusOrbitState.activeId !== focusOrbitNebulaId) {
+    focusOrbitState.activeId = focusOrbitNebulaId;
+  }
+
+  const orbitSpeed = THREE.MathUtils.clamp(cfg?.performanceOrbitSpeed ?? (1 / 30), 0.005, 0.15);
+  const orbitStrength = THREE.MathUtils.clamp(cfg?.performanceOrbitStrength ?? 0.95, 0, 2);
+  const orbitVerticalBias = THREE.MathUtils.clamp(cfg?.performanceOrbitVerticalBias ?? 0.20, 0, 0.6);
+  const deltaAngle = dt * Math.PI * 2 * orbitSpeed * focusOrbitState.weight;
+  focusOrbitState.phase += deltaAngle;
+
+  focusOrbitOffset.copy(camera.position).sub(focusOrbitCenter);
+  if (focusOrbitOffset.lengthSq() < 1e-6) return;
+
+  focusOrbitQuat.setFromAxisAngle(focusOrbitAxis, deltaAngle);
+  focusOrbitRotated.copy(focusOrbitOffset).applyQuaternion(focusOrbitQuat);
+  const verticalAmp = focusOrbitOffset.length() * 0.035 * orbitVerticalBias * Math.min(1.2, 0.65 + orbitStrength * 0.35);
+  focusOrbitRotated.y += Math.sin(focusOrbitState.phase * 0.65) * verticalAmp * focusOrbitState.weight;
+
+  camera.position.copy(focusOrbitCenter).add(focusOrbitRotated);
+  cameraControl?.setTarget?.(focusOrbitCenter);
+  cameraControl?.syncOrbitFromCamera?.();
+}
+
+const galaxyGuiRef = setupGalaxyGUI({ camera, renderer, nebulaSystem, voices, performanceCamera, cameraControl });
 window.__gui = galaxyGuiRef?.gui ?? null;
 const backgroundDockUI = createBackgroundDockPanel({ bg });
 
@@ -1345,6 +1404,7 @@ window.addEventListener("keydown", (e) => {
       musicState.hoverIntent?.galaxyId ??
       activeNebulaKey ??
       nebulaSystem.getActiveId?.();
+    focusOrbitNebulaId = focusGalaxyId ?? null;
     focusCameraToGalaxy(focusGalaxyId);
   }
 });
@@ -1838,6 +1898,7 @@ function tick() {
       cameraControl?.syncOrbitFromCamera?.();
     }
   }
+  applyFocusOrbitMode(dt);
   const t = clock.getElapsedTime();
   autoPlayConductor?.update?.(t, { pointerDown });
   autoReplayVisual.energy = __bgRiseFall(autoReplayVisual.energy, 0.0, dt, 10.0, 1.8);
@@ -1981,11 +2042,25 @@ const hasNebulaHit = !!nebulaHit;
     lastTheta01: musicState.lastIntent?.theta01 ?? null,
   });
 
+  let isPerformancePlaying = false;
+  const performanceActiveNebulaId = musicState.activeIntent?.galaxyId ?? null;
+  if (pointerDown && performanceActiveNebulaId && activeDiskCenterW && musicState.activeIntent) {
+    const centerN = activeDiskCenterW.clone().project(camera);
+    const dx = pointer.x - centerN.x;
+    const dy = pointer.y - centerN.y;
+    const dist = Math.hypot(dx, dy);
+    isPerformancePlaying = dist <= activeDiskOuterNDC;
+  }
+
   const performanceCameraBaseTarget = cameraControl?.getTarget?.() ?? orbitTarget.clone();
   performanceCamera?.update?.(dt, {
     camera,
     baseTarget: performanceCameraBaseTarget,
     hoveredNebulaId: musicState.hoverIntent?.galaxyId ?? null,
+    focusedNebulaId: focusedPerformanceNebulaId,
+    activePerformanceNebulaId: performanceActiveNebulaId,
+    isSustainedPlaying: isPerformancePlaying,
+    forceOrbitNebulaId: null,
     nebulaSystem,
   });
 
