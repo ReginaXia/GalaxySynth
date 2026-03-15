@@ -53,6 +53,7 @@ uniform float uPearl;        // pearly sheen amount
 uniform float uSparkle;      // glitter amount
 uniform float uSat;          // saturation boost (0..2)
 uniform float uContrast;     // contrast (0.5..2)
+uniform float uLegacyColorMode;
 
 // Palette (not rainbow, controllable)
 uniform vec3 uPal0;
@@ -172,7 +173,7 @@ void main(){
   vec3 dir = normalize(vWorldPos - cameraPosition);
   vec2 uv = vec2(atan(dir.z, dir.x) / (6.2831853) + 0.5, asin(dir.y) / 3.1415926 + 0.5);
 
-  float t = uTime * (0.016 + 0.22 * uFlow);
+  float t = uTime * (0.010 + 0.14 * uFlow);
 
   float e = saturate(uLeadE);
   float e2 = e*e;
@@ -209,7 +210,7 @@ void main(){
   energy *= 0.98; // gentle diffusion damping
 
   vec2 swirlDir = vec2(-dInt.y, dInt.x) / max(1e-4, distInt);
-  float swirlPhase = sin(uTime * (0.35 + 0.45 * uFlow) + distInt * 14.0 + uTheta01 * 6.28318);
+  float swirlPhase = sin(uTime * (0.22 + 0.28 * uFlow) + distInt * 14.0 + uTheta01 * 6.28318);
 
   // Background flow direction for transport (from existing domain warp fields).
   vec2 flowDir = normalize(vec2(w1.x - w2.y, w1.y + w2.x) + vec2(1e-4, 1e-4));
@@ -448,6 +449,21 @@ float ink = pulse * inkFall;
   float satMask = saturate(0.22 + satMaskRidge * 0.52 + energy * 0.40 + emitMask * 0.28);
   col = mix(col, satCol, satMask);
   col = mix(col, applyContrast(col, uContrast), 0.72);
+
+  float legacyMode = saturate(uLegacyColorMode);
+  if (legacyMode > 0.001) {
+    vec3 legacyBase = mix(baseTone, gradBase, 0.82);
+    vec3 legacyField = mix(c0, c1, 0.38 + 0.18 * band2);
+    vec3 legacyCol = mix(legacyBase, c0, wCloud * 0.82);
+    legacyCol = mix(legacyCol, legacyField, wSheen * 0.70);
+    legacyCol = mix(legacyCol, spectralCol, spectralBlend * 0.26);
+    legacyCol += filamentCol * filamentMask * (0.04 + 0.09 * rich) * (0.48 + 0.22 * e);
+    legacyCol += mix(c0, spectralCol, 0.24) * filamentHi * (0.02 + 0.05 * rich);
+    legacyCol += sp * mix(c1, spectralCol, 0.34);
+    legacyCol = mix(legacyCol, applySaturation(legacyCol, 1.08 + uSat * 1.02), 0.44);
+    legacyCol = mix(legacyCol, applyContrast(legacyCol, mix(0.96, uContrast, 0.52)), 0.46);
+    col = mix(col, legacyCol, legacyMode);
+  }
 
   // Keep luminous colors from collapsing back into the dark base.
   float purityMask = saturate(max(max(col.r, col.g), col.b) - min(min(col.r, col.g), col.b));

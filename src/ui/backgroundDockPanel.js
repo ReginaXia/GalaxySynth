@@ -180,6 +180,7 @@ export function createBackgroundDockPanel({ bg }) {
     starSize: 16,
   };
   const state = loadState(defaults);
+  let legacySnapshot = null;
 
   const root = document.createElement("div");
   root.className = "custom-ui background-dock-panel";
@@ -223,6 +224,14 @@ export function createBackgroundDockPanel({ bg }) {
   info.style.cssText = "font-size:11px; opacity:.72; margin-bottom:6px;";
   body.appendChild(info);
 
+  const modeWrap = document.createElement("div");
+  modeWrap.style.cssText = "display:flex; gap:6px; margin-bottom:8px;";
+  body.appendChild(modeWrap);
+
+  const modeLabel = document.createElement("div");
+  modeLabel.style.cssText = "font-size:11px; opacity:.72; margin-bottom:8px;";
+  body.appendChild(modeLabel);
+
   const presetWrap = document.createElement("div");
   presetWrap.style.cssText = "display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;";
   body.appendChild(presetWrap);
@@ -255,6 +264,7 @@ export function createBackgroundDockPanel({ bg }) {
   body.appendChild(colorGrid);
 
   const palUniforms = [bg.uniforms.uPal0, bg.uniforms.uPal1, bg.uniforms.uPal2, bg.uniforms.uPal3];
+  const paletteInputs = [];
   for (let i = 0; i < 4; i++) {
     const label = document.createElement("div");
     label.textContent = `Palette ${i + 1}`;
@@ -270,6 +280,7 @@ export function createBackgroundDockPanel({ bg }) {
       palUniforms[i].value.copy(v);
     });
     colorGrid.appendChild(input);
+    paletteInputs.push(input);
   }
 
   const blendRow = makeRange(body, "Color Blend", state.colorBlend, (v, sync) => {
@@ -317,6 +328,7 @@ export function createBackgroundDockPanel({ bg }) {
   const starGlowColorGrid = document.createElement("div");
   starGlowColorGrid.style.cssText = "display:grid; grid-template-columns:1fr 48px; gap:6px 8px; margin-top:6px;";
   body.appendChild(starGlowColorGrid);
+  const starGlowInputs = {};
   const addStarGlowColorInput = (labelText, key) => {
     const label = document.createElement("div");
     label.textContent = labelText;
@@ -332,6 +344,7 @@ export function createBackgroundDockPanel({ bg }) {
       saveState(state);
     });
     starGlowColorGrid.appendChild(input);
+    starGlowInputs[key] = input;
   };
   addStarGlowColorInput("Glow Color A", "starGlowColorA");
   addStarGlowColorInput("Glow Color B", "starGlowColorB");
@@ -343,6 +356,123 @@ export function createBackgroundDockPanel({ bg }) {
     saveState(state);
   });
   starSizeRow.sync(state.starSize);
+
+  function syncPaletteInputs() {
+    for (let i = 0; i < 4; i++) {
+      if (paletteInputs[i]) paletteInputs[i].value = toHex(palUniforms[i].value);
+    }
+  }
+
+  function syncStarGlowInputs() {
+    for (const key of ["starGlowColorA", "starGlowColorB", "starGlowColorC"]) {
+      if (starGlowInputs[key]) starGlowInputs[key].value = state[key];
+    }
+  }
+
+  function captureVisualState() {
+    return {
+      legacyColorMode: bg.getLegacyColorMode?.() ?? 0.0,
+      palette: palUniforms.map((u) => toHex(u.value)),
+      colorBlend: state.colorBlend,
+      flowDetail: state.flowDetail,
+      darkSpace: state.darkSpace,
+      localColorLift: state.localColorLift,
+      starBreath: state.starBreath,
+      starColorGlow: state.starColorGlow,
+      starGlowColorA: state.starGlowColorA,
+      starGlowColorB: state.starGlowColorB,
+      starGlowColorC: state.starGlowColorC,
+      starSize: state.starSize,
+    };
+  }
+
+  function applyVisualState(next) {
+    if (Number.isFinite(next.legacyColorMode)) {
+      bg.setLegacyColorMode?.(next.legacyColorMode);
+    }
+    if (Array.isArray(next.palette) && next.palette.length >= 4) {
+      for (let i = 0; i < 4; i++) {
+        palUniforms[i].value.copy(hexToV3(next.palette[i]));
+      }
+      syncPaletteInputs();
+    }
+    if (Number.isFinite(next.colorBlend)) {
+      state.colorBlend = clamp01(next.colorBlend);
+      blendRow.sync(state.colorBlend);
+    }
+    if (Number.isFinite(next.flowDetail)) {
+      state.flowDetail = clamp01(next.flowDetail);
+      flowDetailRow.sync(state.flowDetail);
+    }
+    if (Number.isFinite(next.darkSpace)) {
+      state.darkSpace = clamp01(next.darkSpace);
+      darkSpaceRow.sync(state.darkSpace);
+    }
+    if (Number.isFinite(next.localColorLift)) {
+      state.localColorLift = clamp01(next.localColorLift);
+      localColorLiftRow.sync(state.localColorLift);
+    }
+    if (Number.isFinite(next.starBreath)) {
+      state.starBreath = clamp01(next.starBreath);
+      starBreathRow.sync(state.starBreath);
+    }
+    if (Number.isFinite(next.starColorGlow)) {
+      state.starColorGlow = clampRange(next.starColorGlow, 0, 30);
+      starColorGlowRow.sync(state.starColorGlow);
+    }
+    if (typeof next.starGlowColorA === "string") state.starGlowColorA = next.starGlowColorA;
+    if (typeof next.starGlowColorB === "string") state.starGlowColorB = next.starGlowColorB;
+    if (typeof next.starGlowColorC === "string") state.starGlowColorC = next.starGlowColorC;
+    syncStarGlowInputs();
+    if (Number.isFinite(next.starSize)) {
+      state.starSize = clampRange(next.starSize, 2, 28);
+      starSizeRow.sync(state.starSize);
+    }
+    saveState(state);
+  }
+
+  function setModeLabel(text) {
+    modeLabel.textContent = `Color mode: ${text}`;
+  }
+
+  function makeModeBtn(name, onClick) {
+    const btn = document.createElement("button");
+    btn.textContent = name;
+    btn.style.cssText = "border:0; border-radius:7px; padding:4px 8px; cursor:pointer; color:#eaf0ff; background:rgba(68,88,156,.38); font:11px/1.1 'IBM Plex Sans','Segoe UI',ui-sans-serif,sans-serif;";
+    btn.addEventListener("click", onClick);
+    modeWrap.appendChild(btn);
+    return btn;
+  }
+
+  makeModeBtn("Current", () => {
+    if (legacySnapshot) {
+      applyVisualState(legacySnapshot);
+      legacySnapshot = null;
+    }
+    bg.setLegacyColorMode?.(0.0);
+    setModeLabel("Current");
+  });
+  makeModeBtn("A8222 Legacy", () => {
+    if (!legacySnapshot) {
+      legacySnapshot = captureVisualState();
+    }
+    applyVisualState({
+      legacyColorMode: 1.0,
+      palette: ["#C8E0FF", "#AFC6FF", "#D7CBFF", "#C0EEFF"],
+      colorBlend: 0.24,
+      flowDetail: 0.74,
+      darkSpace: 0.56,
+      localColorLift: 0.14,
+      starBreath: 0.52,
+      starColorGlow: 1.5,
+      starGlowColorA: "#9fd8ff",
+      starGlowColorB: "#c5c3ff",
+      starGlowColorC: "#e8dcff",
+      starSize: 15,
+    });
+    setModeLabel("A8222 Legacy");
+  });
+  setModeLabel("Current");
 
   foldBtn.addEventListener("click", () => {
     state.collapsed = !state.collapsed;

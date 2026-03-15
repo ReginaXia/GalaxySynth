@@ -46,6 +46,7 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
     uSparkle:   { value: opts.sparkle ?? 0.015 },
     uSat:       { value: opts.sat ?? 0.30 },
     uContrast:  { value: opts.contrast ?? 0.84 },
+    uLegacyColorMode: { value: opts.legacyColorMode ?? 0.0 },
 
     uPal0: { value: hexToVec3(pal.colors[0]) },
     uPal1: { value: hexToVec3(pal.colors[1]) },
@@ -129,6 +130,14 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
       uniforms.uPal1.value.copy(hexToVec3(colors[1]));
       uniforms.uPal2.value.copy(hexToVec3(colors[2]));
       uniforms.uPal3.value.copy(hexToVec3(colors[3]));
+    },
+    setLegacyColorMode(enabledOrMix = 0.0) {
+      uniforms.uLegacyColorMode.value = clamp01(
+        typeof enabledOrMix === "boolean" ? (enabledOrMix ? 1.0 : 0.0) : Number(enabledOrMix) || 0.0
+      );
+    },
+    getLegacyColorMode() {
+      return uniforms.uLegacyColorMode.value;
     },
 
     setAudio({

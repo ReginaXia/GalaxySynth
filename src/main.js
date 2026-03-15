@@ -335,14 +335,22 @@ const dreamyGlowController = (() => {
 
 const backgroundReactivityController = (() => {
   const state = {
+    cleanBackgroundMode: false,
     enableNoteColorInjection: true,
     enableLocalEmitters: true,
   };
   return {
     getConfig() {
-      return { ...state };
+      return {
+        ...state,
+        enableNoteColorInjection: !state.cleanBackgroundMode && state.enableNoteColorInjection,
+        enableLocalEmitters: !state.cleanBackgroundMode && state.enableLocalEmitters,
+      };
     },
     updateConfig(partial = {}) {
+      if (typeof partial.cleanBackgroundMode === "boolean") {
+        state.cleanBackgroundMode = partial.cleanBackgroundMode;
+      }
       if (typeof partial.enableNoteColorInjection === "boolean") {
         state.enableNoteColorInjection = partial.enableNoteColorInjection;
       }
@@ -2645,7 +2653,14 @@ bgDrive.theta01 = theta01;
 
     // Directly drive visible flow/brightness response (keeps click + hold responsive).
     const cinematicGain = cinematicState.enabled ? (1.0 + cinematicState.energy * 0.42) : 1.0;
-    const flowTarget = THREE.MathUtils.clamp((0.015 + bgLeadE * 0.64 + bgClickPulseVis * 0.34 + autoVisual * 0.18) * (0.80 + 0.28 * glowUi) * (0.94 + 0.18 * richnessUi) * cinematicGain, 0, 1.00);
+    const flowTarget = THREE.MathUtils.clamp(
+      (0.010 + bgLeadE * 0.42 + bgClickPulseVis * 0.20 + autoVisual * 0.12) *
+      (0.72 + 0.20 * glowUi) *
+      (0.90 + 0.12 * richnessUi) *
+      cinematicGain,
+      0,
+      0.72
+    );
     const sparkleTarget = THREE.MathUtils.clamp(
       (0.003 + richnessUi * 0.010) * (1.0 + dreamBgE * dreamyGlowBg.backgroundLift * 0.60),
       0.001,

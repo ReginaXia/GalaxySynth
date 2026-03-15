@@ -460,6 +460,7 @@ export function setupGalaxyGUI({
     filterHaze: 0.14,
   };
   const backgroundReactivityState = backgroundReactivityController?.getConfig?.() ?? {
+    cleanBackgroundMode: false,
     enableNoteColorInjection: true,
     enableLocalEmitters: true,
   };
@@ -575,7 +576,9 @@ export function setupGalaxyGUI({
 
     backgroundReactivityState.enableNoteColorInjection = false;
     backgroundReactivityState.enableLocalEmitters = false;
+    backgroundReactivityState.cleanBackgroundMode = true;
     backgroundReactivityController?.updateConfig?.({
+      cleanBackgroundMode: true,
       enableNoteColorInjection: false,
       enableLocalEmitters: false,
     });
@@ -607,7 +610,9 @@ export function setupGalaxyGUI({
 
     backgroundReactivityState.enableNoteColorInjection = false;
     backgroundReactivityState.enableLocalEmitters = false;
+    backgroundReactivityState.cleanBackgroundMode = true;
     backgroundReactivityController?.updateConfig?.({
+      cleanBackgroundMode: true,
       enableNoteColorInjection: false,
       enableLocalEmitters: false,
     });
@@ -669,6 +674,9 @@ export function setupGalaxyGUI({
   });
 
   const fBgReact = gui.addFolder("Background Reactivity");
+  fBgReact.add(backgroundReactivityState, "cleanBackgroundMode").name("clean background").onChange((v) => {
+    backgroundReactivityController?.updateConfig?.({ cleanBackgroundMode: !!v });
+  });
   fBgReact.add(backgroundReactivityState, "enableNoteColorInjection").name("note tint").onChange((v) => {
     backgroundReactivityController?.updateConfig?.({ enableNoteColorInjection: !!v });
   });
