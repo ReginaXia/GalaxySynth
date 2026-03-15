@@ -186,8 +186,8 @@ const cameraControl = createCameraControlSystem({
 const performanceCamera = createPerformanceCameraController();
 
 const bg = await createDreamyBackground(scene, camera, {
-  palette: "aurora",
-  baseColor: "#04050D",
+  palette: "pearl",
+  baseColor: "#1D2140",
 });
 
 // 初始时禁用流动效果和亮度
@@ -310,6 +310,7 @@ const dreamyGlowController = (() => {
     backgroundLift: 0.82,
     filterAmount: 0.72,
     filterTintMix: 0.24,
+    filterHaze: 0.30,
   };
   return {
     getConfig() {
@@ -323,6 +324,47 @@ const dreamyGlowController = (() => {
       if (Number.isFinite(partial.backgroundLift)) state.backgroundLift = THREE.MathUtils.clamp(partial.backgroundLift, 0, 1.5);
       if (Number.isFinite(partial.filterAmount)) state.filterAmount = THREE.MathUtils.clamp(partial.filterAmount, 0, 1.5);
       if (Number.isFinite(partial.filterTintMix)) state.filterTintMix = THREE.MathUtils.clamp(partial.filterTintMix, 0, 1.0);
+      if (Number.isFinite(partial.filterHaze)) state.filterHaze = THREE.MathUtils.clamp(partial.filterHaze, 0, 1.0);
+    },
+  };
+})();
+
+const backgroundReactivityController = (() => {
+  const state = {
+    enableNoteColorInjection: true,
+    enableLocalEmitters: true,
+  };
+  return {
+    getConfig() {
+      return { ...state };
+    },
+    updateConfig(partial = {}) {
+      if (typeof partial.enableNoteColorInjection === "boolean") {
+        state.enableNoteColorInjection = partial.enableNoteColorInjection;
+      }
+      if (typeof partial.enableLocalEmitters === "boolean") {
+        state.enableLocalEmitters = partial.enableLocalEmitters;
+      }
+    },
+  };
+})();
+
+const pureColorController = (() => {
+  const state = {
+    enabled: false,
+    lift: 0.68,
+    saturation: 0.72,
+    contrastSoftness: 0.58,
+  };
+  return {
+    getConfig() {
+      return { ...state };
+    },
+    updateConfig(partial = {}) {
+      if (typeof partial.enabled === "boolean") state.enabled = partial.enabled;
+      if (Number.isFinite(partial.lift)) state.lift = THREE.MathUtils.clamp(partial.lift, 0, 1.5);
+      if (Number.isFinite(partial.saturation)) state.saturation = THREE.MathUtils.clamp(partial.saturation, 0, 1.5);
+      if (Number.isFinite(partial.contrastSoftness)) state.contrastSoftness = THREE.MathUtils.clamp(partial.contrastSoftness, 0, 1.5);
     },
   };
 })();
@@ -862,7 +904,17 @@ function applyFocusOrbitMode(dt) {
   cameraControl?.syncOrbitFromCamera?.();
 }
 
-const galaxyGuiRef = setupGalaxyGUI({ camera, renderer, nebulaSystem, voices, performanceCamera, cameraControl, dreamyGlowController });
+const galaxyGuiRef = setupGalaxyGUI({
+  camera,
+  renderer,
+  nebulaSystem,
+  voices,
+  performanceCamera,
+  cameraControl,
+  dreamyGlowController,
+  backgroundReactivityController,
+  pureColorController,
+});
 window.__gui = galaxyGuiRef?.gui ?? null;
 const backgroundDockUI = createBackgroundDockPanel({ bg });
 
@@ -2430,6 +2482,7 @@ bgDrive.theta01 = theta01;
     ? THREE.MathUtils.lerp(1.4, 4.8, THREE.MathUtils.clamp(dreamyGlowBloom.softness, 0, 1.5) / 1.5)
     : 1.0;
   dreamGlowPass.uniforms.uTintMix.value = dreamyGlowBloom.filterTintMix;
+  dreamGlowPass.uniforms.uHaze.value = dreamyGlowBloom.enabled ? dreamyGlowBloom.filterHaze : 0.0;
 
   // -------------------- Dreamy background (CLEAN) --------------------
   // Clean dt/t timing. No legacy time state object.
@@ -2438,6 +2491,8 @@ bgDrive.theta01 = theta01;
     const pearlUi = THREE.MathUtils.clamp(noteColorUI?.getPearl?.() ?? 0.62, 0, 1);
     const glowUi = THREE.MathUtils.clamp(noteColorUI?.getGlow?.() ?? 0.56, 0, 1);
     const dreamyGlowBg = dreamyGlowController.getConfig();
+    const pureColorCfg = pureColorController.getConfig();
+    const pureColorE = pureColorCfg.enabled ? 1.0 : 0.0;
     const dreamBgE = dreamyGlowBg.enabled ? THREE.MathUtils.clamp(dreamyGlowBg.intensity, 0, 1.5) : 0;
     const richnessUi = THREE.MathUtils.clamp(noteColorUI?.getRichness?.() ?? 0.58, 0, 1);
     const dreamUi = THREE.MathUtils.clamp(noteColorUI?.getDream?.() ?? 0.52, 0, 1);
@@ -2496,9 +2551,9 @@ bgDrive.theta01 = theta01;
     );
     const satTargetRaw = 0.24 + bgLeadE * 0.44 + bgClickPulseVis * 0.22 + dreamUi * 0.10;
     const satTarget = THREE.MathUtils.clamp(
-      satTargetRaw * (1.0 - 0.24 * darkSpaceUi),
-      0.16,
-      THREE.MathUtils.lerp(0.96, 0.80, darkSpaceUi)
+      satTargetRaw * (1.0 - 0.24 * darkSpaceUi) * (1.0 + pureColorE * pureColorCfg.saturation * 0.22),
+      0.22,
+      THREE.MathUtils.lerp(1.04, 0.88, darkSpaceUi)
     );
     // auto-dim to keep nebula readable
     const readabilityLimiter = interactionNow ? 0.84 : 0.92;
@@ -2510,7 +2565,8 @@ bgDrive.theta01 = theta01;
       readabilityLimiter *
       (0.64 + 0.44 * glowUi) *
       darkGain *
-      (1.0 + dreamBgE * dreamyGlowBg.backgroundLift * 0.52),
+      (1.0 + dreamBgE * dreamyGlowBg.backgroundLift * 0.52) *
+      (1.0 + pureColorE * pureColorCfg.lift * 0.20),
       0.006,
       0.72
     );
@@ -2520,9 +2576,9 @@ bgDrive.theta01 = theta01;
     bg.uniforms.uPearl.value = __bgRiseFall(bg.uniforms.uPearl.value, 0.28 + pearlUi * 1.02, dt, 8.0, 4.0);
     bg.uniforms.uIntensity.value = __bgRiseFall(bg.uniforms.uIntensity.value, intensityTarget, dt, 11.0, 1.4);
     const contrastTarget = THREE.MathUtils.clamp(
-      THREE.MathUtils.lerp(0.96, 1.24, darkSpaceUi) + localColorLiftUi * 0.03,
-      0.9,
-      1.3
+      THREE.MathUtils.lerp(0.96, 1.24, darkSpaceUi) + localColorLiftUi * 0.03 - pureColorE * pureColorCfg.contrastSoftness * 0.16,
+      0.82,
+      1.18
     );
     bg.uniforms.uContrast.value = __bgRiseFall(bg.uniforms.uContrast.value, contrastTarget, dt, 7.0, 3.0);
     const detailTarget = THREE.MathUtils.clamp(
@@ -2595,15 +2651,16 @@ bgDrive.theta01 = theta01;
 
     // Feed shader uniforms (new dreamyBackground API)
     if (bg && bg.setAudio) {
+      const bgReactiveCfg = backgroundReactivityController.getConfig();
       const activeIntentNow = musicState.activeIntent;
       const hoverIntentNow = musicState.hoverIntent;
       const focusIntent = activeIntentNow ?? hoverIntentNow ?? musicState.lastIntent ?? null;
       const activeHue = bgDrive.noteHue;
       const hoverHue = hoverIntentNow?.theta01 ?? bgTheta01 ?? activeHue;
-      const colorBlend = THREE.MathUtils.clamp(backgroundDockUI?.getColorBlend?.() ?? 0.72, 0, 1);
-      const notePresence = THREE.MathUtils.lerp(0.35, 1.0, colorBlend);
-      const harmony = THREE.MathUtils.lerp(0.46, 0.06, colorBlend);
-      const colorMix = THREE.MathUtils.clamp(0.16 + 0.42 * notePresence, 0, 0.72);
+      const colorBlend = THREE.MathUtils.clamp(backgroundDockUI?.getColorBlend?.() ?? 0.46, 0, 1);
+      const notePresence = THREE.MathUtils.lerp(0.22, 0.60, colorBlend);
+      const harmony = THREE.MathUtils.lerp(0.52, 0.18, colorBlend);
+      const colorMix = THREE.MathUtils.clamp(0.08 + 0.22 * notePresence, 0, 0.30);
       const activeStep = (typeof activeIntentNow?.step === "number") ? activeIntentNow.step : -1;
       const hoverStep = (typeof hoverIntentNow?.step === "number") ? hoverIntentNow.step : -1;
       const lastStep = (typeof bgLastEmitStep === "number") ? bgLastEmitStep : -1;
@@ -2613,12 +2670,14 @@ bgDrive.theta01 = theta01;
       const activeCustom = noteColorUI?.getColorRgb01?.(activeStep);
       const hoverCustom = noteColorUI?.getColorRgb01?.(hoverStep);
       const lastCustom = noteColorUI?.getColorRgb01?.(lastStep);
+      const noteInjectionOn = bgReactiveCfg.enableNoteColorInjection;
+      const localEmittersOn = bgReactiveCfg.enableLocalEmitters;
       const resolveTone = (baseRgb, customRgb, step, thetaFallback) => {
-        const manual = customRgb ? lerp3(baseRgb, customRgb, colorMix) : baseRgb;
+        const manual = (noteInjectionOn && customRgb) ? lerp3(baseRgb, customRgb, colorMix) : baseRgb;
         const derived = sampleBackgroundPaletteAt((step >= 0 ? (step % 7) / 7 : thetaFallback));
-        const harmonyBlend = 0.04 + 0.20 * harmony; // keep note color identifiable
+        const harmonyBlend = 0.08 + 0.16 * harmony; // keep note color identifiable
         const fused = lerp3(manual, derived, harmonyBlend);
-        return lerp3(derived, fused, 0.45 + 0.55 * notePresence);
+        return lerp3(derived, fused, 0.28 + 0.36 * notePresence);
       };
       const [ar, ag, ab] = resolveTone([ahR, ahG, ahB], activeCustom, activeStep, activeHue);
       const [hr, hg, hb] = resolveTone([hhR, hhG, hhB], hoverCustom, hoverStep, hoverHue);
@@ -2631,17 +2690,23 @@ bgDrive.theta01 = theta01;
       const focusRaw = focusCustom ?? focusBase;
       const focusVisible = lerp3(
         focusRgb,
-        focusRaw,
-        THREE.MathUtils.clamp(0.35 + 0.58 * notePresence, 0, 1)
+        noteInjectionOn ? focusRaw : focusRgb,
+        noteInjectionOn ? THREE.MathUtils.clamp(0.18 + 0.26 * notePresence, 0, 0.52) : 0
       );
       const noteColor = { r: focusVisible[0], g: focusVisible[1], b: focusVisible[2] };
       const stableNoteHue = (focusStep >= 0) ? ((focusStep % 7) / 7) : bgNoteHue;
       const glowGain = 0.56 + 0.58 * glowUi;
       const presenceGain = 0.35 + 0.95 * notePresence;
       const localLift = THREE.MathUtils.lerp(0.72, 1.50, localColorLiftUi);
-      const activeStrength = THREE.MathUtils.clamp((bgInteractionE * 0.74 + bgClickPulseVis * 0.16) * glowGain * presenceGain * localLift, 0, 0.84);
-      const hoverStrength = THREE.MathUtils.clamp((hoverIntentNow ? 0.10 : 0.0) * (0.40 + 0.50 * bgInteractionE) * glowGain * presenceGain * (0.88 + 0.28 * localColorLiftUi), 0, 0.28);
-      const lastStrength = THREE.MathUtils.clamp(bgLastEmitE * 0.46 * glowGain * presenceGain * (0.92 + 0.30 * localColorLiftUi), 0, 0.52);
+      const activeStrength = localEmittersOn
+        ? THREE.MathUtils.clamp((bgInteractionE * 0.36 + bgClickPulseVis * 0.08) * glowGain * presenceGain * localLift, 0, 0.34)
+        : 0;
+      const hoverStrength = localEmittersOn
+        ? THREE.MathUtils.clamp((hoverIntentNow ? 0.05 : 0.0) * (0.28 + 0.24 * bgInteractionE) * glowGain * presenceGain * (0.82 + 0.18 * localColorLiftUi), 0, 0.10)
+        : 0;
+      const lastStrength = localEmittersOn
+        ? THREE.MathUtils.clamp(bgLastEmitE * 0.22 * glowGain * presenceGain * (0.88 + 0.20 * localColorLiftUi), 0, 0.18)
+        : 0;
       const wrap01 = (v) => ((v % 1) + 1) % 1;
       const blendTrail = {
         x: THREE.MathUtils.lerp(bgDrive.notePos.x, bgLastEmitPos.x, 0.58),
@@ -2657,15 +2722,17 @@ bgDrive.theta01 = theta01;
       };
       const [s1r, s1g, s1b] = resolveTone([hr, hg, hb], activeCustom ?? hoverCustom, activeStep >= 0 ? activeStep : hoverStep, hoverHue);
       const [s2r, s2g, s2b] = resolveTone([lr, lg, lb], activeCustom ?? lastCustom, activeStep >= 0 ? activeStep : lastStep, bgLastEmitHue);
-      const satelliteStrength = THREE.MathUtils.clamp(activeStrength * 0.26 + hoverStrength * 0.24 + lastStrength * 0.22, 0, 0.34);
-      const noteColorMixFinal = THREE.MathUtils.clamp(
-        Math.max(
-          (colorMix * 0.76 + 0.04) * (0.55 + 1.00 * notePresence) * (0.90 + 0.18 * localColorLiftUi),
-          0.22 + 0.58 * notePresence
-        ),
-        0,
-        0.72
-      );
+      const satelliteStrength = THREE.MathUtils.clamp(activeStrength * 0.18 + hoverStrength * 0.20 + lastStrength * 0.18, 0, 0.14);
+      const noteColorMixFinal = noteInjectionOn
+        ? THREE.MathUtils.clamp(
+            Math.max(
+              (colorMix * 0.54 + 0.02) * (0.42 + 0.56 * notePresence) * (0.90 + 0.10 * localColorLiftUi),
+              0.08 + 0.24 * notePresence
+            ),
+            0,
+            0.28
+          )
+        : 0.0;
       bg.setAudio({
         leadE: bgLeadE,
         interactionE: bgInteractionE,

@@ -2,13 +2,13 @@ const STORAGE_KEY = "GalaxySynth_NoteColorMap_v1";
 const NOTE_LABELS = ["Do", "Re", "Mi", "Fa", "Sol", "La", "Si"];
 
 const DEFAULT_COLORS = [
-  "#8fd3ff",
-  "#7f9dff",
-  "#b38dff",
-  "#ff89d6",
-  "#68d8ff",
-  "#6de7c4",
-  "#ffd58a",
+  "#8fdcff",
+  "#7ca8ff",
+  "#9c8fff",
+  "#cf8fff",
+  "#f29ae8",
+  "#a9c8ff",
+  "#8ee7ff",
 ];
 const DEFAULTS = {
   mix: 0.52,

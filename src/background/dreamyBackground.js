@@ -4,11 +4,11 @@ import bgVert from "./shaders/bg.vert.glsl?raw";
 import bgFrag from "./shaders/bg.frag.glsl?raw";
 
 export const BACKGROUND_PALETTES = {
-  pearl: { name: "Pearl Shell", colors: ["#3E7BFF","#6D55FF","#27CFFF","#FF57C6"] },
-  candy: { name: "Cotton Candy", colors: ["#61D9FF","#FF6BD6","#FFB86B","#B6FF8A"] },
-  aurora:{ name: "Aurora Soft",  colors: ["#4DBDFF","#5F72FF","#8A63FF","#F24CC4"] },
-  cosmic:{ name: "Cosmic Iris",  colors: ["#2F66FF","#5A4DFF","#1BCBFF","#FF3EB8"] },
-  neo:   { name: "Neo Dream",    colors: ["#3DFFB8","#3D7BFF","#FF3DF2","#FFE83D"] },
+  pearl: { name: "Pearl Shell", colors: ["#8BE8FF","#E98DFF","#BDA7FF","#8BCBFF"] },
+  candy: { name: "Cotton Candy", colors: ["#7BDEFF","#F18BFF","#C29DFF","#9AD8FF"] },
+  aurora:{ name: "Aurora Soft",  colors: ["#67E7FF","#8F86FF","#E788FF","#97FFD8"] },
+  cosmic:{ name: "Cosmic Iris",  colors: ["#4B78FF","#7A62FF","#43D5FF","#E66BFF"] },
+  neo:   { name: "Neo Dream",    colors: ["#79FFD8","#5E8BFF","#F07DFF","#A4E8FF"] },
 };
 
 function hexToVec3(hex){
@@ -19,8 +19,8 @@ function clamp01(x){ return Math.max(0, Math.min(1, x)); }
 
 export async function createDreamyBackground(scene, camera = null, opts = {}){
   const radius = opts.radius ?? 2000;
-  const base = new THREE.Color(opts.baseColor ?? "#04050D");
-  const paletteKey = opts.palette ?? "cosmic";
+  const base = new THREE.Color(opts.baseColor ?? "#1D2140");
+  const paletteKey = opts.palette ?? "pearl";
   const pal = BACKGROUND_PALETTES[paletteKey] ?? BACKGROUND_PALETTES.pearl;
 
   const mainColor = new THREE.Color("#7ca0ff");
@@ -43,7 +43,7 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
     uPearl:     { value: opts.pearl ?? 0.92 },
     uSparkle:   { value: opts.sparkle ?? 0.015 },
     uSat:       { value: opts.sat ?? 0.30 },
-    uContrast:  { value: opts.contrast ?? 0.92 },
+    uContrast:  { value: opts.contrast ?? 0.84 },
 
     uPal0: { value: hexToVec3(pal.colors[0]) },
     uPal1: { value: hexToVec3(pal.colors[1]) },

@@ -303,7 +303,7 @@ float ink = pulse * inkFall;
   vec3 spectralViolet   = vec3(0.36, 0.24, 0.62);
   vec3 spectralCyan     = vec3(0.20, 0.56, 0.66);
   vec3 spectralMagenta  = vec3(0.56, 0.28, 0.58);
-  vec3 spectralGold     = vec3(0.64, 0.54, 0.28);
+  vec3 spectralGold     = vec3(0.50, 0.42, 0.42);
   vec3 spectralIndigo   = vec3(0.20, 0.24, 0.66);
   vec3 spectralPearl    = vec3(0.54, 0.68, 0.78);
 
@@ -319,7 +319,7 @@ float ink = pulse * inkFall;
   float wViolet  = smoothstep(0.54, 0.94, fViolet);
   float wCyan    = smoothstep(0.50, 0.93, fCyan);
   float wMagenta = smoothstep(0.56, 0.95, fMagenta);
-  float wGold    = smoothstep(0.76, 0.98, fGold) * 0.22; // very subtle warm accent
+  float wGold    = smoothstep(0.80, 0.985, fGold) * 0.08; // keep warm accent minimal
   float wIndigo  = smoothstep(0.58, 0.95, fIndigo) * 0.58;
   float wPearl   = smoothstep(0.84, 0.995, fPearl) * 0.10;
 
@@ -356,13 +356,13 @@ float ink = pulse * inkFall;
 
   // Deep-space gradient base to avoid flat white wash.
   float gy = smoothstep(0.08, 0.92, uv.y + (flowA - 0.5) * 0.08);
-  vec3 deepLow = vec3(0.018, 0.024, 0.052);
-  vec3 deepMid = vec3(0.040, 0.050, 0.090);
-  vec3 deepHigh = vec3(0.080, 0.058, 0.122);
+  vec3 deepLow = vec3(0.045, 0.052, 0.095);
+  vec3 deepMid = vec3(0.082, 0.086, 0.145);
+  vec3 deepHigh = vec3(0.126, 0.100, 0.186);
   vec3 gradBase = mix(deepLow, deepMid, gy);
   gradBase = mix(gradBase, deepHigh, smoothstep(0.62, 1.0, gy) * 0.55);
 
-  vec3 col = mix(uBase, gradBase, 0.78);
+  vec3 col = mix(uBase, gradBase, 0.90);
   col = mix(col, c0, wCloud);
   col = mix(col, c1, wSheen);
   col = mix(col, cInk, wInk);
@@ -392,12 +392,12 @@ float ink = pulse * inkFall;
   col += mix(c0, c1, 0.50) * contour * (0.05 + 0.14 * rich) * (0.55 + 0.45 * e);
 
   // Local "cosmic sunset" glow injection from note color (localized only).
-  vec3 warmSunset = vec3(1.00, 0.62, 0.36);
-  vec3 sunsetTint = mix(uNoteColor, warmSunset, 0.20);
+  vec3 warmSunset = vec3(0.82, 0.62, 0.84);
+  vec3 sunsetTint = mix(uNoteColor, warmSunset, 0.12);
   float sunsetCore = exp(-d * 10.5) * (0.45 + 0.55 * pulse);
   float sunsetHalo = exp(-d * 4.8) * (0.20 + 0.80 * energy);
   float sunsetMask = (sunsetCore * 0.75 + sunsetHalo * 0.25) * saturate(uNoteColorMix);
-  col += sunsetTint * sunsetMask * 0.28;
+  col += sunsetTint * sunsetMask * 0.12;
 
   // Nebula-local color emitters: spatial "light-up" feel near interaction points.
   vec2 e0v = (uv - uEmitPos0) * vec2(1.06, 1.0);
@@ -421,8 +421,8 @@ float ink = pulse * inkFall;
   col = mix(col, col + pocketCol * (0.06 + 0.08 * rich), materialPocket * (0.35 + 0.65 * e));
 
   // Preserve dark separations so motion reads as fine flow, not full-screen wash.
-  float darkGap = (1.0 - materialRidge) * (0.45 + 0.55 * (1.0 - band));
-  col *= (1.0 - darkGap * 0.18);
+  float darkGap = (1.0 - materialRidge) * (0.38 + 0.42 * (1.0 - band));
+  col *= (1.0 - darkGap * 0.08);
 
   float sp = 0.0;
   if (uSparkle > 0.001){
@@ -440,11 +440,16 @@ float ink = pulse * inkFall;
   vec3 dreamCol = mix(spectralCol, vec3(0.62, 0.56, 0.78), 0.18);
   col = mix(col, col + dreamCol * 0.12, dreamy * dreamMask * (0.14 + 0.16 * e));
 
-  vec3 satCol = applySaturation(col, 1.12 + uSat * 1.24);
+  vec3 satCol = applySaturation(col, 1.22 + uSat * 1.34);
   float satMaskRidge = pow(saturate(materialRidge), 1.1);
-  float satMask = saturate(0.10 + satMaskRidge * 0.52 + energy * 0.46 + emitMask * 0.40);
+  float satMask = saturate(0.22 + satMaskRidge * 0.52 + energy * 0.40 + emitMask * 0.28);
   col = mix(col, satCol, satMask);
-  col = applyContrast(col, uContrast);
+  col = mix(col, applyContrast(col, uContrast), 0.72);
+
+  // Keep luminous colors from collapsing back into the dark base.
+  float purityMask = saturate(max(max(col.r, col.g), col.b) - min(min(col.r, col.g), col.b));
+  vec3 liftedCol = mix(col, max(col, gradBase * 0.92), 0.32 + 0.28 * purityMask);
+  col = mix(col, liftedCol, 0.26 + 0.22 * purityMask);
 
   float bright = uIntensity * (0.46 + 1.02*e);
   bright = min(bright, 1.12);

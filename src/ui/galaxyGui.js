@@ -2,7 +2,17 @@
 import * as THREE from "three";
 import GUI from "lil-gui";
 
-export function setupGalaxyGUI({ camera, renderer, nebulaSystem, voices = null, performanceCamera = null, cameraControl = null, dreamyGlowController = null }) {
+export function setupGalaxyGUI({
+  camera,
+  renderer,
+  nebulaSystem,
+  voices = null,
+  performanceCamera = null,
+  cameraControl = null,
+  dreamyGlowController = null,
+  backgroundReactivityController = null,
+  pureColorController = null,
+}) {
   const STORAGE_KEY = "GalaxySynth_GalaxyPresets_v2";
 
   // -------- storage --------
@@ -261,6 +271,17 @@ export function setupGalaxyGUI({ camera, renderer, nebulaSystem, voices = null, 
     backgroundLift: 0.82,
     filterAmount: 0.72,
     filterTintMix: 0.24,
+    filterHaze: 0.30,
+  };
+  const backgroundReactivityState = backgroundReactivityController?.getConfig?.() ?? {
+    enableNoteColorInjection: true,
+    enableLocalEmitters: true,
+  };
+  const pureColorState = pureColorController?.getConfig?.() ?? {
+    enabled: false,
+    lift: 0.68,
+    saturation: 0.72,
+    contrastSoftness: 0.58,
   };
 
   // ===============================
@@ -308,6 +329,36 @@ export function setupGalaxyGUI({ camera, renderer, nebulaSystem, voices = null, 
   });
 
   const fDreamGlow = gui.addFolder("Dream Glow");
+  const applyEtherealPreset = () => {
+    dreamyGlowState.enabled = true;
+    dreamyGlowState.intensity = 1.22;
+    dreamyGlowState.softness = 1.28;
+    dreamyGlowState.starGlowBoost = 1.12;
+    dreamyGlowState.backgroundLift = 1.08;
+    dreamyGlowState.filterAmount = 1.12;
+    dreamyGlowState.filterTintMix = 0.34;
+    dreamyGlowState.filterHaze = 0.56;
+    dreamyGlowController?.updateConfig?.({
+      enabled: dreamyGlowState.enabled,
+      intensity: dreamyGlowState.intensity,
+      softness: dreamyGlowState.softness,
+      starGlowBoost: dreamyGlowState.starGlowBoost,
+      backgroundLift: dreamyGlowState.backgroundLift,
+      filterAmount: dreamyGlowState.filterAmount,
+      filterTintMix: dreamyGlowState.filterTintMix,
+      filterHaze: dreamyGlowState.filterHaze,
+    });
+
+    backgroundReactivityState.enableNoteColorInjection = false;
+    backgroundReactivityState.enableLocalEmitters = false;
+    backgroundReactivityController?.updateConfig?.({
+      enableNoteColorInjection: false,
+      enableLocalEmitters: false,
+    });
+
+    updateAllDisplays(gui);
+  };
+  fDreamGlow.add({ Apply: applyEtherealPreset }, "Apply").name("Ethereal");
   fDreamGlow.add(dreamyGlowState, "enabled").name("enabled").onChange((v) => {
     dreamyGlowController?.updateConfig?.({ enabled: !!v });
   });
@@ -328,6 +379,31 @@ export function setupGalaxyGUI({ camera, renderer, nebulaSystem, voices = null, 
   });
   fDreamGlow.add(dreamyGlowState, "filterTintMix", 0.0, 0.8, 0.01).name("tint").onChange((v) => {
     dreamyGlowController?.updateConfig?.({ filterTintMix: v });
+  });
+  fDreamGlow.add(dreamyGlowState, "filterHaze", 0.0, 1.0, 0.01).name("haze").onChange((v) => {
+    dreamyGlowController?.updateConfig?.({ filterHaze: v });
+  });
+
+  const fBgReact = gui.addFolder("Background Reactivity");
+  fBgReact.add(backgroundReactivityState, "enableNoteColorInjection").name("note tint").onChange((v) => {
+    backgroundReactivityController?.updateConfig?.({ enableNoteColorInjection: !!v });
+  });
+  fBgReact.add(backgroundReactivityState, "enableLocalEmitters").name("local emitters").onChange((v) => {
+    backgroundReactivityController?.updateConfig?.({ enableLocalEmitters: !!v });
+  });
+
+  const fPure = gui.addFolder("Pure Color");
+  fPure.add(pureColorState, "enabled").name("enabled").onChange((v) => {
+    pureColorController?.updateConfig?.({ enabled: !!v });
+  });
+  fPure.add(pureColorState, "lift", 0.0, 1.5, 0.01).name("lift").onChange((v) => {
+    pureColorController?.updateConfig?.({ lift: v });
+  });
+  fPure.add(pureColorState, "saturation", 0.0, 1.5, 0.01).name("saturation").onChange((v) => {
+    pureColorController?.updateConfig?.({ saturation: v });
+  });
+  fPure.add(pureColorState, "contrastSoftness", 0.0, 1.5, 0.01).name("soft contrast").onChange((v) => {
+    pureColorController?.updateConfig?.({ contrastSoftness: v });
   });
 
   // Active dropdown (dynamic)

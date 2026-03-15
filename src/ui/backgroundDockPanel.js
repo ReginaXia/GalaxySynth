@@ -168,10 +168,10 @@ export function createBackgroundDockPanel({ bg }) {
     x: window.innerWidth - 300,
     y: 76,
     collapsed: false,
-    colorBlend: 0.72,
+    colorBlend: 0.46,
     flowDetail: 0.62,
     darkSpace: 0.70,
-    localColorLift: 0.62,
+    localColorLift: 0.40,
     starBreath: 0.60,
     starColorGlow: 1.8,
     starGlowColorA: "#9fd6ff",
@@ -245,10 +245,10 @@ export function createBackgroundDockPanel({ bg }) {
     });
     presetWrap.appendChild(btn);
   };
-  makePresetBtn("Aurora", "aurora", 0.66);
-  makePresetBtn("Cosmic", "cosmic", 0.58);
-  makePresetBtn("Sunset", "candy", 0.82);
-  makePresetBtn("Pearl", "pearl", 0.48);
+  makePresetBtn("Aurora", "aurora", 0.54);
+  makePresetBtn("Cosmic", "cosmic", 0.46);
+  makePresetBtn("Sunset", "candy", 0.68);
+  makePresetBtn("Pearl", "pearl", 0.34);
 
   const colorGrid = document.createElement("div");
   colorGrid.style.cssText = "display:grid; grid-template-columns:1fr 48px; gap:6px 8px;";

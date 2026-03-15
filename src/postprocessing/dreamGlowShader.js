@@ -7,7 +7,8 @@ export const DreamGlowShader = {
     uAmount: { value: 0.0 },
     uBlurScale: { value: 1.0 },
     uTintMix: { value: 0.18 },
-    uTintColor: { value: new THREE.Vector3(1.0, 0.86, 0.96) },
+    uTintColor: { value: new THREE.Vector3(0.92, 0.88, 1.0) },
+    uHaze: { value: 0.0 },
   },
   vertexShader: /* glsl */`
     varying vec2 vUv;
@@ -23,6 +24,7 @@ export const DreamGlowShader = {
     uniform float uBlurScale;
     uniform float uTintMix;
     uniform vec3 uTintColor;
+    uniform float uHaze;
     varying vec2 vUv;
 
     vec3 sampleBlur(vec2 uv, vec2 px) {
@@ -47,7 +49,9 @@ export const DreamGlowShader = {
       float lum = dot(base, vec3(0.2126, 0.7152, 0.0722));
       float highlightMask = smoothstep(0.24, 1.15, lum);
       vec3 tintedGlow = mix(glow, glow * uTintColor, uTintMix);
+      vec3 hazeCol = mix(base, mix(glow, glow * uTintColor, 0.45 + uTintMix * 0.35), 0.45);
       vec3 outCol = base + tintedGlow * uAmount * (0.35 + highlightMask * 0.95);
+      outCol = mix(outCol, outCol + hazeCol * (0.22 + highlightMask * 0.28), uHaze);
       gl_FragColor = vec4(outCol, 1.0);
     }
   `,
