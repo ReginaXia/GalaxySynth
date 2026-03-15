@@ -448,14 +448,15 @@ export function setupGalaxyGUI({
     maxDistance: cameraControl?.getDistanceLimits?.()?.maxDistance ?? 60,
   };
   const dreamyGlowState = dreamyGlowController?.getConfig?.() ?? {
-    enabled: false,
-    intensity: 0.88,
-    softness: 0.94,
+    enabled: true,
+    legacyBloom: true,
+    intensity: 0.92,
+    softness: 0.32,
     starGlowBoost: 0.92,
     backgroundLift: 0.82,
-    filterAmount: 0.72,
-    filterTintMix: 0.10,
-    filterHaze: 0.30,
+    filterAmount: 0.42,
+    filterTintMix: 0.06,
+    filterHaze: 0.14,
   };
   const backgroundReactivityState = backgroundReactivityController?.getConfig?.() ?? {
     enableNoteColorInjection: true,
@@ -523,8 +524,32 @@ export function setupGalaxyGUI({
   });
 
   const fDreamGlow = gui.addFolder("Atmosphere");
+  const applyLegacyBloomPreset = () => {
+    dreamyGlowState.enabled = true;
+    dreamyGlowState.legacyBloom = true;
+    dreamyGlowState.intensity = 0.92;
+    dreamyGlowState.softness = 0.32;
+    dreamyGlowState.starGlowBoost = 0.92;
+    dreamyGlowState.backgroundLift = 0.82;
+    dreamyGlowState.filterAmount = 0.42;
+    dreamyGlowState.filterTintMix = 0.06;
+    dreamyGlowState.filterHaze = 0.14;
+    dreamyGlowController?.updateConfig?.({
+      enabled: dreamyGlowState.enabled,
+      legacyBloom: dreamyGlowState.legacyBloom,
+      intensity: dreamyGlowState.intensity,
+      softness: dreamyGlowState.softness,
+      starGlowBoost: dreamyGlowState.starGlowBoost,
+      backgroundLift: dreamyGlowState.backgroundLift,
+      filterAmount: dreamyGlowState.filterAmount,
+      filterTintMix: dreamyGlowState.filterTintMix,
+      filterHaze: dreamyGlowState.filterHaze,
+    });
+    updateAllDisplays(gui);
+  };
   const applyEtherealPreset = () => {
     dreamyGlowState.enabled = true;
+    dreamyGlowState.legacyBloom = false;
     dreamyGlowState.intensity = 1.22;
     dreamyGlowState.softness = 1.28;
     dreamyGlowState.starGlowBoost = 1.12;
@@ -534,6 +559,7 @@ export function setupGalaxyGUI({
     dreamyGlowState.filterHaze = 0.56;
     dreamyGlowController?.updateConfig?.({
       enabled: dreamyGlowState.enabled,
+      legacyBloom: dreamyGlowState.legacyBloom,
       intensity: dreamyGlowState.intensity,
       softness: dreamyGlowState.softness,
       starGlowBoost: dreamyGlowState.starGlowBoost,
@@ -554,6 +580,7 @@ export function setupGalaxyGUI({
   };
   const applyCelestialPreset = () => {
     dreamyGlowState.enabled = true;
+    dreamyGlowState.legacyBloom = false;
     dreamyGlowState.intensity = 1.34;
     dreamyGlowState.softness = 1.36;
     dreamyGlowState.starGlowBoost = 1.18;
@@ -563,6 +590,7 @@ export function setupGalaxyGUI({
     dreamyGlowState.filterHaze = 0.72;
     dreamyGlowController?.updateConfig?.({
       enabled: dreamyGlowState.enabled,
+      legacyBloom: dreamyGlowState.legacyBloom,
       intensity: dreamyGlowState.intensity,
       softness: dreamyGlowState.softness,
       starGlowBoost: dreamyGlowState.starGlowBoost,
@@ -601,10 +629,14 @@ export function setupGalaxyGUI({
 
     updateAllDisplays(gui);
   };
+  fDreamGlow.add({ Apply: applyLegacyBloomPreset }, "Apply").name("Legacy Bloom");
   fDreamGlow.add({ Apply: applyEtherealPreset }, "Apply").name("Ethereal");
   fDreamGlow.add({ Apply: applyCelestialPreset }, "Apply").name("Celestial");
   fDreamGlow.add(dreamyGlowState, "enabled").name("enabled").onChange((v) => {
     dreamyGlowController?.updateConfig?.({ enabled: !!v });
+  });
+  fDreamGlow.add(dreamyGlowState, "legacyBloom").name("legacy bloom").onChange((v) => {
+    dreamyGlowController?.updateConfig?.({ legacyBloom: !!v });
   });
   fDreamGlow.add(dreamyGlowState, "intensity", 0.0, 1.5, 0.01).name("intensity").onChange((v) => {
     dreamyGlowController?.updateConfig?.({ intensity: v });

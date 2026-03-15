@@ -303,14 +303,15 @@ dreamGlowPass.uniforms.uResolution.value.set(window.innerWidth, window.innerHeig
 
 const dreamyGlowController = (() => {
   const state = {
-    enabled: false,
-    intensity: 0.88,
-    softness: 0.94,
+    enabled: true,
+    legacyBloom: true,
+    intensity: 0.92,
+    softness: 0.32,
     starGlowBoost: 0.92,
     backgroundLift: 0.82,
-    filterAmount: 0.72,
-    filterTintMix: 0.10,
-    filterHaze: 0.30,
+    filterAmount: 0.42,
+    filterTintMix: 0.06,
+    filterHaze: 0.14,
   };
   return {
     getConfig() {
@@ -318,6 +319,7 @@ const dreamyGlowController = (() => {
     },
     updateConfig(partial = {}) {
       if (typeof partial.enabled === "boolean") state.enabled = partial.enabled;
+      if (typeof partial.legacyBloom === "boolean") state.legacyBloom = partial.legacyBloom;
       if (Number.isFinite(partial.intensity)) state.intensity = THREE.MathUtils.clamp(partial.intensity, 0, 1.5);
       if (Number.isFinite(partial.softness)) state.softness = THREE.MathUtils.clamp(partial.softness, 0, 1.5);
       if (Number.isFinite(partial.starGlowBoost)) state.starGlowBoost = THREE.MathUtils.clamp(partial.starGlowBoost, 0, 1.5);
@@ -2389,6 +2391,19 @@ if ((nowMs - __lastUIUpdateMs) > uiIntervalMs) {
   const trig = ps.trigger;
   if (trig) ps.trigger = false;
 
+  if (trig) {
+    const midi = aHud.lastMidi ?? 60;
+    const pitchClass = (midi % 12 + 12) % 12;
+    bgMood.hueTarget = pitchClass / 12;
+  }
+  bgMood.hue += (bgMood.hueTarget - bgMood.hue) * (1 - Math.exp(-dt * 1.2));
+  const legacyAudioEnergy = THREE.MathUtils.clamp(
+    Math.max(aHud.rms ?? 0, (aHud.beatPulse ?? 0) * 0.42),
+    0,
+    1
+  );
+  bgMood.energy += (legacyAudioEnergy - bgMood.energy) * (1 - Math.exp(-dt * 1.6));
+
 
   // 4) 音频：先喂，再更新（Lead Gate: only when hovering nebula）
   const psForAudio = { ...ps, trigger: trig };
@@ -2524,24 +2539,44 @@ bgDrive.theta01 = theta01;
   const glowUiBloom = THREE.MathUtils.clamp(noteColorUI?.getGlow?.() ?? 0.56, 0, 1);
   const dreamyGlowBloom = dreamyGlowController.getConfig();
   const dreamBloomE = dreamyGlowBloom.enabled ? THREE.MathUtils.clamp(dreamyGlowBloom.intensity, 0, 1.5) : 0;
-  const bloomTargetBase = (0.03 + bgMood.energy * 0.06 + cinematicState.energy * 0.022) * (0.55 + glowUiBloom * 0.75);
-  const bloomTarget = bloomTargetBase * (1.0 + dreamBloomE * 1.65);
-  bloomPass.strength += (bloomTarget - bloomPass.strength) * (1 - Math.exp(-dt * 1.4));
-  bloomPass.threshold = dreamyGlowBloom.enabled
-    ? THREE.MathUtils.lerp(0.88, 0.58, THREE.MathUtils.clamp(dreamyGlowBloom.softness, 0, 1.5) / 1.5)
-    : 0.88;
-  bloomPass.radius = dreamyGlowBloom.enabled
-    ? THREE.MathUtils.lerp(0.25, 0.88, THREE.MathUtils.clamp(dreamyGlowBloom.softness, 0, 1.5) / 1.5)
-    : 0.25;
-  dreamGlowPass.enabled = dreamyGlowBloom.enabled;
-  dreamGlowPass.uniforms.uAmount.value = dreamyGlowBloom.enabled
-    ? dreamyGlowBloom.filterAmount * (0.55 + dreamBloomE * 0.65)
-    : 0.0;
-  dreamGlowPass.uniforms.uBlurScale.value = dreamyGlowBloom.enabled
-    ? THREE.MathUtils.lerp(1.4, 4.8, THREE.MathUtils.clamp(dreamyGlowBloom.softness, 0, 1.5) / 1.5)
-    : 1.0;
-  dreamGlowPass.uniforms.uTintMix.value = dreamyGlowBloom.filterTintMix;
-  dreamGlowPass.uniforms.uHaze.value = dreamyGlowBloom.enabled ? dreamyGlowBloom.filterHaze : 0.0;
+  if (dreamyGlowBloom.legacyBloom) {
+    const bloomTarget = dreamyGlowBloom.enabled
+      ? THREE.MathUtils.clamp(
+          (0.22 + bgMood.energy * 0.30 + cinematicState.energy * 0.06) *
+            (0.88 + glowUiBloom * 0.28) *
+            (0.94 + dreamBloomE * 0.18),
+          0.20,
+          0.72
+        )
+      : 0.20;
+    bloomPass.strength += (bloomTarget - bloomPass.strength) * (1 - Math.exp(-dt * 2.0));
+    bloomPass.threshold = 0.95;
+    bloomPass.radius = 0.18;
+    dreamGlowPass.enabled = false;
+    dreamGlowPass.uniforms.uAmount.value = 0.0;
+    dreamGlowPass.uniforms.uBlurScale.value = 1.0;
+    dreamGlowPass.uniforms.uTintMix.value = 0.0;
+    dreamGlowPass.uniforms.uHaze.value = 0.0;
+  } else {
+    const bloomTargetBase = (0.03 + bgMood.energy * 0.06 + cinematicState.energy * 0.022) * (0.55 + glowUiBloom * 0.75);
+    const bloomTarget = bloomTargetBase * (1.0 + dreamBloomE * 1.65);
+    bloomPass.strength += (bloomTarget - bloomPass.strength) * (1 - Math.exp(-dt * 1.4));
+    bloomPass.threshold = dreamyGlowBloom.enabled
+      ? THREE.MathUtils.lerp(0.88, 0.58, THREE.MathUtils.clamp(dreamyGlowBloom.softness, 0, 1.5) / 1.5)
+      : 0.88;
+    bloomPass.radius = dreamyGlowBloom.enabled
+      ? THREE.MathUtils.lerp(0.25, 0.88, THREE.MathUtils.clamp(dreamyGlowBloom.softness, 0, 1.5) / 1.5)
+      : 0.25;
+    dreamGlowPass.enabled = dreamyGlowBloom.enabled;
+    dreamGlowPass.uniforms.uAmount.value = dreamyGlowBloom.enabled
+      ? dreamyGlowBloom.filterAmount * (0.55 + dreamBloomE * 0.65)
+      : 0.0;
+    dreamGlowPass.uniforms.uBlurScale.value = dreamyGlowBloom.enabled
+      ? THREE.MathUtils.lerp(1.4, 4.8, THREE.MathUtils.clamp(dreamyGlowBloom.softness, 0, 1.5) / 1.5)
+      : 1.0;
+    dreamGlowPass.uniforms.uTintMix.value = dreamyGlowBloom.filterTintMix;
+    dreamGlowPass.uniforms.uHaze.value = dreamyGlowBloom.enabled ? dreamyGlowBloom.filterHaze : 0.0;
+  }
 
   // -------------------- Dreamy background (CLEAN) --------------------
   // Clean dt/t timing. No legacy time state object.
