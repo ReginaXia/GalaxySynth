@@ -733,6 +733,14 @@ const autoPlayConductor = createAutoPlayConductor({
   onEvent: onAutoPlayNoteEvent,
 });
 
+function triggerPerformanceCameraNotePulse({ galaxyId = null, strength = 0.35, centerWorld = null } = {}) {
+  performanceCamera?.queueNotePulse?.({
+    galaxyId,
+    strength: THREE.MathUtils.clamp(strength, 0, 1),
+    centerWorld,
+  });
+}
+
 function focusCameraToGalaxy(galaxyId) {
   if (!galaxyId) return;
   const c = nebulaSystem.getCluster?.(galaxyId);
@@ -1427,6 +1435,11 @@ canvas.addEventListener("pointerdown", (e) => {
       });
       const instrument = voices?.getNebulaInstrument?.(activeNebulaKey);
       if (instrument) {
+        triggerPerformanceCameraNotePulse({
+          galaxyId: activeNebulaKey,
+          strength: 0.46,
+          centerWorld: hitPoint,
+        });
         audio.playNebulaScratch({
           galaxyId: activeNebulaKey,
           theta01: musicState.activeIntent.theta01,
@@ -2209,12 +2222,6 @@ bgDrive.theta01 = theta01;
 
       const instrument = voices?.getNebulaInstrument?.(activeNebulaKey);
       noteHint?.setInteractionSample?.(activeNebulaKey, musicState.activeIntent.theta01, musicState.activeIntent.r01);
-      // 给镜头一个演奏脉冲
-
-      // const distance = camera.position.distanceTo(cameraControl.getTarget?.() ?? new THREE.Vector3(0,0,0));
-      // const strength = distance * 0.002;     // ✅ 距离越远脉冲越大
-
-      cameraControl?.notePulse?.(1.2, hitPoint);
 
       if (camera.isPerspectiveCamera) {
         camera.fov = 45.0;          // 你原本的 fov 假设是 46/47 之类
@@ -2404,6 +2411,11 @@ bgDrive.theta01 = theta01;
     if (isPlaying && stepNow >= 0 && stepNow !== bgLastStep) {
       bgLastStep = stepNow;
       triggerBackgroundPulse(0.85);
+      triggerPerformanceCameraNotePulse({
+        galaxyId: activeNebulaKey ?? musicState.activeIntent?.galaxyId ?? null,
+        strength: THREE.MathUtils.lerp(0.24, 0.46, THREE.MathUtils.clamp(scratchVel01, 0, 1)),
+        centerWorld: hitPoint,
+      });
       nebulaSystem.triggerNotePulse({
         galaxyId: activeNebulaKey ?? musicState.activeIntent?.galaxyId ?? null,
         theta01: musicState.activeIntent?.theta01 ?? null,

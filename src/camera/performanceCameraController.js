@@ -36,7 +36,16 @@ export function createPerformanceCameraController({
   hoverPositionMaxDistanceFactor = 0.04,
   hoverDollyFactor = 0.03,
   hoverDollyMax = 0.42,
-  pulseEnabled = false,
+  pulseEnabled = true,
+  pulseAttack = 18.0,
+  pulseDecay = 8.5,
+  pulseCenterSmoothing = 8.0,
+  pulseDistanceFactor = 0.014,
+  pulseDistanceMax = 0.16,
+  pulseLookFraction = 0.020,
+  pulseLookMaxDistanceFactor = 0.018,
+  pulsePositionFraction = 0.010,
+  pulsePositionMaxDistanceFactor = 0.010,
   idleEnabled = false,
 } = {}) {
   const hover = {
@@ -64,6 +73,14 @@ export function createPerformanceCameraController({
       distanceOffset: 0,
       rollOffset: 0,
       pending: 0,
+      pendingGalaxyId: null,
+      pendingCenter: new THREE.Vector3(),
+      hasPendingCenter: false,
+      target: 0,
+      energy: 0,
+      focusId: null,
+      targetCenter: new THREE.Vector3(),
+      smoothCenter: new THREE.Vector3(),
     },
     idle: {
       enabled: idleEnabled,
@@ -174,8 +191,65 @@ export function createPerformanceCameraController({
     offsets.hover.distanceOffset = -Math.min(hoverDollyMax, cameraDistance * hoverDollyFactor) * hover.weight;
   }
 
-  function updatePulseOffset() {
+  function updatePulseOffset(dt, camera, baseTarget, nebulaSystem) {
     resetVec4Layer(offsets.pulse);
+    if (!offsets.pulse.enabled) {
+      offsets.pulse.pending = 0;
+      offsets.pulse.pendingGalaxyId = null;
+      offsets.pulse.hasPendingCenter = false;
+      offsets.pulse.target = 0;
+      offsets.pulse.energy = damp01(offsets.pulse.energy, 0, pulseDecay, dt);
+      return;
+    }
+
+    if (offsets.pulse.pending > 1e-4) {
+      offsets.pulse.target = THREE.MathUtils.clamp(offsets.pulse.target + offsets.pulse.pending, 0, 1);
+
+      if (offsets.pulse.hasPendingCenter) {
+        offsets.pulse.targetCenter.copy(offsets.pulse.pendingCenter);
+      } else if (offsets.pulse.pendingGalaxyId) {
+        const info = getNebulaFocusData(nebulaSystem, offsets.pulse.pendingGalaxyId, scratch.center);
+        if (info) offsets.pulse.targetCenter.copy(info.center);
+      }
+
+      offsets.pulse.focusId = offsets.pulse.pendingGalaxyId ?? offsets.pulse.focusId;
+      offsets.pulse.pending = 0;
+      offsets.pulse.pendingGalaxyId = null;
+      offsets.pulse.hasPendingCenter = false;
+    }
+
+    offsets.pulse.target = damp01(offsets.pulse.target, 0, pulseDecay, dt);
+    offsets.pulse.energy = damp01(
+      offsets.pulse.energy,
+      offsets.pulse.target,
+      offsets.pulse.target > offsets.pulse.energy ? pulseAttack : pulseDecay,
+      dt
+    );
+
+    if (offsets.pulse.energy <= 1e-4) return;
+
+    offsets.pulse.smoothCenter.lerp(offsets.pulse.targetCenter, 1.0 - Math.exp(-dt * pulseCenterSmoothing));
+
+    const cameraDistance = Math.max(1e-4, camera.position.distanceTo(baseTarget));
+    const maxLookShift = cameraDistance * pulseLookMaxDistanceFactor;
+    const maxPositionShift = cameraDistance * pulsePositionMaxDistanceFactor;
+
+    scratch.toHover.copy(offsets.pulse.smoothCenter).sub(baseTarget);
+
+    offsets.pulse.lookAtOffset
+      .copy(scratch.toHover)
+      .multiplyScalar(pulseLookFraction)
+      .clampLength(0, maxLookShift)
+      .multiplyScalar(offsets.pulse.energy);
+
+    offsets.pulse.positionOffset
+      .copy(scratch.toHover)
+      .multiplyScalar(pulsePositionFraction)
+      .clampLength(0, maxPositionShift)
+      .multiplyScalar(offsets.pulse.energy);
+
+    offsets.pulse.distanceOffset =
+      -Math.min(pulseDistanceMax, cameraDistance * pulseDistanceFactor) * offsets.pulse.energy;
   }
 
   function updateIdleOffset(dt) {
@@ -211,7 +285,7 @@ export function createPerformanceCameraController({
 
     updateStableHover(dt, hoveredNebulaId, nebulaSystem);
     updateHoverOffset(dt, camera, baseTarget, nebulaSystem);
-    updatePulseOffset();
+    updatePulseOffset(dt, camera, baseTarget, nebulaSystem);
     updateIdleOffset(dt);
     composeOffsets();
 
@@ -255,8 +329,15 @@ export function createPerformanceCameraController({
     };
   }
 
-  function queueNotePulse(strength = 0) {
-    offsets.pulse.pending = Math.max(offsets.pulse.pending, strength);
+  function queueNotePulse({ strength = 0, galaxyId = null, centerWorld = null } = {}) {
+    const s = THREE.MathUtils.clamp(strength, 0, 1);
+    if (s <= 0) return;
+    offsets.pulse.pending = THREE.MathUtils.clamp(offsets.pulse.pending + s * 0.68, 0, 1);
+    offsets.pulse.pendingGalaxyId = galaxyId ?? offsets.pulse.pendingGalaxyId;
+    if (centerWorld && typeof centerWorld.x === "number") {
+      offsets.pulse.pendingCenter.copy(centerWorld);
+      offsets.pulse.hasPendingCenter = true;
+    }
   }
 
   function setPulseEnabled(value) {
