@@ -50,6 +50,7 @@ function makeGlowTextSprite(text = "C", opts = {}) {
     transparent: true,
     depthWrite: false,
     depthTest: false,
+    opacity: 0.85,
   });
 
   const sprite = new THREE.Sprite(material);
@@ -149,15 +150,16 @@ export function createNebulaNoteHintController({
 
   // cursor label
   const { sprite: cursorLabel, setText: setCursorText } = makeGlowTextSprite("Do", {
-    fontSize: 86,
-    glow: 9,
-    color: "#f7f4ff",
-    glowColor: "rgba(230,238,255,0.38)",
-    outlineColor: "rgba(255,255,255,0.46)",
-    outlineWidth: 2.2,
+    fontSize: 76,
+    glow: 6,
+    color: "#ebe7f5",
+    glowColor: "rgba(225,232,255,0.22)",
+    outlineColor: "rgba(255,255,255,0.28)",
+    outlineWidth: 1.6,
   });
   cursorLabel.visible = false;
-  cursorLabel.scale.set(1.75, 0.9, 1);
+  cursorLabel.scale.set(1.45, 0.76, 1);
+  cursorLabel.material.opacity = 0.72;
   scene.add(cursorLabel);
 
   // band sprites: maxBands * 7
@@ -171,10 +173,10 @@ export function createNebulaNoteHintController({
       const { sprite, setText } = makeGlowTextSprite("Do", {
         fontSize: 54,
         glow: 5,
-        color: "#ece8f7",
+        color: "#d9d5e4",
         glowColor: "rgba(225,232,255,0.18)",
-        outlineColor: "rgba(255,255,255,0.16)",
-        outlineWidth: 1.2,
+        outlineColor: "rgba(255,255,255,0.10)",
+        outlineWidth: 1.0,
       });
       sprite.visible = false;
       sprite.scale.set(1.05, 0.55, 1);
@@ -283,8 +285,8 @@ export function createNebulaNoteHintController({
     cursorLabel.quaternion.copy(camera.quaternion);
 
     const s = params.cursorScale;
-    cursorLabel.scale.set(1.75 * s, 0.9 * s, 1);
-    cursorLabel.material.opacity = 1.0;
+    cursorLabel.scale.set(1.45 * s, 0.76 * s, 1);
+    cursorLabel.material.opacity = 0.72;
     cursorLabel.visible = true;
   }
 
