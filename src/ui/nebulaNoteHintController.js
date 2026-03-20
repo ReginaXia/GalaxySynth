@@ -74,6 +74,11 @@ function makeGlowTextSprite(text = "C", opts = {}) {
   }
 
   setText(text);
+  if (document.fonts?.load) {
+    document.fonts.load(`${font} ${fontSize}px LacheyardScript`).then(() => {
+      setText(text);
+    }).catch(() => {});
+  }
   return { sprite, setText };
 }
 
