@@ -4,11 +4,11 @@ import bgVert from "./shaders/bg.vert.glsl?raw";
 import bgFrag from "./shaders/bg.frag.glsl?raw";
 
 export const BACKGROUND_PALETTES = {
-  pearl: { name: "Pearl Shell", colors: ["#73EFFF","#86A8FF","#C9B8FF","#FF9FD2"] },
-  candy: { name: "Cotton Candy", colors: ["#61D9FF","#FF6BD6","#FFB86B","#B6FF8A"] },
-  aurora:{ name: "Aurora Soft",  colors: ["#45E9FF","#6F86FF","#BDA7FF","#A7FFD9"] },
-  cosmic:{ name: "Cosmic Iris",  colors: ["#52E9FF","#6A7CFF","#A99BFF","#E2A6FF"] },
-  neo:   { name: "Neo Dream",    colors: ["#3DFFB8","#3D7BFF","#FF3DF2","#FFE83D"] },
+  pearl: { name: "Pearl Shell", colors: ["#F9FDFF","#DAEEFF","#E7DFFF","#BEE8FF"] },
+  candy: { name: "Cotton Candy", colors: ["#EEF9FF","#D9EAFF","#EEDFFF","#B7E5FF"] },
+  aurora:{ name: "Aurora Soft",  colors: ["#EAFBFF","#CFE6FF","#E7DEFF","#C8F8F1"] },
+  cosmic:{ name: "Cosmic Iris",  colors: ["#C8E0FF","#AFC6FF","#D7CBFF","#C0EEFF"] },
+  neo:   { name: "Neo Dream",    colors: ["#DDFBFF","#C8D7FF","#E8DAFF","#CDEEFF"] },
 };
 
 function hexToVec3(hex){
@@ -19,8 +19,8 @@ function clamp01(x){ return Math.max(0, Math.min(1, x)); }
 
 export async function createDreamyBackground(scene, camera = null, opts = {}){
   const radius = opts.radius ?? 2000;
-  const base = new THREE.Color(opts.baseColor ?? "#070B18");
-  const paletteKey = opts.palette ?? "aurora";
+  const base = new THREE.Color(opts.baseColor ?? "#2B2F54");
+  const paletteKey = opts.palette ?? "pearl";
   const pal = BACKGROUND_PALETTES[paletteKey] ?? BACKGROUND_PALETTES.pearl;
 
   const mainColor = new THREE.Color("#7ca0ff");
@@ -28,30 +28,53 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
   const uniforms = {
     uTime: { value: 0 },
     uLeadE:   { value: 0 },
+    uInteractionE: { value: 0 },
     uPitch01: { value: 0.5 },
     uVel01:   { value: 0.0 },
     uTheta01: { value: 0.0 },
     uMouse:   { value: new THREE.Vector2(0.5, 0.5) },
 
     uBase:      { value: new THREE.Vector3(base.r, base.g, base.b) },
-    uIntensity: { value: opts.intensity ?? 0.82 },
-    uFlow:      { value: opts.flow ?? 1.0 },
-    uScale:     { value: opts.scale ?? 0.9 },
-    uWarp:      { value: opts.warp ?? 0.58 },
-    uDetail:    { value: opts.detail ?? 0.42 },
+    uBaseLift:  { value: new THREE.Vector3(base.r, base.g, base.b) },
+    uBaseLiftMix: { value: 0.0 },
+    uIntensity: { value: opts.intensity ?? 0.05 },
+    uFlow:      { value: opts.flow ?? 0.08 },
+    uScale:     { value: opts.scale ?? 0.75 },
+    uWarp:      { value: opts.warp ?? 0.44 },
+    uDetail:    { value: opts.detail ?? 0.24 },
     uPearl:     { value: opts.pearl ?? 0.92 },
-    uSparkle:   { value: opts.sparkle ?? 0.15 },
-    uSat:       { value: opts.sat ?? 0.45 },
-    uContrast:  { value: opts.contrast ?? 0.9 },
+    uSparkle:   { value: opts.sparkle ?? 0.015 },
+    uSat:       { value: opts.sat ?? 0.30 },
+    uContrast:  { value: opts.contrast ?? 0.84 },
+    uLegacyColorMode: { value: opts.legacyColorMode ?? 0.0 },
 
     uPal0: { value: hexToVec3(pal.colors[0]) },
     uPal1: { value: hexToVec3(pal.colors[1]) },
     uPal2: { value: hexToVec3(pal.colors[2]) },
     uPal3: { value: hexToVec3(pal.colors[3]) },
 
+    uPulse:    { value: 0 },
+    uNoteHue:  { value: 0 },
+    uNoteSeed: { value: 0 },
+    uNotePos:  { value: new THREE.Vector2(0.5, 0.5) },
+    uNoteColor: { value: new THREE.Vector3(0.0, 0.0, 0.0) },
+    uNoteColorMix: { value: 0.0 },
+    uNoteColorStrict: { value: 0.0 },
+    uRichness: { value: 0.58 },
+    uDream: { value: 0.52 },
+    uInteractionPos: { value: new THREE.Vector2(0.5, 0.5) },
+    uEmitPos0: { value: new THREE.Vector2(0.5, 0.5) },
+    uEmitPos1: { value: new THREE.Vector2(0.5, 0.5) },
+    uEmitPos2: { value: new THREE.Vector2(0.5, 0.5) },
+    uEmitCol0: { value: new THREE.Vector3(0.0, 0.0, 0.0) },
+    uEmitCol1: { value: new THREE.Vector3(0.0, 0.0, 0.0) },
+    uEmitCol2: { value: new THREE.Vector3(0.0, 0.0, 0.0) },
+    uEmitStr0: { value: 0.0 },
+    uEmitStr1: { value: 0.0 },
+    uEmitStr2: { value: 0.0 },
   };
 
-  uniforms.uFlow.value = 0.0;
+  uniforms.uFlow.value = 0.012;
   uniforms.uSparkle.value = 0.0;
 
   const mat = new THREE.ShaderMaterial({
@@ -108,17 +131,72 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
       uniforms.uPal2.value.copy(hexToVec3(colors[2]));
       uniforms.uPal3.value.copy(hexToVec3(colors[3]));
     },
+    setLegacyColorMode(enabledOrMix = 0.0) {
+      uniforms.uLegacyColorMode.value = clamp01(
+        typeof enabledOrMix === "boolean" ? (enabledOrMix ? 1.0 : 0.0) : Number(enabledOrMix) || 0.0
+      );
+    },
+    getLegacyColorMode() {
+      return uniforms.uLegacyColorMode.value;
+    },
 
     setAudio({
       leadE = uniforms.uLeadE.value,
+      interactionE = uniforms.uInteractionE.value,
       pitch01 = uniforms.uPitch01.value,
       vel01 = uniforms.uVel01.value,
       theta01 = uniforms.uTheta01.value,
+      pulse = 0,
+      noteSeed = 0,
+      notePos = null,
+      interactionPos = null,
+      noteHue = 0,
+      noteColor = null,
+      noteColorMix = 0,
+      noteColorStrict = 0,
+      richness = uniforms.uRichness.value,
+      dream = uniforms.uDream.value,
+      emitters = null,
     } = {}) {
       uniforms.uLeadE.value   = clamp01(leadE);
+      uniforms.uInteractionE.value = clamp01(interactionE);
       uniforms.uPitch01.value = clamp01(pitch01);
       uniforms.uVel01.value   = clamp01(vel01);
       uniforms.uTheta01.value = clamp01(theta01);
+      uniforms.uPulse.value   = clamp01(pulse);
+      uniforms.uNoteSeed.value = noteSeed ?? 0;
+      uniforms.uNoteHue.value  = noteHue ?? 0;
+      uniforms.uNoteColorMix.value = clamp01(noteColorMix ?? 0);
+      uniforms.uNoteColorStrict.value = clamp01(noteColorStrict ?? 0);
+      uniforms.uRichness.value = clamp01(richness ?? uniforms.uRichness.value);
+      uniforms.uDream.value = clamp01(dream ?? uniforms.uDream.value);
+      if (noteColor && typeof noteColor.r === "number") {
+        uniforms.uNoteColor.value.set(
+          clamp01(noteColor.r),
+          clamp01(noteColor.g),
+          clamp01(noteColor.b)
+        );
+      }
+      if (notePos && typeof notePos.x === "number"){
+        uniforms.uNotePos.value.set(clamp01(notePos.x), clamp01(notePos.y));
+      }
+      if (interactionPos && typeof interactionPos.x === "number"){
+        uniforms.uInteractionPos.value.set(clamp01(interactionPos.x), clamp01(interactionPos.y));
+      }
+      if (Array.isArray(emitters)) {
+        const e0 = emitters[0] ?? {};
+        const e1 = emitters[1] ?? {};
+        const e2 = emitters[2] ?? {};
+        uniforms.uEmitPos0.value.set(clamp01(e0.x ?? 0.5), clamp01(e0.y ?? 0.5));
+        uniforms.uEmitPos1.value.set(clamp01(e1.x ?? 0.5), clamp01(e1.y ?? 0.5));
+        uniforms.uEmitPos2.value.set(clamp01(e2.x ?? 0.5), clamp01(e2.y ?? 0.5));
+        uniforms.uEmitCol0.value.set(clamp01(e0.r ?? 0), clamp01(e0.g ?? 0), clamp01(e0.b ?? 0));
+        uniforms.uEmitCol1.value.set(clamp01(e1.r ?? 0), clamp01(e1.g ?? 0), clamp01(e1.b ?? 0));
+        uniforms.uEmitCol2.value.set(clamp01(e2.r ?? 0), clamp01(e2.g ?? 0), clamp01(e2.b ?? 0));
+        uniforms.uEmitStr0.value = clamp01(e0.s ?? 0);
+        uniforms.uEmitStr1.value = clamp01(e1.s ?? 0);
+        uniforms.uEmitStr2.value = clamp01(e2.s ?? 0);
+      }
     },
 
     setMouse01(x,y){ uniforms.uMouse.value.set(clamp01(x), clamp01(y)); },
@@ -136,7 +214,7 @@ export async function createDreamyBackground(scene, camera = null, opts = {}){
 export function setupBackgroundGUI(gui, bg) {
   if (!gui || !bg) return;
   const params = {
-    palette: "aurora",
+    palette: "cosmic",
     intensity: bg.uniforms.uIntensity.value,
     flow: bg.uniforms.uFlow.value,
     scale: bg.uniforms.uScale.value,

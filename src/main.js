@@ -4,6 +4,7 @@ import * as Tone from "tone";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 
 import { setupGalaxyGUI } from "./ui/galaxyGui.js";
 import { setupMeteorGUI } from "./ui/meteorGui.js";
@@ -14,28 +15,42 @@ import { playMeteorSfx } from "./audio/meteorSfx.js";
 
 import { createNebulaSystem } from "./nebula/nebulaSystem.js";
 import { createMeteorSystem } from "./meteor/meteorSystem.js";
+import { createDolphinSystem } from "./dolphin/dolphinSystem.js";
+import { createNotePopSystem } from "./notePop/notePopSystem.js";
 
-import { createDreamyBackground, setupBackgroundGUI } from "./background/dreamyBackground";
+import { createDreamyBackground } from "./background/dreamyBackground";
 
 import { createPerformanceState } from "./performance/performanceState";
+import { createAutoPlayConductor } from "./performance/autoPlayConductor.js";
 import { createMouseKeyboardController } from "./input/mouseKeyboardController";
 import { createGalaxyAudioEngine } from "./audio/galaxyAudioEngine";
 
 import { createGalaxyVoices } from "./audio/galaxyVoices.js";
 
 import { createAudioMonitorUI } from "./ui/audioMonitor.js";
+import { createNoteColorPanel } from "./ui/noteColorPanel.js";
+import { createBackgroundDockPanel } from "./ui/backgroundDockPanel.js";
+import { createDockPanel } from "./ui/dockPanel.js";
+import { setupDolphinGUI } from "./ui/dolphinGui.js";
+import { setupNotePopGUI } from "./ui/notePopGui.js";
 
 import { createCameraControlSystem } from "./input/cameraControlSystem.js";
+import { createPerformanceCameraController } from "./camera/performanceCameraController.js";
 import { musicState } from "./state/musicState.js";
 import { resolveNoteIntent } from "./interaction/resolveNoteIntent.js";
 import { onPointerMove, onPointerDown, onPointerMovePressed, onPointerUp } from "./interaction/intentStateMachine.js";
+import { NOTE_STEPS, stepToBoundaryTheta01, stepToCenterTheta01 } from "./music/noteMapping.js";
 
+import starsVert from "./shaders/stars.vert.glsl?raw";
+import starsFrag from "./shaders/stars.frag.glsl?raw";
 import meteorVert from "./shaders/meteor.vert.glsl?raw";
 import meteorFrag from "./shaders/meteor.frag.glsl?raw";
+import { DreamGlowShader } from "./postprocessing/dreamGlowShader.js";
 
 console.log("MAIN JS LOADED");
 // --- Debug HUD (show active/hover)
 const debugHud = document.createElement("div");
+debugHud.className = "custom-ui debug-hud";
 debugHud.style.cssText = `
   position:fixed;
   top:12px;
@@ -62,6 +77,7 @@ debugHud.textContent = "HUD ready";
 document.body.appendChild(debugHud);
 
 const DEBUG_INTENT = true;
+const DEBUG_NOTE_OVERLAY = true;
 const __lastIntentLog = { hover: null, active: null, last: null };
 function logIntentChange(kind, intent) {
   if (!DEBUG_INTENT) return;
@@ -70,6 +86,17 @@ function logIntentChange(kind, intent) {
   __lastIntentLog[kind] = next;
   console.log(`[intent] ${kind}:`, next ?? "-");
 }
+
+const noteOverlay = document.createElement("canvas");
+noteOverlay.className = "custom-ui note-overlay";
+noteOverlay.style.cssText = `
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  pointer-events: none;
+`;
+document.body.appendChild(noteOverlay);
+const noteOverlayCtx = noteOverlay.getContext("2d");
 
 
 (async function main(){
@@ -80,9 +107,14 @@ let bgLeadE = 0.0;     // 0..1 presence
 let bgPitch01 = 0.5;   // 0..1
 let bgVel01 = 0.0;     // 0..1
 let bgTheta01 = 0.0;   // 0..1
+let bgPulse = 0.0;     // 0..1 (note trigger)
 let bgClickPulse = 0.0; // click-triggered ripple source
 let bgClickPulseVis = 0.0; // attack-shaped pulse
+let bgInteractionE = 0.0; // local turbulence envelope
+let bgLastEmitE = 0.0;
 let bgLastStep = -1;
+let bgNoteHue = 0.86;
+let bgNoteSeed = 0.0;
 
 // -------------------------------------
 
@@ -106,14 +138,36 @@ function __bgRiseFall(current, target, dt, rise = 16.0, fall = 4.0) {
   return THREE.MathUtils.damp(current, target, k, dt);
 }
 
+function __wrap01(v) {
+  return ((v % 1) + 1) % 1;
+}
+function __lerpHue01(a, b, t) {
+  const aa = __wrap01(a);
+  const bb = __wrap01(b);
+  let d = bb - aa;
+  if (d > 0.5) d -= 1.0;
+  if (d < -0.5) d += 1.0;
+  return __wrap01(aa + d * THREE.MathUtils.clamp(t, 0, 1));
+}
+
+function __bgRiseFallWrap(current, target, dt, rise = 16.0, fall = 4.0) {
+  const c = __wrap01(current);
+  const t = __wrap01(target);
+  let d = t - c;
+  if (d > 0.5) d -= 1.0;
+  if (d < -0.5) d += 1.0;
+  const linearTarget = c + d;
+  const k = linearTarget > c ? rise : fall;
+  return __wrap01(THREE.MathUtils.damp(c, linearTarget, k, dt));
+}
+
 // -------------------------------------
 // Scene / Camera
 // -------------------------------------
 const scene = new THREE.Scene();
 
-
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.05, 2000);
-camera.position.set(0, 6.5, 8.5);
+camera.position.set(-0.9, 5.8, 10.2);
 camera.lookAt(0, 0, 0);
 
 const cameraControl = createCameraControlSystem({
@@ -122,13 +176,26 @@ const cameraControl = createCameraControlSystem({
   getPivotWorldPoint: getMouseWorldOnPlane, // ✅ 关键：用你已有的平面求交当 pivot
   zoomSpeed: 0.0018, // 可以从 0.0012~0.0022 调
 });
+const performanceCamera = createPerformanceCameraController({
+  performanceOrbitStrength: 1.08,
+  performanceOrbitSpeed: 1 / 38,
+  performanceOrbitDelay: 0.52,
+  performanceOrbitVerticalBias: 0.26,
+});
 
-const bg = await createDreamyBackground(scene, camera, { palette: 'aurora' });
+const bg = await createDreamyBackground(scene, camera, {
+  palette: "pearl",
+  baseColor: "#2B2F54",
+});
 
 // 初始时禁用流动效果和亮度
-  bg.uniforms.uFlow.value = 0;
-  bg.uniforms.uSparkle.value = 0;
-  bg.uniforms.uIntensity.value = 0; 
+  bg.uniforms.uFlow.value = 0.018;
+  bg.uniforms.uSparkle.value = 0.012;
+  bg.uniforms.uIntensity.value = 0.022;
+  // Large-display baseline: denser background texture layers.
+  bg.uniforms.uScale.value = 1.04;
+  bg.uniforms.uDetail.value = 0.72;
+  bg.uniforms.uWarp.value = 0.72;
 
   let isInteracting = false;
 
@@ -155,8 +222,6 @@ try {
 }
 
 window.__bg = bg;
-// If your existing UI exposes a gui instance on window.__gui, this will attach a small Background folder.
-if (window.__gui) setupBackgroundGUI(window.__gui, bg);
 scene.background = new THREE.Color(0x000000);
 
 
@@ -179,6 +244,36 @@ function applyOrbitCamera() {
   camera.lookAt(orbitTarget);
 }
 
+const cameraFocus = {
+  active: false,
+  elapsed: 0,
+  duration: 0.36,
+  startPos: new THREE.Vector3(),
+  endPos: new THREE.Vector3(),
+  startTarget: new THREE.Vector3(),
+  endTarget: new THREE.Vector3(),
+};
+let focusedPerformanceNebulaId = null;
+let focusOrbitNebulaId = null;
+const focusOrbitState = {
+  weight: 0,
+  phase: 0,
+  activeId: null,
+};
+const focusOrbitCenter = new THREE.Vector3();
+const focusOrbitOffset = new THREE.Vector3();
+const focusOrbitRotated = new THREE.Vector3();
+const focusOrbitAxis = new THREE.Vector3(0, 1, 0);
+const focusOrbitQuat = new THREE.Quaternion();
+
+function syncLegacyOrbitFromCamera(targetWorld) {
+  orbitTarget.copy(targetWorld);
+  const off = camera.position.clone().sub(orbitTarget);
+  orbitRadius = Math.max(1e-4, off.length());
+  orbitYaw = Math.atan2(off.x, off.z);
+  orbitPitch = Math.asin(THREE.MathUtils.clamp(off.y / orbitRadius, -1, 1));
+}
+
 
 // -------------------------------------
 // Texture
@@ -195,10 +290,119 @@ composer.addPass(new RenderPass(scene, camera));
 
 const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.65, 0.22);
 composer.addPass(bloomPass);
+const dreamGlowPass = new ShaderPass(DreamGlowShader);
+composer.addPass(dreamGlowPass);
 
 bloomPass.strength = 1;
 bloomPass.radius = 1;
 bloomPass.threshold = 0.7;
+dreamGlowPass.enabled = false;
+dreamGlowPass.uniforms.uResolution.value.set(window.innerWidth, window.innerHeight);
+
+const dreamyGlowController = (() => {
+  const state = {
+    enabled: true,
+    legacyBloom: false,
+    legacyBloomBase: 0.26,
+    intensity: 1.24,
+    softness: 1.08,
+    starGlowBoost: 1.12,
+    backgroundLift: 1.12,
+    filterAmount: 1.02,
+    filterTintMix: 0.08,
+    filterHaze: 0.52,
+  };
+  return {
+    getConfig() {
+      return { ...state };
+    },
+    updateConfig(partial = {}) {
+      if (typeof partial.enabled === "boolean") state.enabled = partial.enabled;
+      if (typeof partial.legacyBloom === "boolean") state.legacyBloom = partial.legacyBloom;
+      if (Number.isFinite(partial.legacyBloomBase)) state.legacyBloomBase = THREE.MathUtils.clamp(partial.legacyBloomBase, 0, 1.2);
+      if (Number.isFinite(partial.intensity)) state.intensity = THREE.MathUtils.clamp(partial.intensity, 0, 1.5);
+      if (Number.isFinite(partial.softness)) state.softness = THREE.MathUtils.clamp(partial.softness, 0, 1.5);
+      if (Number.isFinite(partial.starGlowBoost)) state.starGlowBoost = THREE.MathUtils.clamp(partial.starGlowBoost, 0, 1.5);
+      if (Number.isFinite(partial.backgroundLift)) state.backgroundLift = THREE.MathUtils.clamp(partial.backgroundLift, 0, 1.5);
+      if (Number.isFinite(partial.filterAmount)) state.filterAmount = THREE.MathUtils.clamp(partial.filterAmount, 0, 1.5);
+      if (Number.isFinite(partial.filterTintMix)) state.filterTintMix = THREE.MathUtils.clamp(partial.filterTintMix, 0, 1.0);
+      if (Number.isFinite(partial.filterHaze)) state.filterHaze = THREE.MathUtils.clamp(partial.filterHaze, 0, 1.0);
+    },
+  };
+})();
+
+const backgroundReactivityController = (() => {
+  const state = {
+    cleanBackgroundMode: false,
+    enableNoteColorInjection: true,
+    enableLocalEmitters: true,
+  };
+  return {
+    getConfig() {
+      return {
+        ...state,
+        enableNoteColorInjection: !state.cleanBackgroundMode && state.enableNoteColorInjection,
+        enableLocalEmitters: !state.cleanBackgroundMode && state.enableLocalEmitters,
+      };
+    },
+    updateConfig(partial = {}) {
+      if (typeof partial.cleanBackgroundMode === "boolean") {
+        state.cleanBackgroundMode = partial.cleanBackgroundMode;
+      }
+      if (typeof partial.enableNoteColorInjection === "boolean") {
+        state.enableNoteColorInjection = partial.enableNoteColorInjection;
+      }
+      if (typeof partial.enableLocalEmitters === "boolean") {
+        state.enableLocalEmitters = partial.enableLocalEmitters;
+      }
+    },
+  };
+})();
+
+const pureColorController = (() => {
+  const state = {
+    enabled: true,
+    lift: 0.88,
+    saturation: 0.78,
+    contrastSoftness: 0.82,
+  };
+  return {
+    getConfig() {
+      return { ...state };
+    },
+    updateConfig(partial = {}) {
+      if (typeof partial.enabled === "boolean") state.enabled = partial.enabled;
+      if (Number.isFinite(partial.lift)) state.lift = THREE.MathUtils.clamp(partial.lift, 0, 1.5);
+      if (Number.isFinite(partial.saturation)) state.saturation = THREE.MathUtils.clamp(partial.saturation, 0, 1.5);
+      if (Number.isFinite(partial.contrastSoftness)) state.contrastSoftness = THREE.MathUtils.clamp(partial.contrastSoftness, 0, 1.5);
+    },
+  };
+})();
+
+const pearlWhiteController = (() => {
+  const state = {
+    enabled: true,
+    strength: 1.18,
+    color: new THREE.Color("#FFF8FE"),
+  };
+  return {
+    getConfig() {
+      return {
+        enabled: state.enabled,
+        strength: state.strength,
+        color: `#${state.color.getHexString()}`,
+      };
+    },
+    updateConfig(partial = {}) {
+      if (typeof partial.enabled === "boolean") state.enabled = partial.enabled;
+      if (Number.isFinite(partial.strength)) state.strength = THREE.MathUtils.clamp(partial.strength, 0, 1.5);
+      if (typeof partial.color === "string") state.color.set(partial.color);
+    },
+    getColor() {
+      return state.color;
+    },
+  };
+})();
 
 // -------------------------------------
 // Raycast plane (y = 0)
@@ -216,6 +420,7 @@ let lastInteractionTime = 0;
 function triggerBackgroundPulse(strength = 1.0) {
   const s = THREE.MathUtils.clamp(strength, 0, 1);
   bgClickPulse = Math.max(bgClickPulse, s);
+  bgPulse = Math.max(bgPulse, 0.75 * s);
 }
 
 
@@ -239,8 +444,6 @@ let noteHint = null;
 window.addEventListener("pointermove", (e) => {
   __markPointerMoved(e.clientX, e.clientY);
   noteHint?.setPointerClientXY?.(e.clientX, e.clientY);
-  mouse01.x = e.clientX / window.innerWidth;
-  mouse01.y = 1.0 - e.clientY / window.innerHeight;
   pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
   pointer.y = -((e.clientY / window.innerHeight) * 2 - 1);
 });
@@ -281,7 +484,10 @@ function __markPointerMoved(clientX, clientY) {
   }
 }
 
-window.addEventListener("pointerdown", () => (pointerDown = true));
+window.addEventListener("pointerdown", (e) => {
+  if (e.target?.closest?.(".custom-ui") || e.target?.closest?.(".lil-gui") || e.target?.closest?.(".dg")) return;
+  pointerDown = true;
+});
 window.addEventListener("pointerup", () => {
   pointerDown = false;
   onPointerUp(musicState);
@@ -314,7 +520,7 @@ const audio = createGalaxyAudioEngine();
 const audioEngine = audio;
 const voices = createGalaxyVoices();
 const audioUI = createAudioMonitorUI();
-const audioVoices = createGalaxyVoices();
+const noteColorUI = createNoteColorPanel();
 
 
 // -------------------------------------
@@ -403,6 +609,7 @@ window.addEventListener("keydown", (e) => {
     interactionMode = "orbit";
     activeNebulaKey = null; // ✅ ESC 退出当前星云控制
     musicState.activeIntent = null;
+    focusOrbitNebulaId = null;
   }
 });
 
@@ -410,6 +617,7 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     activeNebulaKey = null;
     musicState.activeIntent = null;
+    focusOrbitNebulaId = null;
   }
 });
 
@@ -520,11 +728,56 @@ const bgMood = {
   energy: 0.0,
 };
 
+const cinematicState = {
+  phase: 0,          // 0..1 in full cycle
+  energy: 0,         // 0..1 envelope used as global scene macro
+  pulseBoost: 1.0,   // note pulse multiplier
+  enabled: false,
+  wasEnabled: false,
+  prevMeteor: null,
+};
+
+const autoReplayVisual = {
+  energy: 0.0,
+  pending: null,
+  lastEventMs: 0,
+};
+let lastDolphinEmitMs = 0;
+let lastNotePopEmitMs = 0;
+const autoDisturbPoint = new THREE.Vector3(0, 0, 0);
+let autoDisturbE = 0.0;
+
+function emitGapMsFromVelocity(v01, slowMs = 150, fastMs = 55) {
+  const v = THREE.MathUtils.clamp(v01 ?? 0, 0, 1);
+  return THREE.MathUtils.lerp(slowMs, fastMs, v);
+}
+function midiToPitch01(midi) {
+  if (!Number.isFinite(Number(midi))) return 0.5;
+  return THREE.MathUtils.clamp((Number(midi) - 36) / 60, 0, 1);
+}
+
+function smoothPulse01(x) {
+  const t = THREE.MathUtils.clamp(x, 0, 1);
+  return Math.sin(t * Math.PI);
+}
+
 
 
 // -------------------------------------
 // Brackground
 // -------------------------------------
+
+// ✅ background audio uniforms handle
+const bgU = bg.uniforms;
+
+// ✅ background “note paint” state
+// let bgPulse = 0.0;
+let bgSeed = 0.123;
+let lastMidiSeen = -999;
+let lastTheta01 = 0.0;
+let lastVel01 = 0.0;
+let lastPitch01 = 0.5;
+
 
 // -------------------------------------
 // Brackground mouse
@@ -547,7 +800,222 @@ const nebulaSystem = createNebulaSystem({
   starTexture,
 });
 
-setupGalaxyGUI({ camera, renderer, nebulaSystem });
+function onAutoPlayNoteEvent(ev) {
+  const now = performance.now();
+  const minGapMs = 42; // throttle replay visuals to avoid overload on dense patterns
+  if ((now - autoReplayVisual.lastEventMs) < minGapMs) return;
+  autoReplayVisual.lastEventMs = now;
+  autoReplayVisual.pending = ev;
+  autoReplayVisual.energy = Math.max(autoReplayVisual.energy, 1.0);
+
+  const vAuto = THREE.MathUtils.clamp(ev?.velocity ?? 0.66, 0, 1);
+  const dolphinGapMs = emitGapMsFromVelocity(vAuto, 150, 70);
+  if ((now - lastDolphinEmitMs) >= dolphinGapMs) {
+    lastDolphinEmitMs = now;
+    dolphinSystem?.triggerFromNote?.({
+      galaxyId: ev?.galaxyId ?? null,
+      theta01: ev?.theta01 ?? Math.random(),
+      velocity: vAuto,
+      strength: 0.9,
+      now: now * 0.001,
+    });
+  }
+
+  const notePopGapMs = emitGapMsFromVelocity(vAuto, 130, 48);
+  if ((now - lastNotePopEmitMs) >= notePopGapMs) {
+    lastNotePopEmitMs = now;
+    notePopSystem?.triggerFromNote?.({
+      galaxyId: ev?.galaxyId ?? null,
+      theta01: ev?.theta01 ?? Math.random(),
+      velocity: vAuto,
+      notePitch01: midiToPitch01(ev?.midi),
+      noteHue: ev?.theta01 ?? null,
+      strength: THREE.MathUtils.lerp(0.82, 1.0, vAuto),
+      now: now * 0.001,
+    });
+  }
+
+  const cluster = nebulaSystem?.getCluster?.(ev?.galaxyId);
+  if (cluster?.group) {
+    const sizeScale = cluster?.preset?.shape?.sizeScale ?? 1.0;
+    const groupScale = cluster?.group?.scale?.x ?? 1.0;
+    const rWorld = Math.max(0.2, 1.9 * sizeScale * groupScale * (0.34 + (ev?.r01 ?? 0.5) * 0.66));
+    const a = ((ev?.theta01 ?? Math.random()) % 1 + 1) % 1 * Math.PI * 2;
+    const pLocal = new THREE.Vector3(Math.cos(a) * rWorld, 0, Math.sin(a) * rWorld);
+    const pWorld = cluster.group.localToWorld(pLocal);
+    autoDisturbPoint.copy(pWorld);
+    autoDisturbE = Math.max(autoDisturbE, 1.0);
+  }
+}
+
+const autoPlayConductor = createAutoPlayConductor({
+  nebulaSystem,
+  voices,
+  audio,
+  triggerBackgroundPulse,
+  onEvent: onAutoPlayNoteEvent,
+});
+
+function triggerPerformanceCameraNotePulse({ galaxyId = null, strength = 0.35, centerWorld = null } = {}) {
+  performanceCamera?.queueNotePulse?.({
+    galaxyId,
+    strength: THREE.MathUtils.clamp(strength, 0, 1),
+    centerWorld,
+  });
+}
+
+function focusCameraToGalaxy(galaxyId) {
+  if (!galaxyId) return;
+  const c = nebulaSystem.getCluster?.(galaxyId);
+  if (!c?.group) return;
+  focusedPerformanceNebulaId = galaxyId;
+
+  const center = c.group.localToWorld(new THREE.Vector3(0, 0, 0));
+  const sizeScale = c?.preset?.shape?.sizeScale ?? 1.0;
+  const lengthScale = c?.preset?.shape?.length ?? 1.0;
+  const groupScale = c?.group?.scale?.x ?? 1.0;
+  const nebulaRadius = Math.max(0.8, 1.9 * sizeScale * lengthScale * groupScale);
+  const cameraDistanceLimits = cameraControl?.getDistanceLimits?.() ?? { maxDistance: 13.5 };
+  const desiredDist = THREE.MathUtils.clamp(nebulaRadius * 3.1, 3.8, cameraDistanceLimits.maxDistance);
+
+  const currentTarget = cameraControl?.getTarget?.() ?? orbitTarget.clone();
+  const viewDir = camera.position.clone().sub(currentTarget);
+  if (viewDir.lengthSq() < 1e-6) viewDir.set(0, 0.55, 1.0);
+  viewDir.normalize();
+
+  const endPos = center.clone()
+    .addScaledVector(viewDir, desiredDist)
+    .add(new THREE.Vector3(0, nebulaRadius * 0.15, 0));
+
+  cameraFocus.startPos.copy(camera.position);
+  cameraFocus.endPos.copy(endPos);
+  cameraFocus.startTarget.copy(currentTarget);
+  cameraFocus.endTarget.copy(center);
+  cameraFocus.elapsed = 0;
+  cameraFocus.duration = 0.36;
+  cameraFocus.active = true;
+}
+
+function applyFocusOrbitMode(dt) {
+  const cfg = performanceCamera?.getRuntimeConfig?.();
+  const orbitEnabled = !!(cfg?.enablePerformanceOrbit && focusOrbitNebulaId && !cameraFocus.active);
+  focusOrbitState.weight = THREE.MathUtils.damp(
+    focusOrbitState.weight,
+    orbitEnabled ? 1.0 : 0.0,
+    orbitEnabled ? 1.6 : 2.4,
+    dt
+  );
+
+  if (!orbitEnabled || focusOrbitState.weight <= 1e-4) {
+    if (!orbitEnabled) focusOrbitState.activeId = null;
+    return;
+  }
+
+  const cluster = nebulaSystem.getCluster?.(focusOrbitNebulaId);
+  if (!cluster?.group) return;
+
+  cluster.group.localToWorld(focusOrbitCenter.set(0, 0, 0));
+
+  if (focusOrbitState.activeId !== focusOrbitNebulaId) {
+    focusOrbitState.activeId = focusOrbitNebulaId;
+  }
+
+  const orbitSpeed = THREE.MathUtils.clamp(cfg?.performanceOrbitSpeed ?? (1 / 30), 0.005, 0.15);
+  const orbitStrength = THREE.MathUtils.clamp(cfg?.performanceOrbitStrength ?? 0.95, 0, 2);
+  const orbitVerticalBias = THREE.MathUtils.clamp(cfg?.performanceOrbitVerticalBias ?? 0.20, 0, 0.6);
+  const deltaAngle = dt * Math.PI * 2 * orbitSpeed * focusOrbitState.weight;
+  focusOrbitState.phase += deltaAngle;
+
+  focusOrbitOffset.copy(camera.position).sub(focusOrbitCenter);
+  if (focusOrbitOffset.lengthSq() < 1e-6) return;
+
+  focusOrbitQuat.setFromAxisAngle(focusOrbitAxis, deltaAngle);
+  focusOrbitRotated.copy(focusOrbitOffset).applyQuaternion(focusOrbitQuat);
+  const verticalAmp = focusOrbitOffset.length() * 0.035 * orbitVerticalBias * Math.min(1.2, 0.65 + orbitStrength * 0.35);
+  focusOrbitRotated.y += Math.sin(focusOrbitState.phase * 0.65) * verticalAmp * focusOrbitState.weight;
+
+  camera.position.copy(focusOrbitCenter).add(focusOrbitRotated);
+  cameraControl?.setTarget?.(focusOrbitCenter);
+  cameraControl?.syncOrbitFromCamera?.();
+}
+
+const galaxyGuiRef = setupGalaxyGUI({
+  camera,
+  renderer,
+  nebulaSystem,
+  voices,
+  performanceCamera,
+  cameraControl,
+  dreamyGlowController,
+  backgroundReactivityController,
+  pureColorController,
+  pearlWhiteController,
+});
+window.__gui = galaxyGuiRef?.gui ?? null;
+const backgroundDockUI = createBackgroundDockPanel({ bg });
+
+function resizeNoteOverlay() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  noteOverlay.width = w;
+  noteOverlay.height = h;
+}
+
+function worldToOverlayXY(v3) {
+  const p = v3.clone().project(camera);
+  return {
+    x: (p.x * 0.5 + 0.5) * noteOverlay.width,
+    y: (1 - (p.y * 0.5 + 0.5)) * noteOverlay.height,
+  };
+}
+
+function drawNoteAlignmentOverlay(intent) {
+  if (!DEBUG_NOTE_OVERLAY || !noteOverlayCtx) return;
+  const ctx = noteOverlayCtx;
+  ctx.clearRect(0, 0, noteOverlay.width, noteOverlay.height);
+
+  if (!intent?.galaxyId) return;
+  const cluster = nebulaSystem.getCluster?.(intent.galaxyId);
+  if (!cluster?.group) return;
+
+  const sizeScale = cluster?.preset?.shape?.sizeScale ?? 1.0;
+  const radius = Math.max(1e-4, 1.9 * sizeScale);
+
+  const centerW = cluster.group.localToWorld(new THREE.Vector3(0, 0, 0));
+  const center2 = worldToOverlayXY(centerW);
+
+  ctx.strokeStyle = "rgba(120,200,255,0.65)";
+  ctx.lineWidth = 1;
+
+  for (let i = 0; i < NOTE_STEPS; i++) {
+    const a = stepToBoundaryTheta01(i, NOTE_STEPS) * Math.PI * 2;
+    const p = cluster.group.localToWorld(new THREE.Vector3(Math.cos(a) * radius, 0, Math.sin(a) * radius));
+    const p2 = worldToOverlayXY(p);
+    ctx.beginPath();
+    ctx.moveTo(center2.x, center2.y);
+    ctx.lineTo(p2.x, p2.y);
+    ctx.stroke();
+  }
+
+  for (let i = 0; i < NOTE_STEPS; i++) {
+    const a = stepToCenterTheta01(i, NOTE_STEPS) * Math.PI * 2;
+    const p = cluster.group.localToWorld(new THREE.Vector3(Math.cos(a) * radius, 0, Math.sin(a) * radius));
+    const p2 = worldToOverlayXY(p);
+    ctx.fillStyle = (i === intent.step) ? "rgba(255,255,120,0.95)" : "rgba(255,255,255,0.7)";
+    ctx.beginPath();
+    ctx.arc(p2.x, p2.y, i === intent.step ? 4 : 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (intent.hitWorld) {
+    const hit2 = worldToOverlayXY(intent.hitWorld);
+    ctx.fillStyle = "rgba(255,80,80,0.95)";
+    ctx.beginPath();
+    ctx.arc(hit2.x, hit2.y, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+resizeNoteOverlay();
 
 function cacheActiveDiskFromNebula(galaxyId) {
   if (!galaxyId) {
@@ -605,12 +1073,608 @@ const meteorSystem = createMeteorSystem({
 
 window.__meteor = meteorSystem;
 
+const dolphinSystem = createDolphinSystem({
+  scene,
+  nebulaSystem,
+  planeY: nebulaSystem.planeY,
+});
+window.__dolphin = dolphinSystem;
+const notePopSystem = createNotePopSystem({
+  scene,
+  nebulaSystem,
+  planeY: nebulaSystem.planeY,
+});
+window.__notePop = notePopSystem;
+
 // 新系统没有 mesh（旧系统才有 instanced quad mesh）
 console.log("meteor system", meteorSystem);
 console.log("vert len", meteorVert.length, "frag len", meteorFrag.length);
 
 
-setupMeteorGUI(meteorSystem);
+const meteorGui = setupMeteorGUI(meteorSystem);
+const dolphinGui = setupDolphinGUI(dolphinSystem);
+const notePopGui = setupNotePopGUI(notePopSystem);
+
+const UI_STATE_KEY = "GalaxySynth_UIState_v7";
+function readUiState() {
+  try {
+    const raw = localStorage.getItem(UI_STATE_KEY);
+    if (!raw) {
+      return {
+        visible: true,
+        showcase: false,
+        showPlay: false,
+        showLook: true,
+        showAudio: false,
+        showDebug: false,
+        showTransport: true,
+        showAdvanced: false,
+        cinematic: false,
+        harmonyLayer: true,
+        autoPlay: false,
+        autoPlayStyle: "dream",
+        autoPlayTempo: 86,
+      };
+    }
+    const s = JSON.parse(raw);
+    return {
+      visible: s.visible !== false,
+      showcase: !!s.showcase,
+      showPlay: s.showPlay !== false,
+      showLook: s.showLook !== false,
+      showAudio: !!s.showAudio,
+      showDebug: !!s.showDebug,
+      showTransport: s.showTransport !== false,
+      showAdvanced: !!s.showAdvanced,
+      cinematic: !!s.cinematic,
+      harmonyLayer: s.harmonyLayer !== false,
+      autoPlay: !!s.autoPlay,
+      autoPlayStyle: (typeof s.autoPlayStyle === "string" ? s.autoPlayStyle : "dream"),
+      autoPlayTempo: Number.isFinite(Number(s.autoPlayTempo)) ? Math.max(60, Math.min(140, Number(s.autoPlayTempo))) : 86,
+    };
+  } catch {
+    return {
+      visible: true,
+      showcase: false,
+      showPlay: false,
+      showLook: true,
+      showAudio: false,
+      showDebug: false,
+      showTransport: true,
+      showAdvanced: false,
+      cinematic: false,
+      harmonyLayer: true,
+      autoPlay: false,
+      autoPlayStyle: "dream",
+      autoPlayTempo: 86,
+    };
+  }
+}
+function writeUiState(s) {
+  try {
+    localStorage.setItem(UI_STATE_KEY, JSON.stringify(s));
+  } catch {}
+}
+
+const uiState = readUiState();
+
+const uiStyle = document.createElement("style");
+uiStyle.textContent = `
+.ui-shell{
+  position:fixed; right:12px; top:12px; z-index:10001;
+  width:292px; padding:12px; border-radius:16px;
+  color:#eef2ff; background:linear-gradient(160deg, rgba(10,14,28,.82), rgba(20,12,34,.72));
+  border:1px solid rgba(165,196,255,.22); backdrop-filter:blur(10px);
+  font:12px/1.35 "IBM Plex Sans","Segoe UI",ui-sans-serif,sans-serif;
+  box-shadow:0 10px 30px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.03);
+}
+.ui-shell .row{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin:8px 0; }
+.ui-shell .title{ font-weight:700; letter-spacing:.4px; margin-bottom:4px; }
+.ui-shell .subtitle{ opacity:.72; font-size:11px; margin-bottom:10px; }
+.ui-shell .group-title{ margin-top:8px; font-size:11px; letter-spacing:.7px; text-transform:uppercase; opacity:.72; }
+.ui-shell .btn{
+  border:0; border-radius:10px; padding:7px 10px; cursor:pointer;
+  color:#eaf0ff; background:rgba(70,95,170,.36);
+}
+.ui-shell .btn.secondary{ background:rgba(72,56,112,.38); }
+.ui-shell .btn.ghost{ background:rgba(255,255,255,.08); }
+.ui-shell .btn.active{ background:linear-gradient(135deg, rgba(115,165,255,.52), rgba(136,112,255,.44)); }
+.ui-shell .pair{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.ui-shell .mini-grid{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px; }
+.ui-shell .chk{ display:flex; align-items:center; gap:6px; opacity:.95; }
+.ui-shell .hint{ opacity:.72; font-size:11px; margin-top:6px; }
+.ui-shell input[type="checkbox"]{ transform:translateY(1px); }
+.ui-shell select,
+.ui-shell input[type="range"]{
+  accent-color:#9ab9ff;
+}
+.advanced-shell{
+  display:grid;
+  gap:8px;
+}
+.advanced-shell .section{
+  padding:8px 10px;
+  border-radius:10px;
+  background:rgba(255,255,255,.04);
+  border:1px solid rgba(165,196,255,.10);
+}
+.advanced-shell .section-title{
+  font:600 11px/1.2 "IBM Plex Sans","Segoe UI",ui-sans-serif,sans-serif;
+  letter-spacing:.35px;
+  text-transform:uppercase;
+  opacity:.74;
+  margin-bottom:8px;
+}
+.advanced-shell .row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  margin:6px 0;
+}
+.advanced-shell label{
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+.advanced-shell .hint{
+  opacity:.68;
+  font-size:11px;
+  margin-top:2px;
+}
+
+/* Unified panel look */
+.custom-ui.note-color-panel,
+.custom-ui.audio-monitor,
+.custom-ui.debug-hud,
+.custom-ui.ui-shell{
+  border:1px solid rgba(165,196,255,.20) !important;
+  border-radius:12px !important;
+  background:linear-gradient(160deg, rgba(10,14,28,.78), rgba(22,14,38,.68)) !important;
+  color:#eef2ff !important;
+  box-shadow:0 10px 30px rgba(0,0,0,.34), inset 0 0 0 1px rgba(255,255,255,.03);
+}
+.custom-ui.note-color-panel,
+.custom-ui.audio-monitor{
+  font-family:"IBM Plex Sans","Segoe UI",ui-sans-serif,sans-serif !important;
+}
+.lil-gui{
+  --background-color: rgba(12,16,30,.72) !important;
+  --title-background-color: rgba(34,26,56,.58) !important;
+  --widget-color: #8fb2ff !important;
+  --hover-color: #b3c8ff !important;
+  --text-color: #eaf0ff !important;
+  --folder-widget-color: #7e94e0 !important;
+  --number-color: #a7f2ff !important;
+  --string-color: #ffd3ef !important;
+  backdrop-filter: blur(8px);
+  border:1px solid rgba(165,196,255,.18);
+  border-radius:10px;
+}
+.lil-gui .title{ letter-spacing:.2px; }
+`;
+document.head.appendChild(uiStyle);
+
+const uiShell = document.createElement("div");
+uiShell.className = "custom-ui ui-shell";
+uiShell.addEventListener("pointerdown", (e) => e.stopPropagation());
+uiShell.innerHTML = `
+  <div class="title">Transport</div>
+  <div class="subtitle">Keep the stage clean. Reach deeper controls only when you need them.</div>
+  <div class="pair">
+    <button class="btn" data-act="toggle-ui">UI Visible</button>
+    <button class="btn ghost" data-act="toggle-advanced">Advanced</button>
+  </div>
+  <div class="pair">
+    <button class="btn secondary" data-act="toggle-autoplay">Auto Play</button>
+    <button class="btn secondary" data-act="toggle-cinematic">Cinematic</button>
+  </div>
+  <div class="row"><span>Auto Style</span><select data-k="autoplay-style"><option value="dream">dream</option><option value="sparkle">sparkle</option><option value="calm">calm</option></select></div>
+  <div class="row"><span>Auto Tempo</span><input data-k="autoplay-tempo" type="range" min="60" max="140" step="1" style="flex:1;"><span data-k="autoplay-tempo-v">86</span></div>
+  <div class="mini-grid">
+    <button class="btn ghost" data-act="toggle-look">Look Panel</button>
+    <button class="btn ghost" data-act="toggle-transport">Tempo Ring</button>
+    <button class="btn ghost" data-act="toggle-showcase">Showcase</button>
+    <button class="btn ghost" data-act="clean-layout">Reset Layout</button>
+  </div>
+  <div class="hint">Hotkeys: H hide UI, J showcase, K cinematic, F focus camera</div>
+`;
+document.body.appendChild(uiShell);
+
+const uiHubDock = createDockPanel({
+  id: "hub",
+  title: "Transport",
+  contentEl: uiShell,
+  x: window.innerWidth - 320,
+  y: 12,
+  width: 320,
+  minHeight: 110,
+  zIndex: 10001,
+  showHideButton: false,
+});
+const advancedShell = document.createElement("div");
+advancedShell.className = "custom-ui advanced-shell";
+advancedShell.addEventListener("pointerdown", (e) => e.stopPropagation());
+advancedShell.innerHTML = `
+  <div class="section">
+    <div class="section-title">Visible Panels</div>
+    <div class="row"><label><input type="checkbox" data-k="look"> Look Panel</label></div>
+    <div class="row"><label><input type="checkbox" data-k="transport"> Tempo Ring</label></div>
+    <div class="row"><label><input type="checkbox" data-k="play"> Nebula Editors</label></div>
+    <div class="row"><label><input type="checkbox" data-k="audio"> Audio Monitor</label></div>
+    <div class="row"><label><input type="checkbox" data-k="debug"> Debug Overlay</label></div>
+  </div>
+  <div class="section">
+    <div class="section-title">Performance</div>
+    <div class="row"><label><input type="checkbox" data-k="cinematic"> Cinematic Camera</label></div>
+    <div class="row"><label><input type="checkbox" data-k="harmony"> Harmony Layer</label></div>
+    <div class="row"><label><input type="checkbox" data-k="autoplay"> Auto Play</label></div>
+    <div class="hint">Advanced keeps all creation tools nearby without crowding the landing view.</div>
+  </div>
+`;
+document.body.appendChild(advancedShell);
+const advancedDock = createDockPanel({
+  id: "advanced",
+  title: "Advanced",
+  contentEl: advancedShell,
+  x: window.innerWidth - 320,
+  y: 286,
+  width: 320,
+  minHeight: 120,
+  zIndex: 10000,
+});
+const colorSystemContent = document.createElement("div");
+colorSystemContent.className = "custom-ui color-system-content";
+colorSystemContent.style.cssText = "display:grid; gap:10px;";
+for (const panelEl of [backgroundDockUI.root, noteColorUI.root]) {
+  panelEl.style.position = "static";
+  panelEl.style.left = "";
+  panelEl.style.right = "";
+  panelEl.style.top = "";
+  panelEl.style.bottom = "";
+  panelEl.style.width = "100%";
+  panelEl.style.padding = "8px 10px";
+  panelEl.style.borderRadius = "10px";
+  panelEl.style.background = "rgba(16,20,34,0.48)";
+  panelEl.style.border = "1px solid rgba(165,196,255,.12)";
+  panelEl.style.boxShadow = "none";
+  panelEl.style.backdropFilter = "none";
+  panelEl.style.margin = "0";
+  colorSystemContent.appendChild(panelEl);
+}
+// Compact section styling inside a single Color System dock.
+const bgHead = backgroundDockUI.root.firstElementChild;
+const bgBody = bgHead?.nextElementSibling;
+if (bgHead && bgBody) {
+  bgHead.style.display = "none";
+  bgBody.style.display = "";
+  bgBody.style.marginTop = "0";
+}
+const noteTitle = noteColorUI.root.firstElementChild;
+if (noteTitle) {
+  noteTitle.style.display = "none";
+}
+const colorSections = [
+  { el: backgroundDockUI.root, label: "Background Tone" },
+  { el: noteColorUI.root, label: "Note Response" },
+];
+for (const sec of colorSections) {
+  const chip = document.createElement("div");
+  chip.textContent = sec.label;
+  chip.style.cssText = "font:600 11px/1.2 'IBM Plex Sans','Segoe UI',ui-sans-serif,sans-serif; letter-spacing:.3px; opacity:.82; margin-bottom:6px;";
+  sec.el.insertBefore(chip, sec.el.firstChild);
+}
+const colorDock = createDockPanel({
+  id: "color",
+  title: "Look",
+  contentEl: colorSystemContent,
+  x: window.innerWidth - 320,
+  y: 132,
+  width: 320,
+  minHeight: 180,
+  zIndex: 9998,
+});
+const audioDock = createDockPanel({
+  id: "audio",
+  title: "Audio Monitor",
+  contentEl: audioUI.root,
+  x: 12,
+  y: 420,
+  width: 300,
+  minHeight: 120,
+  zIndex: 9998,
+});
+const debugDock = createDockPanel({
+  id: "debug",
+  title: "Debug HUD",
+  contentEl: debugHud,
+  x: window.innerWidth - 320,
+  y: 540,
+  width: 300,
+  minHeight: 90,
+  zIndex: 9998,
+});
+const galaxyDock = createDockPanel({
+  id: "galaxy",
+  title: "Galaxy System",
+  contentEl: galaxyGuiRef?.gui?.domElement,
+  x: 12,
+  y: 12,
+  width: 340,
+  minHeight: 140,
+  zIndex: 9997,
+});
+const meteorDock = createDockPanel({
+  id: "meteor",
+  title: "Meteor System",
+  contentEl: meteorGui?.domElement,
+  x: 12,
+  y: 430,
+  width: 340,
+  minHeight: 120,
+  zIndex: 9997,
+});
+const dolphinDock = createDockPanel({
+  id: "dolphin",
+  title: "Dolphin Sky",
+  contentEl: dolphinGui?.domElement,
+  x: 12,
+  y: 620,
+  width: 340,
+  minHeight: 120,
+  zIndex: 9997,
+});
+const notePopDock = createDockPanel({
+  id: "note-pop",
+  title: "Note Pop",
+  contentEl: notePopGui?.domElement,
+  x: 12,
+  y: 810,
+  width: 340,
+  minHeight: 120,
+  zIndex: 9997,
+});
+
+const uiBtn = uiShell.querySelector('[data-act="toggle-ui"]');
+const advancedBtn = uiShell.querySelector('[data-act="toggle-advanced"]');
+const showcaseBtn = uiShell.querySelector('[data-act="toggle-showcase"]');
+const autoPlayBtn = uiShell.querySelector('[data-act="toggle-autoplay"]');
+const cinematicBtn = uiShell.querySelector('[data-act="toggle-cinematic"]');
+const lookBtn = uiShell.querySelector('[data-act="toggle-look"]');
+const transportBtn = uiShell.querySelector('[data-act="toggle-transport"]');
+const cleanLayoutBtn = uiShell.querySelector('[data-act="clean-layout"]');
+const playChk = advancedShell.querySelector('input[data-k="play"]');
+const lookChk = advancedShell.querySelector('input[data-k="look"]');
+const audioChk = advancedShell.querySelector('input[data-k="audio"]');
+const debugChk = advancedShell.querySelector('input[data-k="debug"]');
+const transportChk = advancedShell.querySelector('input[data-k="transport"]');
+const cinematicChk = advancedShell.querySelector('input[data-k="cinematic"]');
+const harmonyChk = advancedShell.querySelector('input[data-k="harmony"]');
+const autoPlayChk = advancedShell.querySelector('input[data-k="autoplay"]');
+const autoPlayStyleSel = uiShell.querySelector('select[data-k="autoplay-style"]');
+const autoPlayTempoRange = uiShell.querySelector('input[data-k="autoplay-tempo"]');
+const autoPlayTempoLabel = uiShell.querySelector('[data-k="autoplay-tempo-v"]');
+
+function applyCleanDockLayout() {
+  const margin = 12;
+  const leftX = 12;
+  const rightX = Math.max(12, window.innerWidth - 320);
+  let leftY = margin;
+  let rightY = margin;
+
+  const leftColumn = [uiHubDock, colorDock];
+  const rightColumn = [advancedDock, galaxyDock, meteorDock, dolphinDock, notePopDock, audioDock, debugDock];
+
+  for (const dock of leftColumn) {
+    if (!dock?.root) continue;
+    dock.setVisible(true);
+    dock.setCollapsed(dock !== uiHubDock);
+    dock.setPosition(leftX, leftY);
+    leftY += (dock.root.offsetHeight || 120) + 12;
+  }
+
+  for (const dock of rightColumn) {
+    if (!dock?.root) continue;
+    dock.setVisible(true);
+    dock.setCollapsed(dock !== advancedDock);
+    dock.setPosition(rightX, rightY);
+    rightY += (dock.root.offsetHeight || 120) + 12;
+  }
+}
+
+function applyUiState() {
+  uiBtn.textContent = uiState.visible ? "UI Visible" : "UI Hidden";
+  uiBtn.classList.toggle("active", !!uiState.visible);
+  advancedBtn.textContent = uiState.showAdvanced ? "Advanced ON" : "Advanced";
+  advancedBtn.classList.toggle("active", !!uiState.showAdvanced);
+  showcaseBtn.textContent = uiState.showcase ? "Showcase ON" : "Showcase";
+  showcaseBtn.classList.toggle("active", !!uiState.showcase);
+  autoPlayBtn.textContent = uiState.autoPlay ? "Auto Play ON" : "Auto Play";
+  autoPlayBtn.classList.toggle("active", !!uiState.autoPlay);
+  cinematicBtn.textContent = uiState.cinematic ? "Cinematic ON" : "Cinematic";
+  cinematicBtn.classList.toggle("active", !!uiState.cinematic);
+  lookBtn.textContent = uiState.showLook ? "Look ON" : "Look OFF";
+  lookBtn.classList.toggle("active", !!uiState.showLook);
+  transportBtn.textContent = uiState.showTransport ? "Tempo Ring ON" : "Tempo Ring OFF";
+  transportBtn.classList.toggle("active", !!uiState.showTransport);
+  playChk.checked = !!uiState.showPlay;
+  lookChk.checked = !!uiState.showLook;
+  audioChk.checked = !!uiState.showAudio;
+  debugChk.checked = !!uiState.showDebug;
+  transportChk.checked = !!uiState.showTransport;
+  if (cinematicChk) cinematicChk.checked = !!uiState.cinematic;
+  if (harmonyChk) harmonyChk.checked = !!uiState.harmonyLayer;
+  if (autoPlayChk) autoPlayChk.checked = !!uiState.autoPlay;
+  if (autoPlayStyleSel) autoPlayStyleSel.value = uiState.autoPlayStyle ?? "dream";
+  if (autoPlayTempoRange) autoPlayTempoRange.value = String(uiState.autoPlayTempo ?? 86);
+  if (autoPlayTempoLabel) autoPlayTempoLabel.textContent = String(Math.round(uiState.autoPlayTempo ?? 86));
+  cinematicState.enabled = !!uiState.cinematic;
+  audio?.setNebulaHarmony?.({ enabled: !!uiState.harmonyLayer });
+  autoPlayConductor?.setConfig?.({
+    enabled: !!uiState.autoPlay,
+    style: uiState.autoPlayStyle ?? "dream",
+    tempo: Number(uiState.autoPlayTempo ?? 86),
+  });
+
+  const showPlay = uiState.visible && uiState.showPlay;
+  const showLook = uiState.visible && uiState.showLook;
+  const showAudio = uiState.visible && uiState.showAudio;
+  const showDebug = uiState.visible && uiState.showDebug;
+  const showTransport = uiState.visible && uiState.showTransport;
+  const showAdvanced = uiState.visible && uiState.showAdvanced;
+
+  if (uiState.showcase) {
+    colorDock?.setVisible?.(uiState.visible);
+    audioDock?.setVisible?.(false);
+    debugDock?.setVisible?.(false);
+    advancedDock?.setVisible?.(false);
+    noteOverlay.style.display = "none";
+    galaxyDock?.setVisible?.(false);
+    meteorDock?.setVisible?.(false);
+    dolphinDock?.setVisible?.(false);
+    notePopDock?.setVisible?.(false);
+    const tempoRingEl2 = document.getElementById("tempo-ring");
+    const stepRingEl2 = document.getElementById("step-ring");
+    if (tempoRingEl2) tempoRingEl2.style.display = uiState.visible ? "" : "none";
+    if (stepRingEl2) stepRingEl2.style.display = uiState.visible ? "" : "none";
+  } else {
+    colorDock?.setVisible?.(showLook);
+    advancedDock?.setVisible?.(showAdvanced);
+    audioDock?.setVisible?.(showAdvanced && showAudio);
+    debugDock?.setVisible?.(showAdvanced && showDebug);
+    noteOverlay.style.display = showDebug ? "" : "none";
+    galaxyDock?.setVisible?.(showAdvanced && showPlay);
+    meteorDock?.setVisible?.(showAdvanced && showPlay);
+    dolphinDock?.setVisible?.(showAdvanced && showPlay);
+    notePopDock?.setVisible?.(showAdvanced && showPlay);
+    const tempoRingEl2 = document.getElementById("tempo-ring");
+    const stepRingEl2 = document.getElementById("step-ring");
+    if (tempoRingEl2) tempoRingEl2.style.display = showTransport ? "" : "none";
+    if (stepRingEl2) stepRingEl2.style.display = showTransport ? "" : "none";
+  }
+
+  uiHubDock?.setVisible?.(uiState.visible);
+  writeUiState(uiState);
+}
+
+uiBtn.addEventListener("click", () => {
+  uiState.visible = !uiState.visible;
+  applyUiState();
+});
+showcaseBtn.addEventListener("click", () => {
+  uiState.showcase = !uiState.showcase;
+  applyUiState();
+});
+advancedBtn.addEventListener("click", () => {
+  uiState.showAdvanced = !uiState.showAdvanced;
+  applyUiState();
+});
+autoPlayBtn.addEventListener("click", () => {
+  uiState.autoPlay = !uiState.autoPlay;
+  applyUiState();
+});
+cinematicBtn.addEventListener("click", () => {
+  uiState.cinematic = !uiState.cinematic;
+  applyUiState();
+});
+lookBtn.addEventListener("click", () => {
+  uiState.showLook = !uiState.showLook;
+  applyUiState();
+});
+transportBtn.addEventListener("click", () => {
+  uiState.showTransport = !uiState.showTransport;
+  applyUiState();
+});
+cleanLayoutBtn?.addEventListener("click", () => {
+  applyCleanDockLayout();
+  applyUiState();
+});
+playChk.addEventListener("change", () => {
+  uiState.showPlay = !!playChk.checked;
+  applyUiState();
+});
+lookChk.addEventListener("change", () => {
+  uiState.showLook = !!lookChk.checked;
+  applyUiState();
+});
+audioChk.addEventListener("change", () => {
+  uiState.showAudio = !!audioChk.checked;
+  applyUiState();
+});
+debugChk.addEventListener("change", () => {
+  uiState.showDebug = !!debugChk.checked;
+  applyUiState();
+});
+transportChk.addEventListener("change", () => {
+  uiState.showTransport = !!transportChk.checked;
+  applyUiState();
+});
+const meteorCinematicBase = {
+  spawnRate: meteorSystem?.params?.spawnRate ?? 0.35,
+  meteorRomance: meteorSystem?.params?.meteorRomance ?? 0.62,
+  meteorTail: meteorSystem?.params?.meteorTail ?? 0.64,
+  audioGain: meteorSystem?.params?.audioGain ?? 0.7,
+};
+if (cinematicChk) {
+  cinematicChk.addEventListener("change", () => {
+    uiState.cinematic = !!cinematicChk.checked;
+    applyUiState();
+  });
+}
+if (harmonyChk) {
+  harmonyChk.addEventListener("change", () => {
+    uiState.harmonyLayer = !!harmonyChk.checked;
+    applyUiState();
+  });
+}
+if (autoPlayChk) {
+  autoPlayChk.addEventListener("change", () => {
+    uiState.autoPlay = !!autoPlayChk.checked;
+    applyUiState();
+  });
+}
+if (autoPlayStyleSel) {
+  autoPlayStyleSel.addEventListener("change", () => {
+    uiState.autoPlayStyle = autoPlayStyleSel.value || "dream";
+    applyUiState();
+  });
+}
+if (autoPlayTempoRange) {
+  autoPlayTempoRange.addEventListener("input", () => {
+    uiState.autoPlayTempo = Math.max(60, Math.min(140, Number(autoPlayTempoRange.value) || 86));
+    applyUiState();
+  });
+}
+
+window.addEventListener("keydown", (e) => {
+  const tag = String(e.target?.tagName || "").toLowerCase();
+  if (tag === "input" || tag === "textarea" || e.target?.isContentEditable) return;
+  if (e.repeat) return;
+  const k = (e.key || "").toLowerCase();
+if (k === "h") {
+    uiState.visible = !uiState.visible;
+    applyUiState();
+  } else if (k === "j") {
+    uiState.showcase = !uiState.showcase;
+    applyUiState();
+  } else if (k === "k") {
+    uiState.cinematic = !uiState.cinematic;
+    applyUiState();
+  } else if (k === "u") {
+    uiState.showAdvanced = !uiState.showAdvanced;
+    applyUiState();
+  } else if (k === "f") {
+    const focusGalaxyId =
+      musicState.activeIntent?.galaxyId ??
+      musicState.hoverIntent?.galaxyId ??
+      activeNebulaKey ??
+      nebulaSystem.getActiveId?.();
+    focusOrbitNebulaId = focusGalaxyId ?? null;
+    focusCameraToGalaxy(focusGalaxyId);
+  }
+});
+
+applyUiState();
 
 
 
@@ -658,6 +1722,7 @@ let lastY = 0;
 
 canvas.addEventListener("pointerdown", (e) => {
   if (e.target.closest?.(".lil-gui") || e.target.closest?.(".dg")) return;
+  void audio.start?.();
 
   // ✅ Alt + 左键：永远是旋转（不管当前选没选星云）
   if (e.altKey && e.button === 0) {
@@ -672,9 +1737,6 @@ canvas.addEventListener("pointerdown", (e) => {
   if (e.button === 0) {
     const pick = pickNebulaAtEvent(e);
     const ndc = getPointerNDCFromEvent(e);
-    pointer.copy(ndc);
-    mouse01.x = e.clientX / window.innerWidth;
-    mouse01.y = 1.0 - e.clientY / window.innerHeight;
     const hoverAtDown = resolveNoteIntent({
       galaxyId: pick?.galaxyId ?? null,
       nebulaSystem,
@@ -691,8 +1753,18 @@ canvas.addEventListener("pointerdown", (e) => {
     if (musicState.activeIntent?.galaxyId) {
       activeNebulaKey = musicState.activeIntent.galaxyId;
       cacheActiveDiskFromNebula(activeNebulaKey);
+      nebulaSystem.triggerNotePulse({
+        galaxyId: activeNebulaKey,
+        theta01: musicState.activeIntent.theta01,
+        strength: 0.95,
+      });
       const instrument = voices?.getNebulaInstrument?.(activeNebulaKey);
       if (instrument) {
+        triggerPerformanceCameraNotePulse({
+          galaxyId: activeNebulaKey,
+          strength: 0.46,
+          centerWorld: hitPoint,
+        });
         audio.playNebulaScratch({
           galaxyId: activeNebulaKey,
           theta01: musicState.activeIntent.theta01,
@@ -705,6 +1777,23 @@ canvas.addEventListener("pointerdown", (e) => {
           instrument,
         });
         triggerBackgroundPulse(1.0);
+        const velHit = THREE.MathUtils.clamp(Math.max(move01, 0.48), 0, 1);
+        dolphinSystem?.triggerFromNote?.({
+          galaxyId: activeNebulaKey,
+          theta01: musicState.activeIntent.theta01,
+          velocity: velHit,
+          strength: THREE.MathUtils.lerp(0.88, 1.0, velHit),
+          now: performance.now() * 0.001,
+        });
+        notePopSystem?.triggerFromNote?.({
+          galaxyId: activeNebulaKey,
+          theta01: musicState.activeIntent.theta01,
+          velocity: velHit,
+          notePitch01: midiToPitch01(musicState.activeIntent.midi),
+          noteHue: musicState.activeIntent.theta01,
+          strength: THREE.MathUtils.lerp(0.90, 1.0, velHit),
+          now: performance.now() * 0.001,
+        });
       }
     } else {
       activeNebulaKey = null;
@@ -758,6 +1847,41 @@ function hsvToRgb(h, s, v) {
   const g = [t, v, v, q, p, p][m];
   const b = [p, p, t, v, v, q][m];
   return [r, g, b];
+}
+
+function lerp3(a, b, t) {
+  return [
+    THREE.MathUtils.lerp(a[0], b[0], t),
+    THREE.MathUtils.lerp(a[1], b[1], t),
+    THREE.MathUtils.lerp(a[2], b[2], t),
+  ];
+}
+
+function catmull4(p0, p1, p2, p3, f) {
+  const f2 = f * f;
+  const f3 = f2 * f;
+  return [
+    0.5 * ((2 * p1[0]) + (-p0[0] + p2[0]) * f + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * f2 + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * f3),
+    0.5 * ((2 * p1[1]) + (-p0[1] + p2[1]) * f + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * f2 + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * f3),
+    0.5 * ((2 * p1[2]) + (-p0[2] + p2[2]) * f + (2 * p0[2] - 5 * p1[2] + 4 * p2[2] - p3[2]) * f2 + (-p0[2] + 3 * p1[2] - 3 * p2[2] + p3[2]) * f3),
+  ];
+}
+
+function sampleBackgroundPaletteAt(t01) {
+  const t = ((t01 % 1) + 1) % 1;
+  const x = t * 4;
+  const i1 = Math.floor(x) % 4;
+  const f = x - Math.floor(x);
+  const i0 = (i1 + 3) % 4;
+  const i2 = (i1 + 1) % 4;
+  const i3 = (i1 + 2) % 4;
+  const p = [
+    [bg.uniforms.uPal0.value.x, bg.uniforms.uPal0.value.y, bg.uniforms.uPal0.value.z],
+    [bg.uniforms.uPal1.value.x, bg.uniforms.uPal1.value.y, bg.uniforms.uPal1.value.z],
+    [bg.uniforms.uPal2.value.x, bg.uniforms.uPal2.value.y, bg.uniforms.uPal2.value.z],
+    [bg.uniforms.uPal3.value.x, bg.uniforms.uPal3.value.y, bg.uniforms.uPal3.value.z],
+  ];
+  return catmull4(p[i0], p[i1], p[i2], p[i3], f);
 }
 
 
@@ -839,13 +1963,116 @@ canvas.addEventListener(
 
 // -------------------------------------
 
+// -------------------------------------
+// Helpers (moved up for hoist safety)
+// -------------------------------------
+function makeStars({ count, radius, thickness }) {
+  const geo = new THREE.BufferGeometry();
+  const positions = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);
+  const sizes = new Float32Array(count);
+  const seeds = new Float32Array(count);
+  const alphas = new Float32Array(count);
+
+  for (let i = 0; i < count; i++) {
+    const idx3 = i * 3;
+
+    const angle = Math.random() * Math.PI * 2;
+    const zUnit = Math.random() * 2 - 1;
+    const rr = Math.sqrt(Math.max(0, 1 - zUnit * zUnit));
+    const shell = radius * (0.82 + Math.random() * 0.18);
+    const x = Math.cos(angle) * rr * shell;
+    const y = zUnit * shell * (thickness / radius);
+    const z = Math.sin(angle) * rr * shell;
+
+    positions[idx3 + 0] = x;
+    positions[idx3 + 1] = y;
+    positions[idx3 + 2] = z;
+
+    const t = Math.random();
+    const cA = new THREE.Color("#f9f2ff");
+    const cB = new THREE.Color("#d8ccff");
+    const cC = new THREE.Color("#bfe9ff");
+    const c = new THREE.Color();
+    if (t < 0.5) c.copy(cA).lerp(cB, t / 0.5);
+    else c.copy(cB).lerp(cC, (t - 0.5) / 0.5);
+    c.lerp(new THREE.Color("#ffffff"), 0.14 + (1.0 - t) * 0.16);
+
+    colors[idx3 + 0] = c.r;
+    colors[idx3 + 1] = c.g;
+    colors[idx3 + 2] = c.b;
+
+    sizes[i] = 0.70 + Math.pow(Math.random(), 2.2) * 3.0;
+    seeds[i] = Math.random() * 1000.0;
+    alphas[i] = 0.28 + Math.random() * 0.72;
+  }
+
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  geo.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
+  geo.setAttribute("aSeed", new THREE.BufferAttribute(seeds, 1));
+  geo.setAttribute("aAlpha", new THREE.BufferAttribute(alphas, 1));
+
+  const mat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    depthTest: false,
+    blending: THREE.AdditiveBlending,
+    vertexColors: true,
+    uniforms: {
+      uTime: { value: 0 },
+      uOpacity: { value: 0.58 },
+      uBaseSize: { value: 1.35 },
+      uBreath: { value: 0.60 },
+      uBling: { value: 0.58 },
+      uSoftness: { value: 0.76 },
+      uCross: { value: 0.46 },
+      uColorGlow: { value: 1.8 },
+      uGlowColorA: { value: new THREE.Color("#9fd6ff") },
+      uGlowColorB: { value: new THREE.Color("#c7b2ff") },
+      uGlowColorC: { value: new THREE.Color("#ffc8ef") },
+      uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) },
+    },
+    vertexShader: starsVert,
+    fragmentShader: starsFrag,
+  });
+
+  const points = new THREE.Points(geo, mat);
+  points.frustumCulled = false;
+  points.renderOrder = -950;
+  return points;
+}
+
+// Stars
+// -------------------------------------
+const stars = makeStars({ count: 22000, radius: 120.0, thickness: 120.0 });
+scene.add(stars);
+
+function getStarScreenScale() {
+  const screenMax = Math.max(window.innerWidth, window.innerHeight);
+  return THREE.MathUtils.clamp(1.0 + (screenMax - 1400) / 2200, 1.0, 1.55);
+}
+function getStarBaseSize(sizePx = 16) {
+  return THREE.MathUtils.clamp(sizePx, 2, 28) * 0.22 * getStarScreenScale();
+}
+stars.material.uniforms.uBaseSize.value = getStarBaseSize();
+
 // --- background drive state (avoid undefined vars / keep things stable)
 const bgDrive = {
   leadE: 0,
   pitch01: 0,
   vel01: 0,
   theta01: 0,
+  pulse: 0,
+  notePos: new THREE.Vector2(0.5, 0.5),
+  noteHue: 0.0,
+  noteSeed: 0.123,
 };
+const bgTargetPos = new THREE.Vector2(0.5, 0.5);
+let bgLastSoftInjectMs = 0;
+const bgLastEmitPos = new THREE.Vector2(0.5, 0.5);
+let bgLastEmitHue = 0.66;
+let bgLastEmitStep = -1;
 
 // -------------------------------------
 // Mouse move intensity (for audio trigger)
@@ -853,6 +2080,7 @@ const bgDrive = {
 let lastPX = 0,
   lastPY = 0;
 let move01 = 0;
+let nebulaBoostSmoothed = 0;
 
 window.addEventListener("pointermove", (e) => {
   __markPointerMoved(e.clientX, e.clientY);
@@ -918,8 +2146,55 @@ function tick() {
 
   // dt 用于输入平滑/音频平滑
   const dt = Math.min(0.05, clock.getDelta());
+  performanceCamera?.beginFrame?.(camera);
   cameraControl?.update?.(dt);
+  if (cameraFocus.active) {
+    cameraFocus.elapsed += dt;
+    const a = THREE.MathUtils.clamp(cameraFocus.elapsed / Math.max(1e-4, cameraFocus.duration), 0, 1);
+    const s = a * a * (3 - 2 * a); // smoothstep
+    const targetNow = new THREE.Vector3().lerpVectors(cameraFocus.startTarget, cameraFocus.endTarget, s);
+    camera.position.lerpVectors(cameraFocus.startPos, cameraFocus.endPos, s);
+    cameraControl?.setTarget?.(targetNow);
+    camera.lookAt(targetNow);
+
+    if (a >= 1) {
+      cameraFocus.active = false;
+      syncLegacyOrbitFromCamera(targetNow);
+      cameraControl?.syncOrbitFromCamera?.();
+    }
+  }
+  applyFocusOrbitMode(dt);
   const t = clock.getElapsedTime();
+  autoPlayConductor?.update?.(t, { pointerDown });
+  autoReplayVisual.energy = __bgRiseFall(autoReplayVisual.energy, 0.0, dt, 10.0, 1.8);
+  if (autoReplayVisual.pending) {
+    const ev = autoReplayVisual.pending;
+    autoReplayVisual.pending = null;
+    const cluster = nebulaSystem.getCluster?.(ev.galaxyId);
+    if (cluster?.group) {
+      const sizeScale = cluster?.preset?.shape?.sizeScale ?? 1.0;
+      const groupScale = cluster?.group?.scale?.x ?? 1.0;
+      const rW = Math.max(0.25, 1.9 * sizeScale * groupScale * (0.36 + ev.r01 * 0.64));
+      const pLocal = new THREE.Vector3(
+        Math.cos(ev.theta01 * Math.PI * 2) * rW,
+        0,
+        Math.sin(ev.theta01 * Math.PI * 2) * rW
+      );
+      const pWorld = cluster.group.localToWorld(pLocal);
+      const pNdc = pWorld.clone().project(camera);
+      bgTargetPos.set(
+        THREE.MathUtils.clamp(pNdc.x * 0.5 + 0.5, 0, 1),
+        THREE.MathUtils.clamp(1 - (pNdc.y * 0.5 + 0.5), 0, 1)
+      );
+      bgDrive.noteHue = __lerpHue01(bgDrive.noteHue, ((ev.theta01 % 1) + 1) % 1, 0.32);
+      bgDrive.noteSeed = Math.random() * 0.999 + 0.001;
+      bgLastEmitPos.copy(bgTargetPos);
+      bgLastEmitHue = bgDrive.noteHue;
+      bgLastEmitStep = ev.step ?? -1;
+      bgLastEmitE = Math.max(bgLastEmitE, 0.72);
+      bgClickPulse = Math.max(bgClickPulse, 0.42);
+    }
+  }
 
   // 更新背景效果
   updateBackgroundEffects(dt);
@@ -1023,6 +2298,36 @@ const hasNebulaHit = !!nebulaHit;
 
   activeNebulaKey = musicState.activeIntent?.galaxyId ?? null;
   if (activeNebulaKey && !activeDiskCenterW) cacheActiveDiskFromNebula(activeNebulaKey);
+  nebulaSystem.setIntentVisuals({
+    hoverId: musicState.hoverIntent?.galaxyId ?? null,
+    activeId: musicState.activeIntent?.galaxyId ?? null,
+    lastId: musicState.lastIntent?.galaxyId ?? null,
+    hoverTheta01: musicState.hoverIntent?.theta01 ?? null,
+    activeTheta01: musicState.activeIntent?.theta01 ?? null,
+    lastTheta01: musicState.lastIntent?.theta01 ?? null,
+  });
+
+  let isPerformancePlaying = false;
+  const performanceActiveNebulaId = musicState.activeIntent?.galaxyId ?? null;
+  if (pointerDown && performanceActiveNebulaId && activeDiskCenterW && musicState.activeIntent) {
+    const centerN = activeDiskCenterW.clone().project(camera);
+    const dx = pointer.x - centerN.x;
+    const dy = pointer.y - centerN.y;
+    const dist = Math.hypot(dx, dy);
+    isPerformancePlaying = dist <= activeDiskOuterNDC;
+  }
+
+  const performanceCameraBaseTarget = cameraControl?.getTarget?.() ?? orbitTarget.clone();
+  performanceCamera?.update?.(dt, {
+    camera,
+    baseTarget: performanceCameraBaseTarget,
+    hoveredNebulaId: musicState.hoverIntent?.galaxyId ?? null,
+    focusedNebulaId: focusedPerformanceNebulaId,
+    activePerformanceNebulaId: performanceActiveNebulaId,
+    isSustainedPlaying: isPerformancePlaying,
+    forceOrbitNebulaId: null,
+    nebulaSystem,
+  });
 
 
 
@@ -1036,6 +2341,37 @@ const hasNebulaHit = !!nebulaHit;
 
 
   
+
+  // --- stars
+  stars.material.uniforms.uTime.value = t;
+  stars.position.copy(camera.position);
+  stars.rotation.y += dt * 0.018;
+  stars.rotation.x = Math.sin(t * 0.03) * 0.03;
+  const starBreathUi = THREE.MathUtils.clamp(backgroundDockUI?.getStarBreath?.() ?? 0.60, 0, 1);
+  const starColorGlowUi = THREE.MathUtils.clamp(backgroundDockUI?.getStarColorGlow?.() ?? 1.8, 0, 30);
+  const starSizeUi = THREE.MathUtils.clamp(backgroundDockUI?.getStarSize?.() ?? 16, 2, 28);
+  const dreamyGlow = dreamyGlowController.getConfig();
+  const dreamGlowE = dreamyGlow.enabled ? THREE.MathUtils.clamp(dreamyGlow.intensity, 0, 1.5) : 0;
+  const [gAr, gAg, gAb] = backgroundDockUI?.getStarGlowColorA01?.() ?? [0.62, 0.84, 1.0];
+  const [gBr, gBg, gBb] = backgroundDockUI?.getStarGlowColorB01?.() ?? [0.78, 0.70, 1.0];
+  const [gCr, gCg, gCb] = backgroundDockUI?.getStarGlowColorC01?.() ?? [1.0, 0.78, 0.94];
+  const derivedBling = THREE.MathUtils.lerp(0.0, 0.10, starBreathUi);
+  const derivedSoftness = THREE.MathUtils.lerp(0.0, 0.12, starBreathUi);
+  stars.material.uniforms.uBreath.value = starBreathUi;
+  stars.material.uniforms.uBling.value = derivedBling;
+  stars.material.uniforms.uSoftness.value = derivedSoftness;
+  stars.material.uniforms.uCross.value = THREE.MathUtils.lerp(0.10, 0.24, starBreathUi);
+  stars.material.uniforms.uColorGlow.value = starColorGlowUi * (1.0 + dreamGlowE * dreamyGlow.starGlowBoost * 1.10);
+  stars.material.uniforms.uGlowColorA.value.set(gAr, gAg, gAb);
+  stars.material.uniforms.uGlowColorB.value.set(gBr, gBg, gBb);
+  stars.material.uniforms.uGlowColorC.value.set(gCr, gCg, gCb);
+  const glowNorm = THREE.MathUtils.clamp(starColorGlowUi / 10.0, 0, 1);
+  const colorPreserve = THREE.MathUtils.lerp(1.0, 0.60, glowNorm);
+  stars.material.uniforms.uOpacity.value =
+    THREE.MathUtils.lerp(0.58, 0.92, starBreathUi) *
+    colorPreserve *
+    (1.0 + dreamGlowE * dreamyGlow.starGlowBoost * 0.18);
+  stars.material.uniforms.uBaseSize.value = getStarBaseSize(starSizeUi);
 
   // --- nebula & meteor
   const disturbPoint = (nebulaHit?.point ? nebulaHit.point : hitPoint);
@@ -1053,11 +2389,52 @@ const hasNebulaHit = !!nebulaHit;
       // 用 raycast 平面的 hitPoint 也行；这里保留 disturb = hitPoint
       disturb = hitPoint;
     }
+  } else if (autoDisturbE > 0.001) {
+    disturb = autoDisturbPoint;
+  }
+
+  const autoExpress = autoPlayConductor?.getConfig?.()?.enabled ? autoReplayVisual.energy : 0.0;
+  const pointerExpress = (pointerDown && activeNebulaKey) ? THREE.MathUtils.clamp(move01 * 1.25, 0, 1) : 0.0;
+  autoDisturbE = Math.max(0.0, autoDisturbE - dt / 0.95);
+  const disturbExpress = THREE.MathUtils.clamp(Math.max(pointerExpress, autoExpress * 0.9, autoDisturbE * 0.95), 0, 1);
+  nebulaBoostSmoothed = __bgRiseFall(nebulaBoostSmoothed, disturbExpress, dt, 12.0, 2.2);
+  if (nebulaSystem?.attractionUI) {
+    nebulaSystem.attractionUI.boost = nebulaBoostSmoothed;
   }
 
   nebulaSystem.update(disturb, t);
 
+  // Cinematic mode: gentle scene-level meteor modulation.
+  if (meteorSystem?.params) {
+    if (cinematicState.enabled && !cinematicState.wasEnabled) {
+      cinematicState.prevMeteor = {
+        spawnRate: meteorSystem.params.spawnRate,
+        meteorRomance: meteorSystem.params.meteorRomance,
+        meteorTail: meteorSystem.params.meteorTail,
+        audioGain: meteorSystem.params.audioGain,
+      };
+      cinematicState.wasEnabled = true;
+    } else if (!cinematicState.enabled && cinematicState.wasEnabled) {
+      const prev = cinematicState.prevMeteor ?? meteorCinematicBase;
+      meteorSystem.params.spawnRate = prev.spawnRate;
+      meteorSystem.params.meteorRomance = prev.meteorRomance;
+      meteorSystem.params.meteorTail = prev.meteorTail;
+      meteorSystem.params.audioGain = prev.audioGain;
+      cinematicState.prevMeteor = null;
+      cinematicState.wasEnabled = false;
+    }
+  }
+  if (cinematicState.enabled && meteorSystem?.params) {
+    const ce = cinematicState.energy;
+    meteorSystem.params.spawnRate = THREE.MathUtils.lerp(0.22, 0.58, ce);
+    meteorSystem.params.meteorRomance = THREE.MathUtils.lerp(0.52, 0.88, ce);
+    meteorSystem.params.meteorTail = THREE.MathUtils.lerp(0.54, 0.92, ce);
+    meteorSystem.params.audioGain = THREE.MathUtils.lerp(0.52, 0.86, ce);
+  }
+
   meteorSystem.update(t);
+  dolphinSystem.update(t);
+  notePopSystem.update(t);
 
   // -----------------------------
   // ✅ Phase1: Inputs -> PerformanceState -> Audio -> Visual
@@ -1087,6 +2464,7 @@ const hasNebulaHit = !!nebulaHit;
   const activeInst = activeIntent?.galaxyId ? voices.getNebulaInstrumentName(activeIntent.galaxyId) : "-";
 
   const truthIntent = activeIntent ?? hoverIntent ?? lastIntent;
+  drawNoteAlignmentOverlay(truthIntent);
   const noteStr = truthIntent?.noteName ?? "-";
   const midiStr = (typeof truthIntent?.midi === "number") ? truthIntent.midi : "-";
   const stepStr = truthIntent ? `${(truthIntent.step ?? 0) + 1}/7` : "-";
@@ -1133,6 +2511,19 @@ if ((nowMs - __lastUIUpdateMs) > uiIntervalMs) {
   const trig = ps.trigger;
   if (trig) ps.trigger = false;
 
+  if (trig) {
+    const midi = aHud.lastMidi ?? 60;
+    const pitchClass = (midi % 12 + 12) % 12;
+    bgMood.hueTarget = pitchClass / 12;
+  }
+  bgMood.hue += (bgMood.hueTarget - bgMood.hue) * (1 - Math.exp(-dt * 1.2));
+  const legacyAudioEnergy = THREE.MathUtils.clamp(
+    Math.max(aHud.rms ?? 0, (aHud.beatPulse ?? 0) * 0.42),
+    0,
+    1
+  );
+  bgMood.energy += (legacyAudioEnergy - bgMood.energy) * (1 - Math.exp(-dt * 1.6));
+
 
   // 4) 音频：先喂，再更新（Lead Gate: only when hovering nebula）
   const psForAudio = { ...ps, trigger: trig };
@@ -1174,14 +2565,21 @@ bgDrive.vel01 = Math.max(localVel01, radialExpress * 0.75);
 bgDrive.theta01 = theta01;
 
 
+    // ✅ 给背景一个“随音符变化的色相驱动”（避免一直停留在同一主色）
+    // 这里用 theta + pitch 的混合做一个稳定又有变化的 hue（0..1）
+    // Keep note hue tied to angular position directly to avoid abrupt composite wrap jumps.
+    bgTargetPos.set(mouse01.x, mouse01.y);
+    const nowMsSoft = performance.now();
+    if ((nowMsSoft - bgLastSoftInjectMs) > 120) {
+      bgLastSoftInjectMs = nowMsSoft;
+      bgDrive.pulse = Math.max(bgDrive.pulse, 0.22);
+      bgDrive.noteSeed = (Math.random() * 0.999) + 0.001;
+    }
+
+
+
       const instrument = voices?.getNebulaInstrument?.(activeNebulaKey);
       noteHint?.setInteractionSample?.(activeNebulaKey, musicState.activeIntent.theta01, musicState.activeIntent.r01);
-      // 给镜头一个演奏脉冲
-
-      // const distance = camera.position.distanceTo(cameraControl.getTarget?.() ?? new THREE.Vector3(0,0,0));
-      // const strength = distance * 0.002;     // ✅ 距离越远脉冲越大
-
-      cameraControl?.notePulse?.(1.2, hitPoint);
 
       if (camera.isPerspectiveCamera) {
         camera.fov = 45.0;          // 你原本的 fov 假设是 46/47 之类
@@ -1235,72 +2633,376 @@ bgDrive.theta01 = theta01;
     }
   }
 
+  // Cinematic macro cycle: Calm -> Lift -> Bloom -> Calm
+  // This only modulates global visual/audio mood; interaction logic remains unchanged.
+  if (cinematicState.enabled) {
+    const cycleSec = 44.0;
+    const cycleT = (t % cycleSec) / cycleSec;
+    cinematicState.phase = cycleT;
+
+    const calm = 1.0 - smoothPulse01(THREE.MathUtils.clamp(cycleT / 0.32, 0, 1));
+    const lift = smoothPulse01(THREE.MathUtils.clamp((cycleT - 0.18) / 0.34, 0, 1));
+    const bloomPhase = smoothPulse01(THREE.MathUtils.clamp((cycleT - 0.52) / 0.28, 0, 1));
+    const settle = 1.0 - smoothPulse01(THREE.MathUtils.clamp((cycleT - 0.80) / 0.20, 0, 1));
+    const target = THREE.MathUtils.clamp(0.10 + lift * 0.34 + bloomPhase * 0.56 + calm * 0.06, 0, 1);
+    cinematicState.energy = __bgRiseFall(cinematicState.energy, target * settle + target * (1 - settle) * 0.72, dt, 0.9, 0.55);
+    cinematicState.pulseBoost = 1.0 + cinematicState.energy * 0.42;
+  } else {
+    cinematicState.phase = 0;
+    cinematicState.energy = __bgRiseFall(cinematicState.energy, 0, dt, 1.2, 0.9);
+    cinematicState.pulseBoost = 1.0;
+  }
+
   
   // 7) Bloom：只跟随 lead 能量（慢），并且整体更低
   // 这样“弹奏有光”但不会糊掉星云
-  bloomPass.strength += ((0.05 + bgMood.energy * 0.08) - bloomPass.strength) * (1 - Math.exp(-dt * 1.4));
-  bloomPass.threshold = 0.88;   // 更柔和：避免只有极亮点被硬阈值抽出来
-  bloomPass.radius = 0.25;      // 让中心星光更柔，不容易出现硬形状
+  const glowUiBloom = THREE.MathUtils.clamp(noteColorUI?.getGlow?.() ?? 0.56, 0, 1);
+  const dreamyGlowBloom = dreamyGlowController.getConfig();
+  const dreamBloomE = dreamyGlowBloom.enabled ? THREE.MathUtils.clamp(dreamyGlowBloom.intensity, 0, 1.5) : 0;
+  if (dreamyGlowBloom.legacyBloom) {
+    const legacyBase = dreamyGlowBloom.enabled
+      ? THREE.MathUtils.lerp(0.12, 0.72, THREE.MathUtils.clamp(dreamyGlowBloom.legacyBloomBase ?? 0.32, 0, 1.2) / 1.2)
+      : 0.0;
+    const bloomTarget = dreamyGlowBloom.enabled
+      ? THREE.MathUtils.clamp(
+          (legacyBase + bgMood.energy * 0.30 + cinematicState.energy * 0.06) *
+            (0.88 + glowUiBloom * 0.28) *
+            (0.94 + dreamBloomE * 0.18),
+          legacyBase,
+          0.96
+        )
+      : 0.0;
+    bloomPass.strength += (bloomTarget - bloomPass.strength) * (1 - Math.exp(-dt * 2.0));
+    bloomPass.threshold = 0.95;
+    bloomPass.radius = 0.18;
+    dreamGlowPass.enabled = false;
+    dreamGlowPass.uniforms.uAmount.value = 0.0;
+    dreamGlowPass.uniforms.uBlurScale.value = 1.0;
+    dreamGlowPass.uniforms.uTintMix.value = 0.0;
+    dreamGlowPass.uniforms.uHaze.value = 0.0;
+  } else {
+    const bloomTargetBase = (0.03 + bgMood.energy * 0.06 + cinematicState.energy * 0.022) * (0.55 + glowUiBloom * 0.75);
+    const bloomTarget = bloomTargetBase * (1.0 + dreamBloomE * 1.65);
+    bloomPass.strength += (bloomTarget - bloomPass.strength) * (1 - Math.exp(-dt * 1.4));
+    bloomPass.threshold = dreamyGlowBloom.enabled
+      ? THREE.MathUtils.lerp(0.88, 0.58, THREE.MathUtils.clamp(dreamyGlowBloom.softness, 0, 1.5) / 1.5)
+      : 0.88;
+    bloomPass.radius = dreamyGlowBloom.enabled
+      ? THREE.MathUtils.lerp(0.25, 0.88, THREE.MathUtils.clamp(dreamyGlowBloom.softness, 0, 1.5) / 1.5)
+      : 0.25;
+    dreamGlowPass.enabled = dreamyGlowBloom.enabled;
+    dreamGlowPass.uniforms.uAmount.value = dreamyGlowBloom.enabled
+      ? dreamyGlowBloom.filterAmount * (0.55 + dreamBloomE * 0.65)
+      : 0.0;
+    dreamGlowPass.uniforms.uBlurScale.value = dreamyGlowBloom.enabled
+      ? THREE.MathUtils.lerp(1.4, 4.8, THREE.MathUtils.clamp(dreamyGlowBloom.softness, 0, 1.5) / 1.5)
+      : 1.0;
+    dreamGlowPass.uniforms.uTintMix.value = dreamyGlowBloom.filterTintMix;
+    dreamGlowPass.uniforms.uHaze.value = dreamyGlowBloom.enabled ? dreamyGlowBloom.filterHaze : 0.0;
+  }
 
   // -------------------- Dreamy background (CLEAN) --------------------
   // Clean dt/t timing. No legacy time state object.
   {
     const sScratch = audio.getState()?.scratch;
+    const pearlUi = THREE.MathUtils.clamp(noteColorUI?.getPearl?.() ?? 0.62, 0, 1);
+    const glowUi = THREE.MathUtils.clamp(noteColorUI?.getGlow?.() ?? 0.56, 0, 1);
+    const dreamyGlowBg = dreamyGlowController.getConfig();
+    const pureColorCfg = pureColorController.getConfig();
+    const pearlWhiteCfg = pearlWhiteController.getConfig();
+    const pearlWhiteColor = pearlWhiteController.getColor();
+    const pureColorE = pureColorCfg.enabled ? 1.0 : 0.0;
+    const dreamBgE = dreamyGlowBg.enabled ? THREE.MathUtils.clamp(dreamyGlowBg.intensity, 0, 1.5) : 0;
+    const pearlWhiteE = pearlWhiteCfg.enabled ? 1.0 : 0.0;
+    const richnessUi = THREE.MathUtils.clamp(noteColorUI?.getRichness?.() ?? 0.58, 0, 1);
+    const dreamUi = THREE.MathUtils.clamp(noteColorUI?.getDream?.() ?? 0.52, 0, 1);
+    const flowDetailUi = THREE.MathUtils.clamp(backgroundDockUI?.getFlowDetail?.() ?? 0.62, 0, 1);
+    const darkSpaceUi = THREE.MathUtils.clamp(backgroundDockUI?.getDarkSpace?.() ?? 0.70, 0, 1);
+    const localColorLiftUi = THREE.MathUtils.clamp(backgroundDockUI?.getLocalColorLift?.() ?? 0.62, 0, 1);
+    const screenMax = Math.max(window.innerWidth, window.innerHeight);
+    const largeScreenBoost = THREE.MathUtils.clamp((screenMax - 1600) / 1800, 0, 1);
+    const detailCurve = Math.pow(flowDetailUi, 0.82);
+    const highZone = THREE.MathUtils.clamp((flowDetailUi - 0.55) / 0.45, 0, 1);
+    const detailBoost = 1.0 + largeScreenBoost * highZone * 0.45;
 
-    const scratchVel01 = THREE.MathUtils.clamp((sScratch?.velocity ?? 0) / 1.2, 0, 1);
+    const scratchVelRaw = THREE.MathUtils.clamp((sScratch?.velocity ?? 0) / 1.2, 0, 1);
     const isPlaying = !!(pointerDown && isActiveNebulaHovered);
     const interactionNow = !!(pointerDown && (isActiveNebulaHovered || musicState.activeIntent));
+    const scratchVel01 = interactionNow ? scratchVelRaw : 0.0;
 
     // Click pulse envelope: immediate rise (0.03~0.08s), slower fade (0.5~0.8s)
-    bgClickPulse = Math.max(0.0, bgClickPulse - dt / 0.65);
-    bgClickPulseVis = __bgRiseFall(bgClickPulseVis, bgClickPulse, dt, 26.0, 4.2);
+    bgClickPulse = Math.max(0.0, bgClickPulse - dt / 0.85);
+    bgClickPulseVis = __bgRiseFall(bgClickPulseVis, bgClickPulse, dt, 18.0, 1.5);
 
     // Immediate interaction drive for hold/slide, with no hover-delay dependency.
-    const baseHold = interactionNow ? 0.28 : 0.0;
-    const targetLead = THREE.MathUtils.clamp(baseHold + scratchVel01 * 0.78 + bgClickPulseVis * 0.55, 0, 1);
-    bgLeadE = __bgRiseFall(bgLeadE, targetLead, dt, 18.0, 5.0);
+    const baseHold = interactionNow ? 0.12 : 0.0;
+    const autoVisualLead = autoPlayConductor?.getConfig?.()?.enabled ? autoReplayVisual.energy : 0.0;
+    const targetLead = THREE.MathUtils.clamp(baseHold + scratchVel01 * 0.46 + bgClickPulseVis * 0.30 + autoVisualLead * 0.24, 0, 1);
+    // slower fall to calm (~1-2s)
+    bgLeadE = __bgRiseFall(bgLeadE, targetLead, dt, 14.0, 1.1);
+    const interactionTarget = THREE.MathUtils.clamp(
+      (interactionNow ? 0.82 : 0.0) + scratchVel01 * 0.24 + bgClickPulseVis * 0.18 + autoVisualLead * 0.28,
+      0,
+      1
+    );
+    // ~1-2s decay when no interaction
+    bgInteractionE = __bgRiseFall(bgInteractionE, interactionTarget, dt, 16.0, 0.9);
+    bgLastEmitE = __bgRiseFall(bgLastEmitE, 0.0, dt, 10.0, interactionNow ? 0.45 : 1.35);
 
     // Smooth pitch/vel/theta (prefer scratch state; fallback to bgDrive)
     const targetPitch = (typeof sScratch?.pitch01 === "number") ? sScratch.pitch01 : bgDrive.pitch01;
     const targetVel   = interactionNow ? Math.max(0.12, scratchVel01) : 0.0;
     const targetTheta = (typeof sScratch?.theta01 === "number") ? sScratch.theta01 : bgDrive.theta01;
+    const autoVisual = autoPlayConductor?.getConfig?.()?.enabled ? autoReplayVisual.energy : 0.0;
 
     bgPitch01 = __bgRiseFall(bgPitch01, THREE.MathUtils.clamp(targetPitch, 0, 1), dt, 14.0, 7.0);
-    bgVel01   = __bgRiseFall(bgVel01,   THREE.MathUtils.clamp(targetVel,   0, 1), dt, 16.0, 6.0);
-    bgTheta01 = __bgRiseFall(bgTheta01, THREE.MathUtils.clamp(targetTheta, 0, 1), dt, 14.0, 8.0);
+    bgVel01   = __bgRiseFall(bgVel01,   THREE.MathUtils.clamp(targetVel + autoVisual * 0.18,   0, 1), dt, 16.0, 6.0);
+    bgTheta01 = __bgRiseFallWrap(bgTheta01, THREE.MathUtils.clamp(targetTheta, 0, 1), dt, 14.0, 8.0);
+    bgDrive.noteHue = __bgRiseFallWrap(bgDrive.noteHue, bgTheta01, dt, 8.0, 4.0);
+    bgDrive.notePos.lerp(bgTargetPos, 1.0 - Math.exp(-dt * 7.5));
 
     // Directly drive visible flow/brightness response (keeps click + hold responsive).
-    const flowTarget = THREE.MathUtils.clamp(0.06 + bgLeadE * 0.95 + bgClickPulseVis * 0.65, 0, 1.25);
-    const sparkleTarget = THREE.MathUtils.clamp(0.015 + bgLeadE * 0.18 + bgClickPulseVis * 0.16, 0, 0.32);
-    const intensityTarget = THREE.MathUtils.clamp(0.12 + bgLeadE * 1.0 + bgClickPulseVis * 0.75, 0, 1.35);
-    bg.uniforms.uFlow.value = __bgRiseFall(bg.uniforms.uFlow.value, flowTarget, dt, 18.0, 4.8);
-    bg.uniforms.uSparkle.value = __bgRiseFall(bg.uniforms.uSparkle.value, sparkleTarget, dt, 14.0, 5.0);
-    bg.uniforms.uIntensity.value = __bgRiseFall(bg.uniforms.uIntensity.value, intensityTarget, dt, 16.0, 4.6);
+    const cinematicGain = cinematicState.enabled ? (1.0 + cinematicState.energy * 0.42) : 1.0;
+    const flowTarget = THREE.MathUtils.clamp(
+      (0.010 + bgLeadE * 0.42 + bgClickPulseVis * 0.20 + autoVisual * 0.12) *
+      (0.72 + 0.20 * glowUi) *
+      (0.90 + 0.12 * richnessUi) *
+      cinematicGain,
+      0,
+      0.72
+    );
+    const sparkleTarget = THREE.MathUtils.clamp(
+      (0.003 + richnessUi * 0.010) * (1.0 + dreamBgE * dreamyGlowBg.backgroundLift * 0.60),
+      0.001,
+      0.042
+    );
+    const satTargetRaw = 0.24 + bgLeadE * 0.44 + bgClickPulseVis * 0.22 + dreamUi * 0.10;
+    const satTarget = THREE.MathUtils.clamp(
+      satTargetRaw * (1.0 - 0.24 * darkSpaceUi) * (1.0 + pureColorE * pureColorCfg.saturation * 0.22),
+      0.22,
+      THREE.MathUtils.lerp(1.04, 0.88, darkSpaceUi)
+    );
+    // auto-dim to keep nebula readable
+    const readabilityLimiter = interactionNow ? 0.84 : 0.92;
+    const darkCalmDim = THREE.MathUtils.lerp(1.0, 0.46, darkSpaceUi);
+    const darkInteractionLift = THREE.MathUtils.lerp(0.0, 0.36, darkSpaceUi) * (0.55 * bgInteractionE + 0.45 * bgClickPulseVis);
+    const darkGain = THREE.MathUtils.clamp(darkCalmDim + darkInteractionLift, 0.28, 1.0);
+    const intensityTarget = THREE.MathUtils.clamp(
+      (0.008 + bgLeadE * 0.32 + bgClickPulseVis * 0.16 + cinematicState.energy * 0.06 + autoVisual * 0.06) *
+      readabilityLimiter *
+      (0.64 + 0.44 * glowUi) *
+      darkGain *
+      (1.0 + dreamBgE * dreamyGlowBg.backgroundLift * 0.52) *
+      (1.0 + pureColorE * pureColorCfg.lift * 0.20),
+      0.006,
+      0.72
+    );
+    bg.uniforms.uFlow.value = __bgRiseFall(bg.uniforms.uFlow.value, flowTarget, dt, 12.0, 1.5);
+    bg.uniforms.uSparkle.value = __bgRiseFall(bg.uniforms.uSparkle.value, sparkleTarget, dt, 6.0, 2.6);
+    bg.uniforms.uSat.value = __bgRiseFall(bg.uniforms.uSat.value, satTarget, dt, 10.0, 2.2);
+    bg.uniforms.uPearl.value = __bgRiseFall(bg.uniforms.uPearl.value, 0.28 + pearlUi * 1.02, dt, 8.0, 4.0);
+    bg.uniforms.uIntensity.value = __bgRiseFall(bg.uniforms.uIntensity.value, intensityTarget, dt, 11.0, 1.4);
+    const contrastTarget = THREE.MathUtils.clamp(
+      THREE.MathUtils.lerp(0.96, 1.24, darkSpaceUi) + localColorLiftUi * 0.03 - pureColorE * pureColorCfg.contrastSoftness * 0.16,
+      0.82,
+      1.18
+    );
+    bg.uniforms.uContrast.value = __bgRiseFall(bg.uniforms.uContrast.value, contrastTarget, dt, 7.0, 3.0);
+    const detailTarget = THREE.MathUtils.clamp(
+      THREE.MathUtils.lerp(0.24, 1.02, detailCurve) * (0.94 + 0.24 * bgInteractionE + cinematicState.energy * 0.10) * detailBoost,
+      0.14,
+      1.25
+    );
+    const warpTarget = THREE.MathUtils.clamp(
+      THREE.MathUtils.lerp(0.40, 0.96, detailCurve) * (0.92 + 0.18 * bgInteractionE + cinematicState.energy * 0.16) * (1.0 + largeScreenBoost * highZone * 0.28),
+      0.25,
+      1.08
+    );
+    const scaleTarget = THREE.MathUtils.clamp(
+      THREE.MathUtils.lerp(0.80, 1.24, detailCurve),
+      0.7,
+      1.35
+    );
+    bg.uniforms.uDetail.value = __bgRiseFall(bg.uniforms.uDetail.value, detailTarget, dt, 7.0, 2.4);
+    bg.uniforms.uWarp.value = __bgRiseFall(bg.uniforms.uWarp.value, warpTarget, dt, 7.5, 2.5);
+    bg.uniforms.uScale.value = __bgRiseFall(bg.uniforms.uScale.value, scaleTarget, dt, 5.8, 2.0);
+    const pearlWhiteTarget = THREE.MathUtils.clamp(
+      (0.18 + bgInteractionE * 0.48 + bgClickPulseVis * 0.26 + bgLeadE * 0.22) * pearlWhiteCfg.strength * pearlWhiteE,
+      0,
+      1
+    );
+    bg.uniforms.uBaseLift.value.set(pearlWhiteColor.r, pearlWhiteColor.g, pearlWhiteColor.b);
+    bg.uniforms.uBaseLiftMix.value = __bgRiseFall(bg.uniforms.uBaseLiftMix.value, pearlWhiteTarget, dt, 4.5, 1.8);
 
     // Pulse: when step changes while playing
     const stepNow = (typeof sScratch?.step === "number") ? sScratch.step : -1;
     if (isPlaying && stepNow >= 0 && stepNow !== bgLastStep) {
       bgLastStep = stepNow;
       triggerBackgroundPulse(0.85);
+      triggerPerformanceCameraNotePulse({
+        galaxyId: activeNebulaKey ?? musicState.activeIntent?.galaxyId ?? null,
+        strength: THREE.MathUtils.lerp(0.24, 0.46, THREE.MathUtils.clamp(scratchVel01, 0, 1)),
+        centerWorld: hitPoint,
+      });
+      nebulaSystem.triggerNotePulse({
+        galaxyId: activeNebulaKey ?? musicState.activeIntent?.galaxyId ?? null,
+        theta01: musicState.activeIntent?.theta01 ?? null,
+        strength: THREE.MathUtils.clamp(0.72 * cinematicState.pulseBoost, 0, 1),
+      });
+      bgNoteSeed = t;
+      bgNoteHue = (stepNow % STEPS) / STEPS;
+      bgDrive.noteSeed = bgNoteSeed;
+      bgLastEmitPos.copy(bgDrive.notePos);
+      bgLastEmitHue = bgDrive.noteHue;
+      bgLastEmitStep = stepNow;
+      bgLastEmitE = 1.0;
+      const nowMsD = performance.now();
+      const vPlay = THREE.MathUtils.clamp(scratchVel01, 0, 1);
+      if ((nowMsD - lastDolphinEmitMs) >= emitGapMsFromVelocity(vPlay, 145, 60)) {
+        lastDolphinEmitMs = nowMsD;
+        dolphinSystem?.triggerFromNote?.({
+          galaxyId: activeNebulaKey ?? musicState.activeIntent?.galaxyId ?? null,
+          theta01: musicState.activeIntent?.theta01 ?? (stepNow / 7),
+          velocity: vPlay,
+          strength: THREE.MathUtils.lerp(0.78, 1.0, vPlay),
+          now: nowMsD * 0.001,
+        });
+      }
+      if ((nowMsD - lastNotePopEmitMs) >= emitGapMsFromVelocity(vPlay, 125, 44)) {
+        lastNotePopEmitMs = nowMsD;
+        notePopSystem?.triggerFromNote?.({
+          galaxyId: activeNebulaKey ?? musicState.activeIntent?.galaxyId ?? null,
+          theta01: musicState.activeIntent?.theta01 ?? (stepNow / 7),
+          velocity: vPlay,
+          notePitch01: midiToPitch01(musicState.activeIntent?.midi),
+          noteHue: musicState.activeIntent?.theta01 ?? (stepNow / 7),
+          strength: THREE.MathUtils.lerp(0.84, 1.0, vPlay),
+          now: nowMsD * 0.001,
+        });
+      }
     }
+    bgPulse = Math.max(0.0, bgPulse - dt / 0.70);
 
     // Feed shader uniforms (new dreamyBackground API)
     if (bg && bg.setAudio) {
+      const bgReactiveCfg = backgroundReactivityController.getConfig();
+      const activeIntentNow = musicState.activeIntent;
+      const hoverIntentNow = musicState.hoverIntent;
+      const focusIntent = activeIntentNow ?? hoverIntentNow ?? musicState.lastIntent ?? null;
+      const activeHue = bgDrive.noteHue;
+      const hoverHue = hoverIntentNow?.theta01 ?? bgTheta01 ?? activeHue;
+      const colorBlend = THREE.MathUtils.clamp(backgroundDockUI?.getColorBlend?.() ?? 0.46, 0, 1);
+      const notePresence = THREE.MathUtils.lerp(0.22, 0.60, colorBlend);
+      const harmony = THREE.MathUtils.lerp(0.52, 0.18, colorBlend);
+      const colorMix = THREE.MathUtils.clamp(0.08 + 0.22 * notePresence, 0, 0.30);
+      const activeStep = (typeof activeIntentNow?.step === "number") ? activeIntentNow.step : -1;
+      const hoverStep = (typeof hoverIntentNow?.step === "number") ? hoverIntentNow.step : -1;
+      const lastStep = (typeof bgLastEmitStep === "number") ? bgLastEmitStep : -1;
+      const [ahR, ahG, ahB] = hsvToRgb(activeHue, 0.66, 1.0);
+      const [hhR, hhG, hhB] = hsvToRgb(hoverHue, 0.56, 0.95);
+      const [lhR, lhG, lhB] = hsvToRgb(bgLastEmitHue, 0.52, 0.9);
+      const activeCustom = noteColorUI?.getColorRgb01?.(activeStep);
+      const hoverCustom = noteColorUI?.getColorRgb01?.(hoverStep);
+      const lastCustom = noteColorUI?.getColorRgb01?.(lastStep);
+      const noteInjectionOn = bgReactiveCfg.enableNoteColorInjection;
+      const localEmittersOn = bgReactiveCfg.enableLocalEmitters;
+      const resolveTone = (baseRgb, customRgb, step, thetaFallback) => {
+        const manual = (noteInjectionOn && customRgb) ? lerp3(baseRgb, customRgb, colorMix) : baseRgb;
+        const derived = sampleBackgroundPaletteAt((step >= 0 ? (step % 7) / 7 : thetaFallback));
+        const harmonyBlend = 0.08 + 0.16 * harmony; // keep note color identifiable
+        const fused = lerp3(manual, derived, harmonyBlend);
+        return lerp3(derived, fused, 0.28 + 0.36 * notePresence);
+      };
+      const [ar, ag, ab] = resolveTone([ahR, ahG, ahB], activeCustom, activeStep, activeHue);
+      const [hr, hg, hb] = resolveTone([hhR, hhG, hhB], hoverCustom, hoverStep, hoverHue);
+      const [lr, lg, lb] = resolveTone([lhR, lhG, lhB], lastCustom, lastStep, bgLastEmitHue);
+      const focusStep = (typeof focusIntent?.step === "number") ? focusIntent.step : -1;
+      const focusCustom = noteColorUI?.getColorRgb01?.(focusStep);
+      const focusHue = (typeof focusIntent?.theta01 === "number") ? focusIntent.theta01 : activeHue;
+      const focusBase = hsvToRgb(focusHue, 0.62, 1.0);
+      const focusRgb = resolveTone(focusBase, focusCustom, focusStep, focusHue);
+      const focusRaw = focusCustom ?? focusBase;
+      const focusVisible = lerp3(
+        focusRgb,
+        noteInjectionOn ? focusRaw : focusRgb,
+        noteInjectionOn ? THREE.MathUtils.clamp(0.18 + 0.26 * notePresence, 0, 0.52) : 0
+      );
+      const noteColor = { r: focusVisible[0], g: focusVisible[1], b: focusVisible[2] };
+      const stableNoteHue = (focusStep >= 0) ? ((focusStep % 7) / 7) : bgNoteHue;
+      const glowGain = 0.56 + 0.58 * glowUi;
+      const presenceGain = 0.35 + 0.95 * notePresence;
+      const localLift = THREE.MathUtils.lerp(0.72, 1.50, localColorLiftUi);
+      const activeStrength = localEmittersOn
+        ? THREE.MathUtils.clamp((bgInteractionE * 0.36 + bgClickPulseVis * 0.08) * glowGain * presenceGain * localLift, 0, 0.34)
+        : 0;
+      const hoverStrength = localEmittersOn
+        ? THREE.MathUtils.clamp((hoverIntentNow ? 0.05 : 0.0) * (0.28 + 0.24 * bgInteractionE) * glowGain * presenceGain * (0.82 + 0.18 * localColorLiftUi), 0, 0.10)
+        : 0;
+      const lastStrength = localEmittersOn
+        ? THREE.MathUtils.clamp(bgLastEmitE * 0.22 * glowGain * presenceGain * (0.88 + 0.20 * localColorLiftUi), 0, 0.18)
+        : 0;
+      const wrap01 = (v) => ((v % 1) + 1) % 1;
+      const blendTrail = {
+        x: THREE.MathUtils.lerp(bgDrive.notePos.x, bgLastEmitPos.x, 0.58),
+        y: THREE.MathUtils.lerp(bgDrive.notePos.y, bgLastEmitPos.y, 0.58),
+      };
+      const sat2 = {
+        x: wrap01(bgLastEmitPos.x - 0.20 * Math.cos((bgTheta01 + 0.33) * Math.PI * 2)),
+        y: wrap01(bgLastEmitPos.y - 0.12 * Math.sin((bgTheta01 + 0.33) * Math.PI * 2)),
+      };
+      const sat1 = {
+        x: wrap01(blendTrail.x + 0.16 * Math.cos((bgTheta01 + 0.08) * Math.PI * 2)),
+        y: wrap01(blendTrail.y + 0.14 * Math.sin((bgTheta01 + 0.08) * Math.PI * 2)),
+      };
+      const [s1r, s1g, s1b] = resolveTone([hr, hg, hb], activeCustom ?? hoverCustom, activeStep >= 0 ? activeStep : hoverStep, hoverHue);
+      const [s2r, s2g, s2b] = resolveTone([lr, lg, lb], activeCustom ?? lastCustom, activeStep >= 0 ? activeStep : lastStep, bgLastEmitHue);
+      const satelliteStrength = THREE.MathUtils.clamp(activeStrength * 0.18 + hoverStrength * 0.20 + lastStrength * 0.18, 0, 0.14);
+      const noteColorMixFinal = noteInjectionOn
+        ? THREE.MathUtils.clamp(
+            Math.max(
+              (colorMix * 0.54 + 0.02) * (0.42 + 0.56 * notePresence) * (0.90 + 0.10 * localColorLiftUi),
+              0.08 + 0.24 * notePresence
+            ),
+            0,
+            0.28
+          )
+        : 0.0;
       bg.setAudio({
         leadE: bgLeadE,
+        interactionE: bgInteractionE,
         pitch01: bgPitch01,
         vel01: bgVel01,
         theta01: bgTheta01,
+        pulse: bgPulse,
+        noteSeed: bgDrive.noteSeed,
+        notePos: bgDrive.notePos,
+        interactionPos: bgDrive.notePos,
+        noteHue: stableNoteHue,
+        noteColor,
+        noteColorMix: noteColorMixFinal,
+        noteColorStrict: 0,
+        richness: richnessUi,
+        dream: dreamUi,
+        emitters: [
+          { x: bgDrive.notePos.x, y: bgDrive.notePos.y, r: ar, g: ag, b: ab, s: activeStrength },
+          { x: sat1.x, y: sat1.y, r: s1r, g: s1g, b: s1b, s: satelliteStrength },
+          { x: sat2.x, y: sat2.y, r: s2r, g: s2g, b: s2b, s: satelliteStrength + lastStrength * 0.18 },
+        ],
       });
 
     // ✅ 背景音频驱动的衰减：防止一直“锁死”在某个颜色/亮度
     // dt: 这一帧的秒数（如果你这里没有 dt，就用 1/60 近似）
     const _dtBg = (typeof dt === "number" && isFinite(dt)) ? dt : (1 / 60);
+    bgDrive.pulse = Math.max(0, bgDrive.pulse - _dtBg * 2.8);
     bgDrive.leadE = Math.max(0, bgDrive.leadE - _dtBg * 1.6);
     }
   }
 // -------------------- /Dreamy background (CLEAN) --------------------
 
+
+  performanceCamera?.apply?.(camera, performanceCameraBaseTarget);
+  if (bg) bg.update(0, camera);
+  stars.position.copy(camera.position);
 
   // --- render
   composer.render();
@@ -1320,11 +3022,17 @@ tick();
 window.addEventListener("resize", () => {
   const w = window.innerWidth;
   const h = window.innerHeight;
+  resizeNoteOverlay();
   renderer.setSize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
   composer.setSize(w, h);
   bloomPass.setSize(w, h);
+  dreamGlowPass.uniforms.uResolution.value.set(w, h);
+  if (stars?.material?.uniforms?.uBaseSize) {
+    const starSizeUi = THREE.MathUtils.clamp(backgroundDockUI?.getStarSize?.() ?? 16, 2, 28);
+    stars.material.uniforms.uBaseSize.value = getStarBaseSize(starSizeUi);
+  }
 });
 
 // -------------------------------------

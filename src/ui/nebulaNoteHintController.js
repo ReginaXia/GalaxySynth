@@ -5,6 +5,22 @@ import { NOTE_STEPS, stepToCenterTheta01 } from "../music/noteMapping.js";
 
 function clamp01(x) { return Math.max(0, Math.min(1, x)); }
 
+const HINT_FONT_FAMILY = "'LacheyardScript', 'Lacheyard Script', ui-sans-serif, system-ui, -apple-system";
+let __hintFontInjected = false;
+function ensureHintFontFace() {
+  if (__hintFontInjected) return;
+  __hintFontInjected = true;
+  const style = document.createElement("style");
+  style.textContent = `
+    @font-face {
+      font-family: 'LacheyardScript';
+      src: url('/fonts/LacheyardScript.otf') format('opentype');
+      font-display: swap;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
 function makeGlowTextSprite(text = "C", opts = {}) {
   const {
     canvasW = 512,
@@ -20,6 +36,7 @@ function makeGlowTextSprite(text = "C", opts = {}) {
   canvas.width = canvasW;
   canvas.height = canvasH;
   const ctx = canvas.getContext("2d");
+  ensureHintFontFace();
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.minFilter = THREE.LinearFilter;
@@ -37,7 +54,7 @@ function makeGlowTextSprite(text = "C", opts = {}) {
 
   function setText(newText) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.font = `${font} ${fontSize}px ui-sans-serif, system-ui, -apple-system`;
+    ctx.font = `${font} ${fontSize}px ${HINT_FONT_FAMILY}`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
 

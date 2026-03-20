@@ -16,6 +16,7 @@ export function setupMeteorGUI(meteorSystem) {
   // -------------------------------------------------
   const f0 = gui.addFolder("Meteors");
   f0.add(params, "enabled").name("Enable");
+  f0.add(params, "audioEnabled").name("Meteor Sound");
   f0.add(params, "spawnRate", 0.0, 2.0, 0.01).name("Spawn Rate");
   f0.add(params, "areaRadius", 2.0, 12.0, 0.1).name("Area Radius");
 
@@ -30,6 +31,9 @@ export function setupMeteorGUI(meteorSystem) {
   style.add(params, "headGlowMul", 0.35, 1.6, 0.001).name("Head Brightness");
   style.add(params, "styleVariation", 0.0, 1.0, 0.001).name("Variation");
   style.add(params, "styleTheme", ["pink", "blue", "purple", "rainbow"]).name("Theme");
+  style.add(params, "meteorRomance", 0.0, 1.0, 0.001).name("Meteor Romance");
+  style.add(params, "meteorChime", 0.0, 1.0, 0.001).name("Meteor Chime");
+  style.add(params, "meteorTail", 0.0, 1.0, 0.001).name("Meteor Tail");
 
 
   // ---- Length (macro)

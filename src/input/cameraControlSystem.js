@@ -392,6 +392,16 @@ export function createCameraControlSystem({
       return target.clone();
     },
 
+    getDistanceLimits() {
+      return { minDistance, maxDistance };
+    },
+    setDistanceLimits(next = {}) {
+      if (Number.isFinite(next.minDistance)) minDistance = Math.max(0.05, Number(next.minDistance));
+      if (Number.isFinite(next.maxDistance)) maxDistance = Math.max(minDistance, Number(next.maxDistance));
+      syncOrbitFromCamera();
+      applyOrbitToCamera();
+    },
+
     // orbit API (optional)
     syncOrbitFromCamera,
     applyOrbitToCamera,
