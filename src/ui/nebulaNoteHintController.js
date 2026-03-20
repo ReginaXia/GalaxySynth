@@ -27,9 +27,11 @@ function makeGlowTextSprite(text = "C", opts = {}) {
     canvasW = 512,
     canvasH = 256,
     fontSize = 72,
-    glow = 18,
-    color = "#ffffff",
-    glowColor = "rgba(255,255,255,0.9)",
+    glow = 10,
+    color = "#f7f4ff",
+    glowColor = "rgba(230,235,255,0.42)",
+    outlineColor = "rgba(255,255,255,0.34)",
+    outlineWidth = 2,
     font = "700",
   } = opts;
 
@@ -58,17 +60,26 @@ function makeGlowTextSprite(text = "C", opts = {}) {
     ctx.font = `${font} ${fontSize}px ${HINT_FONT_FAMILY}`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
+    const x = canvas.width / 2;
+    const y = canvas.height / 2;
 
-    // glow pass
+    // soft outer halo
     ctx.shadowBlur = glow;
     ctx.shadowColor = glowColor;
-    ctx.fillStyle = color;
-    ctx.fillText(newText, canvas.width / 2, canvas.height / 2);
+    ctx.fillStyle = "rgba(255,255,255,0.22)";
+    ctx.fillText(newText, x, y);
 
-    // crisp pass
+    // light outline helps the glyph stay legible inside bloom
     ctx.shadowBlur = 0;
+    ctx.lineJoin = "round";
+    ctx.miterLimit = 2;
+    ctx.lineWidth = outlineWidth;
+    ctx.strokeStyle = outlineColor;
+    ctx.strokeText(newText, x, y);
+
+    // crisp core
     ctx.fillStyle = color;
-    ctx.fillText(newText, canvas.width / 2, canvas.height / 2);
+    ctx.fillText(newText, x, y);
 
     texture.needsUpdate = true;
   }
@@ -139,7 +150,11 @@ export function createNebulaNoteHintController({
   // cursor label
   const { sprite: cursorLabel, setText: setCursorText } = makeGlowTextSprite("Do", {
     fontSize: 86,
-    glow: 22,
+    glow: 9,
+    color: "#f7f4ff",
+    glowColor: "rgba(230,238,255,0.38)",
+    outlineColor: "rgba(255,255,255,0.46)",
+    outlineWidth: 2.2,
   });
   cursorLabel.visible = false;
   cursorLabel.scale.set(1.75, 0.9, 1);
@@ -155,7 +170,11 @@ export function createNebulaNoteHintController({
     for (let i = 0; i < STEPS; i++) {
       const { sprite, setText } = makeGlowTextSprite("Do", {
         fontSize: 54,
-        glow: 16,
+        glow: 5,
+        color: "#ece8f7",
+        glowColor: "rgba(225,232,255,0.18)",
+        outlineColor: "rgba(255,255,255,0.16)",
+        outlineWidth: 1.2,
       });
       sprite.visible = false;
       sprite.scale.set(1.05, 0.55, 1);
