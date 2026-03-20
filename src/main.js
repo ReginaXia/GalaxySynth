@@ -1095,7 +1095,7 @@ const meteorGui = setupMeteorGUI(meteorSystem);
 const dolphinGui = setupDolphinGUI(dolphinSystem);
 const notePopGui = setupNotePopGUI(notePopSystem);
 
-const UI_STATE_KEY = "GalaxySynth_UIState_v6";
+const UI_STATE_KEY = "GalaxySynth_UIState_v7";
 function readUiState() {
   try {
     const raw = localStorage.getItem(UI_STATE_KEY);
@@ -1103,11 +1103,12 @@ function readUiState() {
       return {
         visible: true,
         showcase: false,
-        showPlay: true,
-        showLook: false,
+        showPlay: false,
+        showLook: true,
         showAudio: false,
         showDebug: false,
         showTransport: true,
+        showAdvanced: false,
         cinematic: false,
         harmonyLayer: true,
         autoPlay: false,
@@ -1124,6 +1125,7 @@ function readUiState() {
       showAudio: !!s.showAudio,
       showDebug: !!s.showDebug,
       showTransport: s.showTransport !== false,
+      showAdvanced: !!s.showAdvanced,
       cinematic: !!s.cinematic,
       harmonyLayer: s.harmonyLayer !== false,
       autoPlay: !!s.autoPlay,
@@ -1134,11 +1136,12 @@ function readUiState() {
     return {
       visible: true,
       showcase: false,
-      showPlay: true,
-      showLook: false,
+      showPlay: false,
+      showLook: true,
       showAudio: false,
       showDebug: false,
       showTransport: true,
+      showAdvanced: false,
       cinematic: false,
       harmonyLayer: true,
       autoPlay: false,
@@ -1159,23 +1162,66 @@ const uiStyle = document.createElement("style");
 uiStyle.textContent = `
 .ui-shell{
   position:fixed; right:12px; top:12px; z-index:10001;
-  width:272px; padding:10px 12px; border-radius:14px;
+  width:292px; padding:12px; border-radius:16px;
   color:#eef2ff; background:linear-gradient(160deg, rgba(10,14,28,.82), rgba(20,12,34,.72));
   border:1px solid rgba(165,196,255,.22); backdrop-filter:blur(10px);
   font:12px/1.35 "IBM Plex Sans","Segoe UI",ui-sans-serif,sans-serif;
   box-shadow:0 10px 30px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.03);
 }
-.ui-shell .row{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin:6px 0; }
-.ui-shell .title{ font-weight:700; letter-spacing:.4px; margin-bottom:8px; }
+.ui-shell .row{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin:8px 0; }
+.ui-shell .title{ font-weight:700; letter-spacing:.4px; margin-bottom:4px; }
+.ui-shell .subtitle{ opacity:.72; font-size:11px; margin-bottom:10px; }
 .ui-shell .group-title{ margin-top:8px; font-size:11px; letter-spacing:.7px; text-transform:uppercase; opacity:.72; }
 .ui-shell .btn{
-  border:0; border-radius:8px; padding:5px 8px; cursor:pointer;
+  border:0; border-radius:10px; padding:7px 10px; cursor:pointer;
   color:#eaf0ff; background:rgba(70,95,170,.36);
 }
 .ui-shell .btn.secondary{ background:rgba(72,56,112,.38); }
+.ui-shell .btn.ghost{ background:rgba(255,255,255,.08); }
+.ui-shell .btn.active{ background:linear-gradient(135deg, rgba(115,165,255,.52), rgba(136,112,255,.44)); }
+.ui-shell .pair{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.ui-shell .mini-grid{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px; }
 .ui-shell .chk{ display:flex; align-items:center; gap:6px; opacity:.95; }
 .ui-shell .hint{ opacity:.72; font-size:11px; margin-top:6px; }
 .ui-shell input[type="checkbox"]{ transform:translateY(1px); }
+.ui-shell select,
+.ui-shell input[type="range"]{
+  accent-color:#9ab9ff;
+}
+.advanced-shell{
+  display:grid;
+  gap:8px;
+}
+.advanced-shell .section{
+  padding:8px 10px;
+  border-radius:10px;
+  background:rgba(255,255,255,.04);
+  border:1px solid rgba(165,196,255,.10);
+}
+.advanced-shell .section-title{
+  font:600 11px/1.2 "IBM Plex Sans","Segoe UI",ui-sans-serif,sans-serif;
+  letter-spacing:.35px;
+  text-transform:uppercase;
+  opacity:.74;
+  margin-bottom:8px;
+}
+.advanced-shell .row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  margin:6px 0;
+}
+.advanced-shell label{
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+.advanced-shell .hint{
+  opacity:.68;
+  font-size:11px;
+  margin-top:2px;
+}
 
 /* Unified panel look */
 .custom-ui.note-color-panel,
@@ -1213,40 +1259,69 @@ const uiShell = document.createElement("div");
 uiShell.className = "custom-ui ui-shell";
 uiShell.addEventListener("pointerdown", (e) => e.stopPropagation());
 uiShell.innerHTML = `
-  <div class="title">Visual UI</div>
-  <div class="row">
-    <button class="btn" data-act="toggle-ui">Master: ON</button>
-    <button class="btn secondary" data-act="toggle-showcase">Showcase: OFF</button>
+  <div class="title">Transport</div>
+  <div class="subtitle">Keep the stage clean. Reach deeper controls only when you need them.</div>
+  <div class="pair">
+    <button class="btn" data-act="toggle-ui">UI Visible</button>
+    <button class="btn ghost" data-act="toggle-advanced">Advanced</button>
   </div>
-  <div class="row">
-    <button class="btn secondary" data-act="toggle-cinematic">Cinematic: OFF</button>
-    <button class="btn secondary" data-act="clean-layout">Clean Layout</button>
+  <div class="pair">
+    <button class="btn secondary" data-act="toggle-autoplay">Auto Play</button>
+    <button class="btn secondary" data-act="toggle-cinematic">Cinematic</button>
   </div>
-  <div class="group-title">Panels</div>
-  <label class="chk"><input type="checkbox" data-k="play"> Play Panel</label>
-  <label class="chk"><input type="checkbox" data-k="look"> Look Panels</label>
-  <label class="chk"><input type="checkbox" data-k="audio"> Audio Monitor</label>
-  <label class="chk"><input type="checkbox" data-k="debug"> Debug HUD</label>
-  <label class="chk"><input type="checkbox" data-k="transport"> Transport UI</label>
-  <label class="chk"><input type="checkbox" data-k="cinematic"> Cinematic Mode</label>
-  <label class="chk"><input type="checkbox" data-k="harmony"> Harmony Layer</label>
-  <label class="chk"><input type="checkbox" data-k="autoplay"> Auto Play (5 Nebula)</label>
   <div class="row"><span>Auto Style</span><select data-k="autoplay-style"><option value="dream">dream</option><option value="sparkle">sparkle</option><option value="calm">calm</option></select></div>
   <div class="row"><span>Auto Tempo</span><input data-k="autoplay-tempo" type="range" min="60" max="140" step="1" style="flex:1;"><span data-k="autoplay-tempo-v">86</span></div>
-  <div class="hint">Hotkeys: H master hide/show, J showcase</div>
+  <div class="mini-grid">
+    <button class="btn ghost" data-act="toggle-look">Look Panel</button>
+    <button class="btn ghost" data-act="toggle-transport">Tempo Ring</button>
+    <button class="btn ghost" data-act="toggle-showcase">Showcase</button>
+    <button class="btn ghost" data-act="clean-layout">Reset Layout</button>
+  </div>
+  <div class="hint">Hotkeys: H hide UI, J showcase, K cinematic, F focus camera</div>
 `;
 document.body.appendChild(uiShell);
 
 const uiHubDock = createDockPanel({
   id: "hub",
-  title: "UI Hub",
+  title: "Transport",
   contentEl: uiShell,
   x: window.innerWidth - 320,
   y: 12,
-  width: 300,
+  width: 320,
   minHeight: 110,
   zIndex: 10001,
   showHideButton: false,
+});
+const advancedShell = document.createElement("div");
+advancedShell.className = "custom-ui advanced-shell";
+advancedShell.addEventListener("pointerdown", (e) => e.stopPropagation());
+advancedShell.innerHTML = `
+  <div class="section">
+    <div class="section-title">Visible Panels</div>
+    <div class="row"><label><input type="checkbox" data-k="look"> Look Panel</label></div>
+    <div class="row"><label><input type="checkbox" data-k="transport"> Tempo Ring</label></div>
+    <div class="row"><label><input type="checkbox" data-k="play"> Nebula Editors</label></div>
+    <div class="row"><label><input type="checkbox" data-k="audio"> Audio Monitor</label></div>
+    <div class="row"><label><input type="checkbox" data-k="debug"> Debug Overlay</label></div>
+  </div>
+  <div class="section">
+    <div class="section-title">Performance</div>
+    <div class="row"><label><input type="checkbox" data-k="cinematic"> Cinematic Camera</label></div>
+    <div class="row"><label><input type="checkbox" data-k="harmony"> Harmony Layer</label></div>
+    <div class="row"><label><input type="checkbox" data-k="autoplay"> Auto Play</label></div>
+    <div class="hint">Advanced keeps all creation tools nearby without crowding the landing view.</div>
+  </div>
+`;
+document.body.appendChild(advancedShell);
+const advancedDock = createDockPanel({
+  id: "advanced",
+  title: "Advanced",
+  contentEl: advancedShell,
+  x: window.innerWidth - 320,
+  y: 286,
+  width: 320,
+  minHeight: 120,
+  zIndex: 10000,
 });
 const colorSystemContent = document.createElement("div");
 colorSystemContent.className = "custom-ui color-system-content";
@@ -1291,11 +1366,11 @@ for (const sec of colorSections) {
 }
 const colorDock = createDockPanel({
   id: "color",
-  title: "Color System",
+  title: "Look",
   contentEl: colorSystemContent,
   x: window.innerWidth - 320,
-  y: 182,
-  width: 300,
+  y: 132,
+  width: 320,
   minHeight: 180,
   zIndex: 9998,
 });
@@ -1361,17 +1436,21 @@ const notePopDock = createDockPanel({
 });
 
 const uiBtn = uiShell.querySelector('[data-act="toggle-ui"]');
+const advancedBtn = uiShell.querySelector('[data-act="toggle-advanced"]');
 const showcaseBtn = uiShell.querySelector('[data-act="toggle-showcase"]');
+const autoPlayBtn = uiShell.querySelector('[data-act="toggle-autoplay"]');
 const cinematicBtn = uiShell.querySelector('[data-act="toggle-cinematic"]');
+const lookBtn = uiShell.querySelector('[data-act="toggle-look"]');
+const transportBtn = uiShell.querySelector('[data-act="toggle-transport"]');
 const cleanLayoutBtn = uiShell.querySelector('[data-act="clean-layout"]');
-const playChk = uiShell.querySelector('input[data-k="play"]');
-const lookChk = uiShell.querySelector('input[data-k="look"]');
-const audioChk = uiShell.querySelector('input[data-k="audio"]');
-const debugChk = uiShell.querySelector('input[data-k="debug"]');
-const transportChk = uiShell.querySelector('input[data-k="transport"]');
-const cinematicChk = uiShell.querySelector('input[data-k="cinematic"]');
-const harmonyChk = uiShell.querySelector('input[data-k="harmony"]');
-const autoPlayChk = uiShell.querySelector('input[data-k="autoplay"]');
+const playChk = advancedShell.querySelector('input[data-k="play"]');
+const lookChk = advancedShell.querySelector('input[data-k="look"]');
+const audioChk = advancedShell.querySelector('input[data-k="audio"]');
+const debugChk = advancedShell.querySelector('input[data-k="debug"]');
+const transportChk = advancedShell.querySelector('input[data-k="transport"]');
+const cinematicChk = advancedShell.querySelector('input[data-k="cinematic"]');
+const harmonyChk = advancedShell.querySelector('input[data-k="harmony"]');
+const autoPlayChk = advancedShell.querySelector('input[data-k="autoplay"]');
 const autoPlayStyleSel = uiShell.querySelector('select[data-k="autoplay-style"]');
 const autoPlayTempoRange = uiShell.querySelector('input[data-k="autoplay-tempo"]');
 const autoPlayTempoLabel = uiShell.querySelector('[data-k="autoplay-tempo-v"]');
@@ -1383,13 +1462,13 @@ function applyCleanDockLayout() {
   let leftY = margin;
   let rightY = margin;
 
-  const leftColumn = [galaxyDock, colorDock, audioDock];
-  const rightColumn = [uiHubDock, meteorDock, dolphinDock, notePopDock, debugDock];
+  const leftColumn = [uiHubDock, colorDock];
+  const rightColumn = [advancedDock, galaxyDock, meteorDock, dolphinDock, notePopDock, audioDock, debugDock];
 
   for (const dock of leftColumn) {
     if (!dock?.root) continue;
     dock.setVisible(true);
-    dock.setCollapsed(false);
+    dock.setCollapsed(dock !== uiHubDock);
     dock.setPosition(leftX, leftY);
     leftY += (dock.root.offsetHeight || 120) + 12;
   }
@@ -1397,16 +1476,27 @@ function applyCleanDockLayout() {
   for (const dock of rightColumn) {
     if (!dock?.root) continue;
     dock.setVisible(true);
-    dock.setCollapsed(dock === debugDock);
+    dock.setCollapsed(dock !== advancedDock);
     dock.setPosition(rightX, rightY);
     rightY += (dock.root.offsetHeight || 120) + 12;
   }
 }
 
 function applyUiState() {
-  uiBtn.textContent = `Master: ${uiState.visible ? "ON" : "OFF"}`;
-  showcaseBtn.textContent = `Showcase: ${uiState.showcase ? "ON" : "OFF"}`;
-  cinematicBtn.textContent = `Cinematic: ${uiState.cinematic ? "ON" : "OFF"}`;
+  uiBtn.textContent = uiState.visible ? "UI Visible" : "UI Hidden";
+  uiBtn.classList.toggle("active", !!uiState.visible);
+  advancedBtn.textContent = uiState.showAdvanced ? "Advanced ON" : "Advanced";
+  advancedBtn.classList.toggle("active", !!uiState.showAdvanced);
+  showcaseBtn.textContent = uiState.showcase ? "Showcase ON" : "Showcase";
+  showcaseBtn.classList.toggle("active", !!uiState.showcase);
+  autoPlayBtn.textContent = uiState.autoPlay ? "Auto Play ON" : "Auto Play";
+  autoPlayBtn.classList.toggle("active", !!uiState.autoPlay);
+  cinematicBtn.textContent = uiState.cinematic ? "Cinematic ON" : "Cinematic";
+  cinematicBtn.classList.toggle("active", !!uiState.cinematic);
+  lookBtn.textContent = uiState.showLook ? "Look ON" : "Look OFF";
+  lookBtn.classList.toggle("active", !!uiState.showLook);
+  transportBtn.textContent = uiState.showTransport ? "Tempo Ring ON" : "Tempo Ring OFF";
+  transportBtn.classList.toggle("active", !!uiState.showTransport);
   playChk.checked = !!uiState.showPlay;
   lookChk.checked = !!uiState.showLook;
   audioChk.checked = !!uiState.showAudio;
@@ -1431,11 +1521,13 @@ function applyUiState() {
   const showAudio = uiState.visible && uiState.showAudio;
   const showDebug = uiState.visible && uiState.showDebug;
   const showTransport = uiState.visible && uiState.showTransport;
+  const showAdvanced = uiState.visible && uiState.showAdvanced;
 
   if (uiState.showcase) {
     colorDock?.setVisible?.(uiState.visible);
     audioDock?.setVisible?.(false);
     debugDock?.setVisible?.(false);
+    advancedDock?.setVisible?.(false);
     noteOverlay.style.display = "none";
     galaxyDock?.setVisible?.(false);
     meteorDock?.setVisible?.(false);
@@ -1446,14 +1538,15 @@ function applyUiState() {
     if (tempoRingEl2) tempoRingEl2.style.display = uiState.visible ? "" : "none";
     if (stepRingEl2) stepRingEl2.style.display = uiState.visible ? "" : "none";
   } else {
-    colorDock?.setVisible?.(showPlay || showLook);
-    audioDock?.setVisible?.(showAudio);
-    debugDock?.setVisible?.(showDebug);
+    colorDock?.setVisible?.(showLook);
+    advancedDock?.setVisible?.(showAdvanced);
+    audioDock?.setVisible?.(showAdvanced && showAudio);
+    debugDock?.setVisible?.(showAdvanced && showDebug);
     noteOverlay.style.display = showDebug ? "" : "none";
-    galaxyDock?.setVisible?.(showLook);
-    meteorDock?.setVisible?.(showLook);
-    dolphinDock?.setVisible?.(showLook);
-    notePopDock?.setVisible?.(showLook);
+    galaxyDock?.setVisible?.(showAdvanced && showPlay);
+    meteorDock?.setVisible?.(showAdvanced && showPlay);
+    dolphinDock?.setVisible?.(showAdvanced && showPlay);
+    notePopDock?.setVisible?.(showAdvanced && showPlay);
     const tempoRingEl2 = document.getElementById("tempo-ring");
     const stepRingEl2 = document.getElementById("step-ring");
     if (tempoRingEl2) tempoRingEl2.style.display = showTransport ? "" : "none";
@@ -1472,8 +1565,24 @@ showcaseBtn.addEventListener("click", () => {
   uiState.showcase = !uiState.showcase;
   applyUiState();
 });
+advancedBtn.addEventListener("click", () => {
+  uiState.showAdvanced = !uiState.showAdvanced;
+  applyUiState();
+});
+autoPlayBtn.addEventListener("click", () => {
+  uiState.autoPlay = !uiState.autoPlay;
+  applyUiState();
+});
 cinematicBtn.addEventListener("click", () => {
   uiState.cinematic = !uiState.cinematic;
+  applyUiState();
+});
+lookBtn.addEventListener("click", () => {
+  uiState.showLook = !uiState.showLook;
+  applyUiState();
+});
+transportBtn.addEventListener("click", () => {
+  uiState.showTransport = !uiState.showTransport;
   applyUiState();
 });
 cleanLayoutBtn?.addEventListener("click", () => {
@@ -1542,7 +1651,7 @@ window.addEventListener("keydown", (e) => {
   if (tag === "input" || tag === "textarea" || e.target?.isContentEditable) return;
   if (e.repeat) return;
   const k = (e.key || "").toLowerCase();
-  if (k === "h") {
+if (k === "h") {
     uiState.visible = !uiState.visible;
     applyUiState();
   } else if (k === "j") {
@@ -1550,6 +1659,9 @@ window.addEventListener("keydown", (e) => {
     applyUiState();
   } else if (k === "k") {
     uiState.cinematic = !uiState.cinematic;
+    applyUiState();
+  } else if (k === "u") {
+    uiState.showAdvanced = !uiState.showAdvanced;
     applyUiState();
   } else if (k === "f") {
     const focusGalaxyId =
