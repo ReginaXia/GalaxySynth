@@ -10,11 +10,12 @@ let __hintFontInjected = false;
 function ensureHintFontFace() {
   if (__hintFontInjected) return;
   __hintFontInjected = true;
+  const fontUrl = `${import.meta.env.BASE_URL}fonts/LacheyardScript.otf`;
   const style = document.createElement("style");
   style.textContent = `
     @font-face {
       font-family: 'LacheyardScript';
-      src: url('/fonts/LacheyardScript.otf') format('opentype');
+      src: url('${fontUrl}') format('opentype');
       font-display: swap;
     }
   `;

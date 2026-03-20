@@ -300,7 +300,7 @@ export function createMeteorSystem({
   tailGeo.setAttribute("color", new THREE.BufferAttribute(col, 3));
   tailGeo.setAttribute("aSize", new THREE.BufferAttribute(siz, 1));
 
-  const tex = new THREE.TextureLoader().load("/textures/meteor.png");
+  const tex = new THREE.TextureLoader().load(`${import.meta.env.BASE_URL}textures/meteor.png`);
   tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   tex.magFilter = THREE.LinearFilter;

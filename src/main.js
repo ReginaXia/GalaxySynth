@@ -279,7 +279,7 @@ function syncLegacyOrbitFromCamera(targetWorld) {
 // Texture
 // -------------------------------------
 const texLoader = new THREE.TextureLoader();
-const starTexture = texLoader.load("/textures/star.png");
+const starTexture = texLoader.load(`${import.meta.env.BASE_URL}textures/star.png`);
 starTexture.colorSpace = THREE.SRGBColorSpace;
 
 // -------------------------------------

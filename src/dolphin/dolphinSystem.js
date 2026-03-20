@@ -100,7 +100,7 @@ export function createDolphinSystem({ scene, nebulaSystem, planeY = 0.0 }) {
   // Prefer user-provided dolphin style texture from /public.
   const loader = new THREE.TextureLoader();
   loader.load(
-    "/dophine/1.png",
+    `${import.meta.env.BASE_URL}dophine/1.png`,
     (tex) => {
       tex.colorSpace = THREE.SRGBColorSpace;
       tex.minFilter = THREE.LinearMipmapLinearFilter;
