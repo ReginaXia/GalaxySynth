@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { BACKGROUND_PALETTES } from "../background/dreamyBackground";
 
-const STORAGE_KEY = "GalaxySynth_BackgroundDock_v1";
+const STORAGE_KEY = "GalaxySynth_BackgroundDock_v2";
 
 function clamp01(x) {
   return Math.max(0, Math.min(1, x));
@@ -168,16 +168,16 @@ export function createBackgroundDockPanel({ bg }) {
     x: window.innerWidth - 300,
     y: 76,
     collapsed: false,
-    colorBlend: 0.46,
-    flowDetail: 0.62,
-    darkSpace: 0.70,
-    localColorLift: 0.40,
-    starBreath: 0.60,
-    starColorGlow: 1.8,
-    starGlowColorA: "#9fd6ff",
-    starGlowColorB: "#c7b2ff",
-    starGlowColorC: "#ffc8ef",
-    starSize: 16,
+    colorBlend: 0.58,
+    flowDetail: 0.76,
+    darkSpace: 0.60,
+    localColorLift: 0.58,
+    starBreath: 0.74,
+    starColorGlow: 3.4,
+    starGlowColorA: "#b7e7ff",
+    starGlowColorB: "#d8c6ff",
+    starGlowColorC: "#ffd9f2",
+    starSize: 18,
   };
   const state = loadState(defaults);
   let legacySnapshot = null;

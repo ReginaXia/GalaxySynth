@@ -166,15 +166,8 @@ function __bgRiseFallWrap(current, target, dt, rise = 16.0, fall = 4.0) {
 // -------------------------------------
 const scene = new THREE.Scene();
 
-const testSphere = new THREE.Mesh(
-  new THREE.SphereGeometry(1, 32, 32),
-  new THREE.MeshBasicMaterial({ color: 0xff0000 })
-);
-scene.add(testSphere);
-
-
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.05, 2000);
-camera.position.set(0, 6.5, 8.5);
+camera.position.set(-0.9, 5.8, 10.2);
 camera.lookAt(0, 0, 0);
 
 const cameraControl = createCameraControlSystem({
@@ -183,7 +176,12 @@ const cameraControl = createCameraControlSystem({
   getPivotWorldPoint: getMouseWorldOnPlane, // ✅ 关键：用你已有的平面求交当 pivot
   zoomSpeed: 0.0018, // 可以从 0.0012~0.0022 调
 });
-const performanceCamera = createPerformanceCameraController();
+const performanceCamera = createPerformanceCameraController({
+  performanceOrbitStrength: 1.08,
+  performanceOrbitSpeed: 1 / 38,
+  performanceOrbitDelay: 0.52,
+  performanceOrbitVerticalBias: 0.26,
+});
 
 const bg = await createDreamyBackground(scene, camera, {
   palette: "pearl",
@@ -191,13 +189,13 @@ const bg = await createDreamyBackground(scene, camera, {
 });
 
 // 初始时禁用流动效果和亮度
-  bg.uniforms.uFlow.value = 0.012;
-  bg.uniforms.uSparkle.value = 0;
-  bg.uniforms.uIntensity.value = 0.015;
+  bg.uniforms.uFlow.value = 0.018;
+  bg.uniforms.uSparkle.value = 0.012;
+  bg.uniforms.uIntensity.value = 0.022;
   // Large-display baseline: denser background texture layers.
-  bg.uniforms.uScale.value = 0.92;
-  bg.uniforms.uDetail.value = 0.44;
-  bg.uniforms.uWarp.value = 0.56;
+  bg.uniforms.uScale.value = 1.04;
+  bg.uniforms.uDetail.value = 0.72;
+  bg.uniforms.uWarp.value = 0.72;
 
   let isInteracting = false;
 
@@ -304,15 +302,15 @@ dreamGlowPass.uniforms.uResolution.value.set(window.innerWidth, window.innerHeig
 const dreamyGlowController = (() => {
   const state = {
     enabled: true,
-    legacyBloom: true,
-    legacyBloomBase: 0.32,
-    intensity: 0.92,
-    softness: 0.32,
-    starGlowBoost: 0.92,
-    backgroundLift: 0.82,
-    filterAmount: 0.42,
-    filterTintMix: 0.06,
-    filterHaze: 0.14,
+    legacyBloom: false,
+    legacyBloomBase: 0.26,
+    intensity: 1.24,
+    softness: 1.08,
+    starGlowBoost: 1.12,
+    backgroundLift: 1.12,
+    filterAmount: 1.02,
+    filterTintMix: 0.08,
+    filterHaze: 0.52,
   };
   return {
     getConfig() {
@@ -363,10 +361,10 @@ const backgroundReactivityController = (() => {
 
 const pureColorController = (() => {
   const state = {
-    enabled: false,
-    lift: 0.68,
-    saturation: 0.72,
-    contrastSoftness: 0.58,
+    enabled: true,
+    lift: 0.88,
+    saturation: 0.78,
+    contrastSoftness: 0.82,
   };
   return {
     getConfig() {
@@ -384,8 +382,8 @@ const pureColorController = (() => {
 const pearlWhiteController = (() => {
   const state = {
     enabled: true,
-    strength: 1.05,
-    color: new THREE.Color("#FDFEFF"),
+    strength: 1.18,
+    color: new THREE.Color("#FFF8FE"),
   };
   return {
     getConfig() {

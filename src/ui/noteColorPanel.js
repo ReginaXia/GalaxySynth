@@ -1,21 +1,21 @@
-const STORAGE_KEY = "GalaxySynth_NoteColorMap_v1";
+const STORAGE_KEY = "GalaxySynth_NoteColorMap_v2";
 const NOTE_LABELS = ["Do", "Re", "Mi", "Fa", "Sol", "La", "Si"];
 
 const DEFAULT_COLORS = [
-  "#8fdcff",
-  "#7ca8ff",
-  "#9c8fff",
-  "#cf8fff",
-  "#f29ae8",
-  "#a9c8ff",
-  "#8ee7ff",
+  "#aae9ff",
+  "#9bc8ff",
+  "#baa7ff",
+  "#e2adff",
+  "#ffbde9",
+  "#c5dbff",
+  "#b3f1ff",
 ];
 const DEFAULTS = {
-  mix: 0.52,
-  pearl: 0.62,
-  glow: 0.56,
-  richness: 0.58,
-  dream: 0.52,
+  mix: 0.60,
+  pearl: 0.76,
+  glow: 0.72,
+  richness: 0.68,
+  dream: 0.70,
 };
 
 function clamp01(x) {
